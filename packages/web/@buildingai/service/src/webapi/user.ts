@@ -224,11 +224,17 @@ export interface WechatLoginTicket {
  */
 export interface SystemLoginAccountParams {
     /** Username */
-    username: string;
+    username?: string;
     /** Password */
-    password: string;
+    password?: string;
     /** Terminal type */
-    terminal?: string;
+    terminal?: string | number;
+    /** Scene type (e.g. for phone login) */
+    scene?: number;
+    /** Account/Phone number */
+    account?: string;
+    /** Verification code */
+    code?: string;
 }
 
 /**

@@ -1,37 +1,52 @@
 <script setup lang="ts">
+// 导入登录响应类型
 import type { LoginResponse } from "@buildingai/service/webapi/user";
+// 导入注册 API
 import { apiAuthRegister } from "@buildingai/service/webapi/user";
+// 导入 Vue 相关函数
 import { computed, reactive, resolveComponent } from "vue";
+// 导入国际化 hook
 import { useI18n } from "vue-i18n";
+// 导入 yup 验证库
 import { object, ref as yupRef, string } from "yup";
 
+// 导入用户协议弹窗 Hook
 import { useAgreementModal } from "../../hooks/use-agreement-modal";
 
+// 异步加载隐私条款组件
 const PrivacyTerms = defineAsyncComponent(() => import("../privacy-terms.vue"));
 
+// 定义组件事件
 const emits = defineEmits<{
-    (e: "switchComponent", component: string): void;
-    (e: "success", v: LoginResponse): void;
+    (e: "switchComponent", component: string): void; // 切换组件
+    (e: "success", v: LoginResponse): void;          // 注册并登录成功
 }>();
 
+// 获取应用状态
 const appStore = useAppStore();
+// 获取用户状态
 const userStore = useUserStore();
+// 获取国际化函数
 const { t } = useI18n();
 
+// 初始化协议弹窗控制
 const { ensureAgreementAccepted } = useAgreementModal(
     { width: "!w-[420px]" },
     resolveComponent("UIcon") as unknown as Component,
 );
 
-// 表单验证架构
+// 定义注册表单验证架构
 const registerSchema = object({
+    // 用户名验证
     username: string()
         .required(t("login.validation.accountRequired"))
         .min(3, t("login.validation.accountMinLength"))
         .max(20, t("login.validation.accountMaxLength")),
+    // 邮箱验证（已注释）
     // email: string()
     //   .required(t("login.validation.emailRequired"))
     //   .email(t("login.validation.emailInvalid")),
+    // 密码验证
     password: string()
         .required(t("login.validation.passwordRequired"))
         .min(6, t("login.validation.passwordMinLength"))
@@ -40,12 +55,13 @@ const registerSchema = object({
             /^(?=.*[a-z])(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?])/,
             t("login.validation.passwordFormat"),
         ),
+    // 确认密码验证
     confirmPassword: string()
         .required(t("login.validation.confirmPasswordRequired"))
         .oneOf([yupRef("password")], t("login.validation.passwordMismatch")),
 });
 
-// 表单状态
+// 注册表单状态
 const registerState = reactive({
     username: "",
     // email: '',
@@ -53,19 +69,21 @@ const registerState = reactive({
     confirmPassword: "",
 });
 
+// 注册提交处理函数，防止重复提交
 const { lockFn: onRegisterSubmit, isLock } = useLockFn(async () => {
+    // 确保已同意协议
     const canProceed = await ensureAgreementAccepted();
     if (!canProceed) {
         return;
     }
     try {
-        // TODO: 调用注册接口
+        // 调用注册接口，terminal 默认为 "1"
         const data = await apiAuthRegister({
             terminal: "1",
             ...registerState,
         });
 
-        // 注册成功后跳转到登录页
+        // 注册成功后，触发成功事件，并传递用户数据
         emits("success", { ...data, ...data.user });
     } catch (error: unknown) {
         console.log(t("login.messages.registerFailed"), error);
@@ -73,8 +91,8 @@ const { lockFn: onRegisterSubmit, isLock } = useLockFn(async () => {
 });
 
 /**
- * Compute password strength requirements.
- * Returns a list of requirement checks with their met state and description.
+ * 计算密码强度要求的方法
+ * 返回一个包含正则表达式和对应提示文本的对象数组
  */
 function checkPasswordStrength(str: string) {
     const requirements = [
@@ -86,13 +104,13 @@ function checkPasswordStrength(str: string) {
     return requirements.map((req) => ({ met: req.regex.test(str), text: req.text }));
 }
 
-/** Compute the list of met/unmet requirements for the current password. */
+/** 计算当前密码满足和未满足的要求列表 */
 const passwordStrength = computed(() => checkPasswordStrength(registerState.password));
 
-/** Compute numeric score [0..4] for the current password. */
+/** 计算当前密码的强度得分 [0..4] */
 const passwordScore = computed(() => passwordStrength.value.filter((req) => req.met).length);
 
-/** Map score to color token for UI components. */
+/** 根据得分映射到 UI 组件的颜色 token */
 const passwordColor = computed(() => {
     if (passwordScore.value === 0) return "neutral";
     if (passwordScore.value <= 1) return "error";
@@ -101,7 +119,7 @@ const passwordColor = computed(() => {
     return "success";
 });
 
-/** Compute localized text label for current password strength. */
+/** 计算当前密码强度的本地化文本标签 */
 const passwordStrengthText = computed(() => {
     if (passwordScore.value === 0) return "";
     if (passwordScore.value <= 1) return t("login.strength.weak");
@@ -109,7 +127,7 @@ const passwordStrengthText = computed(() => {
     return t("login.strength.strong");
 });
 
-/** Match the strength label color to the progress color. */
+/** 根据强度标签颜色匹配文本颜色类 */
 const passwordTextClass = computed(() => {
     const c = passwordColor.value;
     if (c === "error") return "text-error";
@@ -120,7 +138,9 @@ const passwordTextClass = computed(() => {
 </script>
 
 <template>
+    <!-- 注册表单 -->
     <UForm :schema="registerSchema" :state="registerState" @submit="onRegisterSubmit">
+        <!-- 用户名输入 -->
         <UFormField :label="$t('login.account')" name="username" required>
             <UInput
                 v-model="registerState.username"
@@ -131,6 +151,7 @@ const passwordTextClass = computed(() => {
             />
         </UFormField>
 
+        <!-- 密码输入 -->
         <UFormField :label="$t('login.password')" name="password" class="mt-2" required>
             <BdInputPassword
                 v-model="registerState.password"
@@ -141,6 +162,7 @@ const passwordTextClass = computed(() => {
                 :placeholder="$t('login.placeholders.enterPassword')"
             />
 
+            <!-- 密码强度显示 -->
             <div class="mt-2" v-if="registerState.password">
                 <UProgress :color="passwordColor" :model-value="passwordScore" :max="4" size="sm" />
                 <div
@@ -149,6 +171,7 @@ const passwordTextClass = computed(() => {
                     :class="passwordTextClass"
                 >
                     <span>{{ passwordStrengthText }}</span>
+                    <!-- 悬停查看密码要求 -->
                     <UPopover mode="hover">
                         <span
                             class="inline-flex cursor-help items-center"
@@ -188,6 +211,7 @@ const passwordTextClass = computed(() => {
             </div>
         </UFormField>
 
+        <!-- 确认密码输入 -->
         <UFormField
             :label="$t('login.confirmPassword')"
             name="confirmPassword"
@@ -210,14 +234,17 @@ const passwordTextClass = computed(() => {
             </template>
         </UFormField>
 
+        <!-- 隐私协议，根据配置显示 -->
         <div v-if="appStore.loginSettings?.showPolicyAgreement" class="mt-8 mb-4 text-left">
             <PrivacyTerms v-model="userStore.isAgreed" />
         </div>
 
+        <!-- 底部按钮 -->
         <div
             class="flex flex-1 gap-4 pb-8"
             :class="{ 'mt-8': !appStore.loginSettings?.showPolicyAgreement }"
         >
+            <!-- 返回登录 -->
             <UButton
                 variant="outline"
                 color="primary"
@@ -227,6 +254,7 @@ const passwordTextClass = computed(() => {
             >
                 {{ $t("login.backToLogin") }}
             </UButton>
+            <!-- 注册提交 -->
             <UButton
                 color="primary"
                 type="submit"
