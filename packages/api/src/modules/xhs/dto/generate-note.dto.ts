@@ -1,4 +1,4 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString, Length } from "class-validator";
+import { IsIn, IsNotEmpty, IsOptional, IsString, Length, Matches } from "class-validator";
 
 /**
  * 生成笔记DTO
@@ -11,6 +11,7 @@ export class GenerateNoteDto {
     @IsNotEmpty({ message: "输入内容不能为空" })
     @IsString({ message: "输入内容必须是字符串" })
     @Length(1, 2000, { message: "输入内容长度必须在1-2000个字符之间" })
+    @Matches(/.*\S.*/, { message: "输入内容不能只包含空白字符，请输入有效内容" })
     content: string;
 
     /**

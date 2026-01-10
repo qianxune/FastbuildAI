@@ -9,6 +9,7 @@ import type { Response } from "express";
 import type { ChatCompletionMessageParam } from "openai/resources/index";
 
 import { CreateNoteDto, GenerateNoteDto, QueryNoteDto, UpdateNoteDto } from "../dto";
+import { ContentModerationService } from "./content-moderation.service";
 
 /**
  * 小红书笔记服务
@@ -22,10 +23,12 @@ export class XhsNoteService extends BaseService<XhsNote> {
      * 构造函数
      *
      * @param noteRepository 笔记仓库
+     * @param contentModerationService 内容审核服务
      */
     constructor(
         @InjectRepository(XhsNote)
         private readonly noteRepository: Repository<XhsNote>,
+        private readonly contentModerationService: ContentModerationService,
     ) {
         super(noteRepository);
     }
@@ -48,6 +51,12 @@ export class XhsNoteService extends BaseService<XhsNote> {
             // 输入验证
             if (!dto.content || dto.content.trim().length === 0) {
                 throw HttpErrorFactory.badRequest("输入内容不能为空");
+            }
+
+            // 内容审核 - 检查生成输入
+            const moderationResult = this.contentModerationService.moderateGenerationInput(dto.content);
+            if (!moderationResult.isValid) {
+                throw HttpErrorFactory.badRequest(moderationResult.message || "输入内容包含不当信息，请修改后重试");
             }
 
             // 获取AI提供者和配置
@@ -259,6 +268,12 @@ export class XhsNoteService extends BaseService<XhsNote> {
      * @returns 创建的笔记
      */
     async createNote(dto: CreateNoteDto, userId: string): Promise<XhsNote> {
+        // 内容审核 - 检查笔记内容
+        const moderationResult = this.contentModerationService.moderateNoteContent(dto.title, dto.content);
+        if (!moderationResult.isValid) {
+            throw HttpErrorFactory.badRequest(moderationResult.message || "笔记内容包含不当信息，请修改后重试");
+        }
+
         // 计算字数
         const wordCount = dto.content.length;
 
@@ -333,6 +348,17 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
         if (!note) {
             throw HttpErrorFactory.notFound("笔记不存在或无权限访问");
+        }
+
+        // 内容审核 - 如果更新了标题或内容，需要进行审核
+        if (dto.title || dto.content) {
+            const titleToCheck = dto.title || note.title;
+            const contentToCheck = dto.content || note.content;
+            
+            const moderationResult = this.contentModerationService.moderateNoteContent(titleToCheck, contentToCheck);
+            if (!moderationResult.isValid) {
+                throw HttpErrorFactory.badRequest(moderationResult.message || "笔记内容包含不当信息，请修改后重试");
+            }
         }
 
         // 如果更新了内容，重新计算字数
