@@ -47,6 +47,7 @@ import { SystemModule } from "./system/system.module";
 import { TagModule } from "./tag/tag.module";
 import { UploadModule } from "./upload/upload.module";
 import { UserModule } from "./user/user.module";
+import { XhsModule } from "./xhs/xhs.module";
 
 @Module({})
 export class AppModule {
@@ -112,6 +113,7 @@ export class AppModule {
                 UserModule,
                 CloudStorageModule,
                 ScheduleModule,
+                XhsModule,
                 await ExtensionCoreModule.register(),
             ],
             controllers: [],
