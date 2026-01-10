@@ -8,7 +8,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import type { Response } from "express";
 import type { ChatCompletionMessageParam } from "openai/resources/index";
 
-import { CreateNoteDto, GenerateNoteDto, QueryNoteDto, UpdateNoteDto } from "../dto";
+import { CreateNoteDto, GenerateNoteDto, QueryNoteDto, SearchNoteDto, UpdateNoteDto } from "../dto";
 import { ContentModerationService } from "./content-moderation.service";
 
 /**
@@ -333,6 +333,26 @@ export class XhsNoteService extends BaseService<XhsNote> {
     }
 
     /**
+     * 根据ID获取笔记详情
+     *
+     * @param id 笔记ID
+     * @param userId 用户ID
+     * @returns 笔记详情
+     */
+    async findById(id: string, userId: string): Promise<XhsNote> {
+        const note = await this.noteRepository.findOne({
+            where: { id, userId },
+            relations: ["group"],
+        });
+
+        if (!note) {
+            throw HttpErrorFactory.notFound("笔记不存在或无权限访问");
+        }
+
+        return note;
+    }
+
+    /**
      * 更新笔记
      *
      * @param id 笔记ID
@@ -395,22 +415,69 @@ export class XhsNoteService extends BaseService<XhsNote> {
     }
 
     /**
-     * 搜索笔记
+     * 搜索笔记 - 使用PostgreSQL全文搜索
      *
      * @param userId 用户ID
-     * @param keyword 搜索关键词
+     * @param searchDto 搜索参数
      * @returns 搜索结果
      */
-    async search(userId: string, keyword: string) {
+    async search(userId: string, searchDto: SearchNoteDto) {
+        const { keyword, exact = false } = searchDto;
+
+        if (!keyword || keyword.trim().length === 0) {
+            return {
+                items: [],
+                total: 0,
+            };
+        }
+
         const queryBuilder = this.noteRepository
             .createQueryBuilder("note")
             .leftJoinAndSelect("note.group", "group")
-            .where("note.userId = :userId", { userId })
-            .andWhere(
-                "(note.title ILIKE :keyword OR note.content ILIKE :keyword)",
-                { keyword: `%${keyword}%` }
-            )
-            .orderBy("note.createdAt", "DESC");
+            .where("note.userId = :userId", { userId });
+
+        if (exact) {
+            // 精确匹配：使用 plainto_tsquery 进行精确短语匹配
+            queryBuilder.andWhere(
+                "to_tsvector('english', note.title || ' ' || note.content) @@ plainto_tsquery('english', :keyword)",
+                { keyword }
+            );
+        } else {
+            // 模糊匹配：结合全文搜索和ILIKE查询
+            // 首先尝试全文搜索，然后回退到ILIKE模糊匹配
+            const tsqueryKeyword = keyword.split(/\s+/).join(' & '); // 将空格分隔的词用 & 连接
+            
+            queryBuilder.andWhere(
+                `(
+                    to_tsvector('english', note.title || ' ' || note.content) @@ to_tsquery('english', :tsquery)
+                    OR note.title ILIKE :ilike
+                    OR note.content ILIKE :ilike
+                )`,
+                { 
+                    tsquery: tsqueryKeyword,
+                    ilike: `%${keyword}%`
+                }
+            );
+        }
+
+        // 按相关性排序：全文搜索匹配的排在前面，然后按创建时间倒序
+        if (exact) {
+            queryBuilder.orderBy(
+                "ts_rank(to_tsvector('english', note.title || ' ' || note.content), plainto_tsquery('english', :keyword))",
+                "DESC"
+            ).addOrderBy("note.createdAt", "DESC");
+        } else {
+            queryBuilder.orderBy(
+                `CASE 
+                    WHEN to_tsvector('english', note.title || ' ' || note.content) @@ to_tsquery('english', :tsquery) THEN 1
+                    ELSE 2
+                END`,
+                "ASC"
+            ).addOrderBy(
+                "ts_rank(to_tsvector('english', note.title || ' ' || note.content), to_tsquery('english', :tsquery))",
+                "DESC"
+            ).addOrderBy("note.createdAt", "DESC");
+        }
 
         const items = await queryBuilder.getMany();
 
