@@ -1,4 +1,4 @@
-import { IsArray, IsIn, IsNotEmpty, IsOptional, IsString, IsUUID, Length } from "class-validator";
+import { IsArray, IsIn, IsNotEmpty, IsOptional, IsString, IsUUID, Length, Matches } from "class-validator";
 
 /**
  * 创建笔记DTO
@@ -10,6 +10,7 @@ export class CreateNoteDto {
     @IsNotEmpty({ message: "标题不能为空" })
     @IsString({ message: "标题必须是字符串" })
     @Length(1, 200, { message: "标题长度必须在1-200个字符之间" })
+    @Matches(/.*\S.*/, { message: "标题不能只包含空白字符，请输入有效标题" })
     title: string;
 
     /**
@@ -18,6 +19,7 @@ export class CreateNoteDto {
     @IsNotEmpty({ message: "正文内容不能为空" })
     @IsString({ message: "正文内容必须是字符串" })
     @Length(1, 10000, { message: "正文内容长度必须在1-10000个字符之间" })
+    @Matches(/.*\S.*/, { message: "正文内容不能只包含空白字符，请输入有效内容" })
     content: string;
 
     /**

@@ -3,6 +3,7 @@ import { XhsGroup, XhsHotTopic, XhsImage, XhsNote, XhsTemplate } from "@building
 import { Module } from "@nestjs/common";
 
 import { XhsNoteWebController } from "./controllers/web/xhs-note.web.controller";
+import { ContentModerationService } from "./services/content-moderation.service";
 import { XhsGroupService } from "./services/xhs-group.service";
 import { XhsNoteService } from "./services/xhs-note.service";
 
@@ -21,7 +22,7 @@ import { XhsNoteService } from "./services/xhs-note.service";
         ]),
     ],
     controllers: [XhsNoteWebController],
-    providers: [XhsNoteService, XhsGroupService],
-    exports: [XhsNoteService, XhsGroupService],
+    providers: [XhsNoteService, XhsGroupService, ContentModerationService],
+    exports: [XhsNoteService, XhsGroupService, ContentModerationService],
 })
 export class XhsModule {}
