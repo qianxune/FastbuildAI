@@ -1,11 +1,12 @@
 import { BaseController } from "@buildingai/base";
 import { type UserPlayground } from "@buildingai/db";
 import { Playground } from "@buildingai/decorators/playground.decorator";
+import { HttpErrorFactory } from "@buildingai/errors";
 import { WebController } from "@common/decorators/controller.decorator";
 import { Body, Post, Res, Get, Put, Delete, Param, Query } from "@nestjs/common";
 import type { Response } from "express";
 
-import { GenerateNoteDto, CreateNoteDto, UpdateNoteDto, QueryNoteDto, SearchNoteDto } from "../../dto";
+import { GenerateNoteDto, CreateNoteDto, UpdateNoteDto, QueryNoteDto, SearchNoteDto, BatchNoteDto, BatchActionType } from "../../dto";
 import { XhsNoteService } from "../../services/xhs-note.service";
 
 /**
@@ -96,6 +97,43 @@ export class XhsNoteWebController extends BaseController {
     async deleteNote(@Param("id") id: string, @Playground() user: UserPlayground) {
         await this.xhsNoteService.deleteNote(id, user.id);
         return { message: "笔记删除成功" };
+    }
+
+    /**
+     * 批量操作笔记
+     * 
+     * @param dto 批量操作DTO
+     * @param user 当前用户
+     * @returns 操作结果
+     */
+    @Post("notes/batch")
+    async batchOperateNotes(@Body() dto: BatchNoteDto, @Playground() user: UserPlayground) {
+        let affected = 0;
+        let message = "";
+
+        switch (dto.action) {
+            case BatchActionType.DELETE:
+                affected = await this.xhsNoteService.batchDelete(dto.ids, user.id);
+                message = `成功删除 ${affected} 个笔记`;
+                break;
+
+            case BatchActionType.MOVE:
+                if (!dto.groupId) {
+                    throw HttpErrorFactory.badRequest("移动操作需要指定目标分组ID");
+                }
+                affected = await this.xhsNoteService.batchMove(dto.ids, dto.groupId, user.id);
+                message = `成功移动 ${affected} 个笔记`;
+                break;
+
+            default:
+                throw HttpErrorFactory.badRequest("不支持的操作类型");
+        }
+
+        return {
+            success: true,
+            affected,
+            message
+        };
     }
 
     /**

@@ -1,3 +1,4 @@
+export * from "./batch-note.dto";
 export * from "./create-group.dto";
 export * from "./create-note.dto";
 export * from "./generate-note.dto";
