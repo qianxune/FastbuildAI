@@ -1,9 +1,11 @@
 import { BaseController } from "@buildingai/base";
+import { type UserPlayground } from "@buildingai/db";
+import { Playground } from "@buildingai/decorators/playground.decorator";
 import { WebController } from "@common/decorators/controller.decorator";
-import { Body, Post, Res } from "@nestjs/common";
+import { Body, Post, Res, Get, Put, Delete, Param, Query } from "@nestjs/common";
 import type { Response } from "express";
 
-import { GenerateNoteDto } from "../../dto";
+import { GenerateNoteDto, CreateNoteDto, UpdateNoteDto, QueryNoteDto, SearchNoteDto } from "../../dto";
 import { XhsNoteService } from "../../services/xhs-note.service";
 
 /**
@@ -28,5 +30,84 @@ export class XhsNoteWebController extends BaseController {
         @Res() res: Response,
     ): Promise<void> {
         await this.xhsNoteService.generateStream(dto, res);
+    }
+
+    /**
+     * 创建笔记
+     * 
+     * @param dto 创建笔记DTO
+     * @param user 当前用户
+     * @returns 创建的笔记
+     */
+    @Post("notes")
+    async createNote(@Body() dto: CreateNoteDto, @Playground() user: UserPlayground) {
+        const note = await this.xhsNoteService.createNote(dto, user.id);
+        return note;
+    }
+
+    /**
+     * 获取笔记列表
+     * 
+     * @param query 查询参数
+     * @param user 当前用户
+     * @returns 分页的笔记列表
+     */
+    @Get("notes")
+    async getNotes(@Query() query: QueryNoteDto, @Playground() user: UserPlayground) {
+        const result = await this.xhsNoteService.findByUser(user.id, query);
+        return result;
+    }
+
+    /**
+     * 获取笔记详情
+     * 
+     * @param id 笔记ID
+     * @param user 当前用户
+     * @returns 笔记详情
+     */
+    @Get("notes/:id")
+    async getNoteById(@Param("id") id: string, @Playground() user: UserPlayground) {
+        const note = await this.xhsNoteService.findById(id, user.id);
+        return note;
+    }
+
+    /**
+     * 更新笔记
+     * 
+     * @param id 笔记ID
+     * @param dto 更新数据
+     * @param user 当前用户
+     * @returns 更新后的笔记
+     */
+    @Put("notes/:id")
+    async updateNote(@Param("id") id: string, @Body() dto: UpdateNoteDto, @Playground() user: UserPlayground) {
+        const note = await this.xhsNoteService.updateNote(id, dto, user.id);
+        return note;
+    }
+
+    /**
+     * 删除笔记
+     * 
+     * @param id 笔记ID
+     * @param user 当前用户
+     * @returns 删除结果
+     */
+    @Delete("notes/:id")
+    async deleteNote(@Param("id") id: string, @Playground() user: UserPlayground) {
+        await this.xhsNoteService.deleteNote(id, user.id);
+        return { message: "笔记删除成功" };
+    }
+
+    /**
+     * 搜索笔记
+     * 
+     * @param searchDto 搜索参数
+     * @param user 当前用户
+     * @returns 搜索结果
+     */
+    @Get("notes/search")
+    async searchNotes(@Query() searchDto: SearchNoteDto, @Playground() user: UserPlayground) {
+        const result = await this.xhsNoteService.search(user.id, searchDto);
+        return result;
     }
 }
