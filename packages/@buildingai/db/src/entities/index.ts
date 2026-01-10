@@ -44,3 +44,8 @@ export { Tag } from "./tag.entity";
 export { User } from "./user.entity";
 export { UserSubscription } from "./user-subscription.entity";
 export { UserToken } from "./user-token.entity";
+export { XhsGroup } from "./xhs-group.entity";
+export { XhsHotTopic } from "./xhs-hot-topic.entity";
+export { XhsImage } from "./xhs-image.entity";
+export { XhsNote } from "./xhs-note.entity";
+export { XhsTemplate } from "./xhs-template.entity";
