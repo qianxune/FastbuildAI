@@ -2,6 +2,7 @@ import { TypeOrmModule } from "@buildingai/db/@nestjs/typeorm";
 import { XhsGroup, XhsHotTopic, XhsImage, XhsNote, XhsTemplate } from "@buildingai/db/entities";
 import { Module } from "@nestjs/common";
 
+import { XhsNoteWebController } from "./controllers/web/xhs-note.web.controller";
 import { XhsGroupService } from "./services/xhs-group.service";
 import { XhsNoteService } from "./services/xhs-note.service";
 
@@ -19,7 +20,7 @@ import { XhsNoteService } from "./services/xhs-note.service";
             XhsTemplate,
         ]),
     ],
-    controllers: [],
+    controllers: [XhsNoteWebController],
     providers: [XhsNoteService, XhsGroupService],
     exports: [XhsNoteService, XhsGroupService],
 })
