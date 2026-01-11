@@ -283,15 +283,18 @@ export const useXhsGenerate = () => {
   // 处理生成错误
   const handleGenerationError = (error: any): void => {
     let errorMessage = '生成失败，请稍后重试'
+    const errorMsg = error?.message || ''
     
-    if (error.message?.includes('timeout') || error.message?.includes('超时')) {
+    if (errorMsg.includes('timeout') || errorMsg.includes('超时')) {
       errorMessage = '生成超时，请稍后重试'
-    } else if (error.message?.includes('网络') || error.message?.includes('network')) {
+    } else if (errorMsg.includes('网络') || errorMsg.includes('network')) {
       errorMessage = '网络连接失败，请检查网络后重试'
-    } else if (error.message?.includes('输入内容')) {
-      errorMessage = error.message
-    } else if (error.message?.includes('AI服务')) {
+    } else if (errorMsg.includes('输入内容')) {
+      errorMessage = errorMsg
+    } else if (errorMsg.includes('AI服务')) {
       errorMessage = 'AI服务暂时不可用，请稍后重试'
+    } else if (errorMsg) {
+      errorMessage = errorMsg
     }
 
     generationError.value = errorMessage
@@ -305,10 +308,93 @@ export const useXhsGenerate = () => {
     await generate()
   }
 
-  // 保存笔记（将在后续任务中实现）
+  // 保存笔记
   const save = async (): Promise<void> => {
-    // TODO: 在任务11中实现保存功能
-    console.log('保存功能将在后续任务中实现')
+    // 验证是否有生成的内容
+    if (!generatedTitle.value && !generatedContent.value) {
+      toast.error('没有可保存的内容')
+      return
+    }
+
+    // 验证标题和内容不为空
+    if (!generatedTitle.value.trim()) {
+      toast.error('标题不能为空')
+      return
+    }
+
+    if (!generatedContent.value.trim()) {
+      toast.error('正文内容不能为空')
+      return
+    }
+
+    try {
+      // 获取认证token
+      const authToken = userStore.token || userStore.temporaryToken
+      if (!authToken) {
+        toast.error('请先登录')
+        return
+      }
+
+      // 准备保存数据
+      const createNoteDto = {
+        title: generatedTitle.value.trim(),
+        content: generatedContent.value.trim(),
+        mode: mode.value,
+        originalInput: content.value.trim() || undefined
+      }
+
+      // 调用API保存笔记
+      const response = await fetch('/api/xhs/notes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(createNoteDto)
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        let errorMessage = '保存失败，请稍后重试'
+        
+        try {
+          const errorData = JSON.parse(errorText)
+          errorMessage = errorData.error?.message || errorData.message || errorMessage
+        } catch {
+          // 如果不是JSON格式，使用默认错误消息
+        }
+        
+        throw new Error(errorMessage)
+      }
+
+      const savedNote = await response.json()
+      
+      // 显示成功提示
+      toast.success('笔记保存成功')
+      
+      // 可选：清空生成结果或跳转到笔记列表
+      // clearGenerated()
+      
+      console.log('保存的笔记:', savedNote)
+      
+    } catch (error: any) {
+      console.error('保存笔记失败:', error)
+      
+      let errorMessage = '保存失败，请稍后重试'
+      const errorMsg = error?.message || ''
+      
+      if (errorMsg.includes('登录')) {
+        errorMessage = '请先登录'
+      } else if (errorMsg.includes('标题') || errorMsg.includes('内容')) {
+        errorMessage = errorMsg
+      } else if (errorMsg.includes('网络') || errorMsg.includes('network')) {
+        errorMessage = '网络连接失败，请检查网络后重试'
+      } else if (errorMsg) {
+        errorMessage = errorMsg
+      }
+      
+      toast.error(errorMessage)
+    }
   }
 
   // 复制标题到剪贴板
@@ -321,7 +407,8 @@ export const useXhsGenerate = () => {
     try {
       await navigator.clipboard.writeText(generatedTitle.value)
       toast.success('标题已复制到剪贴板')
-    } catch (error) {
+    } catch (error: any) {
+      console.error('复制标题失败:', error)
       toast.error('无法访问剪贴板')
     }
   }
@@ -336,7 +423,8 @@ export const useXhsGenerate = () => {
     try {
       await navigator.clipboard.writeText(generatedContent.value)
       toast.success('正文已复制到剪贴板')
-    } catch (error) {
+    } catch (error: any) {
+      console.error('复制正文失败:', error)
       toast.error('无法访问剪贴板')
     }
   }
