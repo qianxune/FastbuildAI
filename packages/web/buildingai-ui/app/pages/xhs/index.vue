@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { GenerationMode } from '@/types/xhs'
+import { useXhsGenerate } from '@/composables/useXhsGenerate'
+
 // Page metadata configuration
 definePageMeta({
     layout: "default",
@@ -12,21 +15,31 @@ useSeoMeta({
     description: "使用AI快速生成符合小红书风格的笔记内容",
 });
 
-// Reactive state for the generation page
-const content = ref('')
-const mode = ref('ai-generate')
-const generatedTitle = ref('')
-const generatedContent = ref('')
-const isGenerating = ref(false)
+// 使用XHS生成组合式函数
+const {
+    content,
+    mode,
+    generatedTitle,
+    generatedContent,
+    isGenerating,
+    generationError,
+    generationProgress,
+    isInputEmpty,
+    characterCount,
+    selectedModel,
+    generate,
+    regenerate,
+    clearInput,
+    clearGenerated,
+    copyTitle,
+    copyContent
+} = useXhsGenerate()
 
-// Character count for input
-const characterCount = computed(() => content.value.length)
-
-// Check if input is empty or whitespace only
-const isInputEmpty = computed(() => content.value.trim() === '')
+// 全局状态管理
+const controlsStore = useControlsStore()
 
 // Generation modes configuration
-const generationModes = [
+const generationModes: GenerationMode[] = [
     {
         key: 'ai-generate',
         label: 'AI生成',
@@ -44,22 +57,85 @@ const generationModes = [
     }
 ]
 
-// Clear input content
-const clearInput = () => {
-    content.value = ''
+// 获取当前模式的描述
+const currentModeDescription = computed(() => {
+    return generationModes.find((m: GenerationMode) => m.key === mode.value)?.description || ''
+})
+
+// 获取输入框占位符文本
+const inputPlaceholder = computed(() => {
+    switch (mode.value) {
+        case 'ai-generate':
+            return '请输入主题，例如：分享一个超好用的护肤品'
+        case 'ai-compose':
+            return '请输入你的草稿内容，AI将帮你扩写和优化'
+        case 'add-emoji':
+            return '请输入需要添加emoji的笔记内容'
+        default:
+            return '请输入内容'
+    }
+})
+
+// 字符计数颜色
+const characterCountColor = computed(() => {
+    if (characterCount.value > 2000) {
+        return 'text-red-500'
+    } else if (characterCount.value > 1800) {
+        return 'text-yellow-500'
+    }
+    return 'text-gray-500'
+})
+
+// 输入验证状态
+const inputValidationError = computed(() => {
+    if (content.value.length > 2000) {
+        return '输入内容不能超过2000个字符'
+    }
+    if (content.value.length > 0 && !/.*\S.*/.test(content.value)) {
+        return '输入内容不能只包含空白字符'
+    }
+    if (!selectedModel.value?.id && content.value.trim()) {
+        return '请选择AI模型'
+    }
+    return ''
+})
+
+// 处理模型选择变化
+const handleModelChange = (model: any) => {
+    // 更新全局状态中的选中模型
+    controlsStore.setSelectedModel(model)
 }
 
-// Generate content (placeholder for now)
-const generateContent = async () => {
-    if (isInputEmpty.value) {
+// 处理生成按钮点击
+const handleGenerate = async () => {
+    await generate()
+}
+
+// 处理重新生成
+const handleRegenerate = async () => {
+    await regenerate()
+}
+
+// 调试模型配置
+const debugModel = async () => {
+    if (!selectedModel.value?.id) {
+        console.error('没有选择模型')
         return
     }
-    
-    isGenerating.value = true
-    // TODO: Implement actual generation logic in later tasks
-    setTimeout(() => {
-        isGenerating.value = false
-    }, 2000)
+
+    try {
+        const response = await fetch(`/api/xhs/debug/model/${selectedModel.value.id}`)
+        const result = await response.json()
+        console.log('模型调试结果:', result)
+        
+        if (result.success) {
+            console.log('模型配置正常:', result.model)
+        } else {
+            console.error('模型配置错误:', result.message)
+        }
+    } catch (error) {
+        console.error('调试请求失败:', error)
+    }
 }
 </script>
 
@@ -89,15 +165,41 @@ const generateContent = async () => {
                             <div class="mb-6">
                                 <UTabs 
                                     v-model="mode" 
-                                    :items="generationModes.map(m => ({ key: m.key, label: m.label }))"
+                                    :items="generationModes.map(m => ({ value: m.key, label: m.label }))"
                                     class="w-full"
                                 />
                                 
                                 <!-- Mode Description -->
                                 <div class="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                                     <p class="text-sm text-blue-700 dark:text-blue-300">
-                                        {{ generationModes.find(m => m.key === mode)?.description }}
+                                        {{ currentModeDescription }}
                                     </p>
+                                </div>
+                            </div>
+
+                            <!-- Model Selection -->
+                            <div class="mb-6">
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    选择AI模型
+                                </label>
+                                <ModelSelect
+                                    :supportedModelTypes="['llm']"
+                                    :show-billingRule="true"
+                                    :open-local-storage="true"
+                                    placeholder="选择AI模型开始生成"
+                                    @change="handleModelChange"
+                                />
+                                
+                                <!-- Debug Button (temporary) -->
+                                <div class="mt-2" v-if="selectedModel?.id">
+                                    <UButton
+                                        variant="ghost"
+                                        size="xs"
+                                        color="neutral"
+                                        @click="debugModel"
+                                    >
+                                        调试模型配置 ({{ selectedModel.id }})
+                                    </UButton>
                                 </div>
                             </div>
 
@@ -106,15 +208,40 @@ const generateContent = async () => {
                                 <div class="relative">
                                     <UTextarea
                                         v-model="content"
-                                        :placeholder="mode === 'ai-generate' ? '请输入主题，例如：分享一个超好用的护肤品' : mode === 'ai-compose' ? '请输入你的草稿内容，AI将帮你扩写和优化' : '请输入需要添加emoji的笔记内容'"
+                                        :placeholder="inputPlaceholder"
                                         :rows="8"
                                         class="w-full resize-none"
                                         :ui="{ base: 'w-full' }"
                                     />
                                     
                                     <!-- Character Count -->
-                                    <div class="absolute bottom-3 right-3 text-sm text-gray-500">
+                                    <div class="absolute bottom-3 right-3 text-sm" :class="characterCountColor">
                                         {{ characterCount }}/2000
+                                    </div>
+                                </div>
+
+                                <!-- Input Validation Error -->
+                                <div v-if="inputValidationError" class="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                                    <p class="text-sm text-yellow-700 dark:text-yellow-300">
+                                        {{ inputValidationError }}
+                                    </p>
+                                </div>
+
+                                <!-- Error Message -->
+                                <div v-if="generationError" class="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                                    <div class="flex justify-between items-center">
+                                        <p class="text-sm text-red-700 dark:text-red-300">
+                                            {{ generationError }}
+                                        </p>
+                                        <UButton
+                                            variant="ghost"
+                                            size="xs"
+                                            color="error"
+                                            @click="handleGenerate"
+                                            :disabled="isInputEmpty || isGenerating"
+                                        >
+                                            重试
+                                        </UButton>
                                     </div>
                                 </div>
 
@@ -130,20 +257,33 @@ const generateContent = async () => {
                                         清空
                                     </UButton>
 
-                                    <UButton
-                                        color="primary"
-                                        size="lg"
-                                        :loading="isGenerating"
-                                        :disabled="isInputEmpty"
-                                        @click="generateContent"
-                                    >
-                                        <template v-if="isGenerating">
-                                            生成中...
-                                        </template>
-                                        <template v-else>
-                                            自动生成(消耗1字)
-                                        </template>
-                                    </UButton>
+                                    <div class="flex gap-2">
+                                        <UButton
+                                            v-if="generatedTitle || generatedContent"
+                                            variant="outline"
+                                            color="primary"
+                                            size="lg"
+                                            @click="handleRegenerate"
+                                            :disabled="isInputEmpty || isGenerating"
+                                        >
+                                            重新生成
+                                        </UButton>
+
+                                        <UButton
+                                            color="primary"
+                                            size="lg"
+                                            :loading="isGenerating"
+                                            :disabled="isInputEmpty || !!inputValidationError"
+                                            @click="handleGenerate"
+                                        >
+                                            <template v-if="isGenerating">
+                                                生成中...
+                                            </template>
+                                            <template v-else>
+                                                自动生成(消耗1字)
+                                            </template>
+                                        </UButton>
+                                    </div>
                                 </div>
                             </div>
                         </UCard>
@@ -158,6 +298,13 @@ const generateContent = async () => {
 
                             <!-- Loading Skeleton -->
                             <div v-if="isGenerating" class="space-y-4">
+                                <!-- Progress Message -->
+                                <div v-if="generationProgress" class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                                    <p class="text-sm text-blue-700 dark:text-blue-300">
+                                        {{ generationProgress }}
+                                    </p>
+                                </div>
+                                
                                 <div class="space-y-2">
                                     <USkeleton class="h-4 w-3/4" />
                                     <USkeleton class="h-4 w-1/2" />
@@ -175,20 +322,57 @@ const generateContent = async () => {
                             <div v-else-if="generatedTitle || generatedContent" class="space-y-6">
                                 <!-- Title Section -->
                                 <div v-if="generatedTitle" class="space-y-2">
-                                    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">标题</h3>
+                                    <div class="flex justify-between items-center">
+                                        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">标题</h3>
+                                        <UButton
+                                            variant="ghost"
+                                            size="xs"
+                                            @click="copyTitle"
+                                        >
+                                            复制标题
+                                        </UButton>
+                                    </div>
                                     <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
                                         <p class="text-lg font-semibold">{{ generatedTitle }}</p>
                                     </div>
-                                 </div>
+                                </div>
 
                                 <!-- Content Section -->
                                 <div v-if="generatedContent" class="space-y-2">
-                                    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">正文</h3>
+                                    <div class="flex justify-between items-center">
+                                        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">正文</h3>
+                                        <UButton
+                                            variant="ghost"
+                                            size="xs"
+                                            @click="copyContent"
+                                        >
+                                            复制正文
+                                        </UButton>
+                                    </div>
                                     <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
                                         <div class="whitespace-pre-wrap text-gray-900 dark:text-gray-100">
                                             {{ generatedContent }}
                                         </div>
                                     </div>
+                                </div>
+
+                                <!-- Action Buttons -->
+                                <div class="flex gap-2">
+                                    <UButton
+                                        variant="outline"
+                                        color="primary"
+                                        @click="clearGenerated"
+                                    >
+                                        清空结果
+                                    </UButton>
+                                    
+                                    <!-- TODO: 保存功能将在后续任务中实现 -->
+                                    <UButton
+                                        color="primary"
+                                        disabled
+                                    >
+                                        保存笔记
+                                    </UButton>
                                 </div>
                             </div>
 

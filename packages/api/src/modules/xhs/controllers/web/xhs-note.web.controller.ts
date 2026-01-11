@@ -34,6 +34,52 @@ export class XhsNoteWebController extends BaseController {
     }
 
     /**
+     * 诊断模型配置 - 用于调试
+     * 
+     * @param modelId 模型ID
+     */
+    @Get("debug/model/:modelId")
+    async debugModel(@Param("modelId") modelId: string) {
+        try {
+            const model = await this.xhsNoteService['aiModelService'].findOne({
+                where: { id: modelId, isActive: true },
+                relations: ["provider"],
+            });
+
+            if (!model) {
+                return {
+                    success: false,
+                    message: `模型ID ${modelId} 不存在或未激活`,
+                    modelId
+                };
+            }
+
+            return {
+                success: true,
+                model: {
+                    id: model.id,
+                    name: model.name,
+                    model: model.model,
+                    isActive: model.isActive,
+                    provider: model.provider ? {
+                        id: model.provider.id,
+                        name: model.provider.name,
+                        provider: model.provider.provider,
+                        isActive: model.provider.isActive,
+                        bindSecretId: model.provider.bindSecretId
+                    } : null
+                }
+            };
+        } catch (error) {
+            return {
+                success: false,
+                message: `查询模型失败: ${error.message}`,
+                modelId
+            };
+        }
+    }
+
+    /**
      * 创建笔记
      * 
      * @param dto 创建笔记DTO

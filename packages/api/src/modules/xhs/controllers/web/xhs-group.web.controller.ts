@@ -12,7 +12,7 @@ import { XhsGroupService } from "../../services/xhs-group.service";
  * 小红书笔记分组Web控制器
  * 提供分组管理的RESTful API
  */
-@WebController("xhs/groups")
+@WebController("xhs")
 export class XhsGroupWebController extends BaseController {
     constructor(private readonly xhsGroupService: XhsGroupService) {
         super();
@@ -22,7 +22,7 @@ export class XhsGroupWebController extends BaseController {
      * 获取用户所有分组
      * GET /api/web/xhs/groups
      */
-    @Get()
+    @Get("groups")
     async getGroups(@Playground() user: UserPlayground): Promise<{ items: XhsGroup[] }> {
         // 确保用户有默认分组
         await this.xhsGroupService.ensureDefaultGroup(user.id);
@@ -36,7 +36,7 @@ export class XhsGroupWebController extends BaseController {
      * 创建分组
      * POST /api/web/xhs/groups
      */
-    @Post()
+    @Post("groups")
     async createGroup(
         @Body() dto: CreateGroupDto,
         @Playground() user: UserPlayground
@@ -48,7 +48,7 @@ export class XhsGroupWebController extends BaseController {
      * 更新分组
      * PUT /api/web/xhs/groups/:id
      */
-    @Put(":id")
+    @Put("groups/:id")
     async updateGroup(
         @Param("id") id: string,
         @Body() dto: UpdateGroupDto,
@@ -62,7 +62,7 @@ export class XhsGroupWebController extends BaseController {
      * DELETE /api/web/xhs/groups/:id
      * 删除前将该分组下的所有笔记移动到默认分组
      */
-    @Delete(":id")
+    @Delete("groups/:id")
     async deleteGroup(
         @Param("id") id: string,
         @Playground() user: UserPlayground
