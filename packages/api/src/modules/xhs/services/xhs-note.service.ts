@@ -7,9 +7,12 @@ import { HttpErrorFactory } from "@buildingai/errors";
 import { Injectable, Logger } from "@nestjs/common";
 import type { Response } from "express";
 import type { ChatCompletionMessageParam } from "openai/resources/index";
+import { SecretService } from "@buildingai/core/modules";
+import { getProviderSecret } from "@buildingai/utils";
 
 import { CreateNoteDto, GenerateNoteDto, QueryNoteDto, SearchNoteDto, UpdateNoteDto } from "../dto";
 import { ContentModerationService } from "./content-moderation.service";
+import { AiModelService } from "@modules/ai/model/services/ai-model.service";
 
 /**
  * 小红书笔记服务
@@ -24,11 +27,15 @@ export class XhsNoteService extends BaseService<XhsNote> {
      *
      * @param noteRepository 笔记仓库
      * @param contentModerationService 内容审核服务
+     * @param aiModelService AI模型服务
+     * @param secretService 密钥服务
      */
     constructor(
         @InjectRepository(XhsNote)
         private readonly noteRepository: Repository<XhsNote>,
         private readonly contentModerationService: ContentModerationService,
+        public readonly aiModelService: AiModelService,
+        private readonly secretService: SecretService,
     ) {
         super(noteRepository);
     }
@@ -41,6 +48,16 @@ export class XhsNoteService extends BaseService<XhsNote> {
      */
     async generateStream(dto: GenerateNoteDto, res: Response): Promise<void> {
         try {
+            this.logger.log(`开始生成笔记，接收到的DTO:`, {
+                content: dto.content?.substring(0, 50) + '...',
+                mode: dto.mode,
+                aiModel: dto.aiModel,
+                aiModelType: typeof dto.aiModel,
+                aiModelDefined: dto.aiModel !== undefined,
+                aiModelNull: dto.aiModel === null,
+                aiModelEmpty: dto.aiModel === ''
+            });
+
             // 设置SSE响应头
             res.setHeader("Content-Type", "text/event-stream");
             res.setHeader("Cache-Control", "no-cache");
@@ -56,25 +73,27 @@ export class XhsNoteService extends BaseService<XhsNote> {
             // 内容审核 - 检查生成输入
             const moderationResult = this.contentModerationService.moderateGenerationInput(dto.content);
             if (!moderationResult.isValid) {
-                throw HttpErrorFactory.badRequest(moderationResult.message || "输入内容包含不当信息，请修改后重试");
+                throw HttpErrorFactory.badRequest(
+                    moderationResult.message || "输入内容包含不当信息，请修改后重试",
+                );
             }
-
-            // 获取AI提供者和配置
-            const provider = await this.getAIProvider();
+            this.logger.debug("dto.aiModel 参数", dto.aiModel);
+            // 获取AI提供者和模型配置
+            const { provider, modelName } = await this.getAIProviderAndModel(dto.aiModel);
             const client = new TextGenerator(provider);
 
             // 构建消息内容
             const messages = this.buildMessages(dto);
 
-            // 设置5秒超时
+            // 设置30秒超时
             const timeoutPromise = new Promise<never>((_, reject) => {
                 setTimeout(() => {
                     reject(HttpErrorFactory.timeout("生成超时，请稍后重试"));
-                }, 5000);
+                }, 30000);
             });
 
             // 开始流式生成
-            const streamPromise = this.performStreamGeneration(client, messages, res);
+            const streamPromise = this.performStreamGeneration(client, messages, modelName, res);
 
             // 等待生成完成或超时
             await Promise.race([streamPromise, timeoutPromise]);
@@ -92,9 +111,18 @@ export class XhsNoteService extends BaseService<XhsNote> {
             } else if (error.message?.includes("输入内容")) {
                 errorMessage = error.message;
                 errorCode = "VALIDATION_ERROR";
+            } else if (error.message?.includes("AI服务配置错误")) {
+                errorMessage = error.message;
+                errorCode = "CONFIG_ERROR";
+            } else if (error.message?.includes("密钥") || error.message?.includes("配置")) {
+                errorMessage = `AI服务配置错误: ${error.message}`;
+                errorCode = "CONFIG_ERROR";
             } else if (error.message?.includes("AI服务")) {
                 errorMessage = "AI服务暂时不可用，请稍后重试";
                 errorCode = "AI_SERVICE_ERROR";
+            } else if (error.name === "APIConnectionError" || error.message?.includes("Connection error")) {
+                errorMessage = "无法连接到AI服务，请检查网络连接或稍后重试";
+                errorCode = "CONNECTION_ERROR";
             }
             
             // 发送错误事件
@@ -111,22 +139,116 @@ export class XhsNoteService extends BaseService<XhsNote> {
     }
 
     /**
-     * 获取AI提供者
+     * 获取AI提供者和模型配置
+     * @param modelId 可选的模型ID，如果不提供则使用默认配置
      */
-    private async getAIProvider() {
+    private async getAIProviderAndModel(modelId?: string): Promise<{ provider: any; modelName: string }> {
         try {
-            // 使用默认的OpenAI提供者，可以根据需要配置其他提供者
-            const providerName = "openai";
+            this.logger.log(`尝试获取AI提供者，模型ID: ${modelId}`);
             
-            // 简化配置，使用环境变量或默认配置
+            if (modelId) {
+                // 根据模型ID获取模型信息和关联的提供者
+                const model = await this.aiModelService.findOne({
+                    where: { id: modelId, isActive: true },
+                    relations: ["provider"],
+                });
+
+                this.logger.log(`查询到的模型:`, model ? `${model.name} (${model.id})` : '未找到');
+
+                if (!model) {
+                    this.logger.warn(`模型ID ${modelId} 不存在或未激活，使用默认配置`);
+                    return this.getDefaultProviderAndModel();
+                }
+
+                if (!model.provider || !model.provider.isActive) {
+                    this.logger.warn(`模型 ${modelId} 的提供者不存在或未激活，使用默认配置`);
+                    this.logger.log(`提供者信息:`, model.provider);
+                    return this.getDefaultProviderAndModel();
+                }
+
+                this.logger.log(`使用提供者: ${model.provider.name} (${model.provider.provider})`);
+
+                // 检查提供者是否有绑定的密钥配置
+                if (!model.provider.bindSecretId) {
+                    this.logger.error(`提供者 ${model.provider.name} 没有绑定密钥配置`);
+                    throw new Error(`提供者 ${model.provider.name} 没有绑定密钥配置`);
+                }
+
+                // 获取提供者的密钥配置
+                let providerSecret: any;
+                try {
+                    providerSecret = await this.secretService.getConfigKeyValuePairs(
+                        model.provider.bindSecretId,
+                    );
+                    this.logger.log(`获取到提供者密钥配置，密钥ID: ${model.provider.bindSecretId}`);
+                } catch (secretError) {
+                    this.logger.error(`获取提供者密钥失败:`, secretError);
+                    throw new Error(`无法获取提供者 ${model.provider.name} 的密钥配置: ${secretError.message}`);
+                }
+
+                // 构建提供者配置
+                const apiKey = getProviderSecret("apiKey", providerSecret);
+                const baseURL = getProviderSecret("baseUrl", providerSecret);
+                
+                this.logger.log(`提供者配置 - baseURL: ${baseURL}, apiKey: ${apiKey ? '已设置' : '未设置'}`);
+                
+                if (!apiKey) {
+                    this.logger.error(`提供者 ${model.provider.name} 缺少API密钥`);
+                    throw new Error(`提供者 ${model.provider.name} 缺少API密钥配置`);
+                }
+
+                const provider = getProvider(model.provider.provider, {
+                    apiKey,
+                    baseURL,
+                });
+                
+                this.logger.log(`成功配置提供者，模型名称: ${model.model}`);
+                
+                return {
+                    provider,
+                    modelName: model.model, // 使用模型的标识符
+                };
+            } else {
+                this.logger.log('未提供模型ID，使用默认配置');
+                // 使用默认配置
+                return this.getDefaultProviderAndModel();
+            }
+        } catch (error) {
+            this.logger.error("获取AI提供者失败", error);
+            // 如果是配置错误，直接抛出，不要回退到默认配置
+            if (error.message?.includes('密钥') || error.message?.includes('配置') || error.message?.includes('绑定')) {
+                throw HttpErrorFactory.internal(`AI服务配置错误: ${error.message}`);
+            }
+            // 其他错误回退到默认配置
+            this.logger.warn('回退到默认配置');
+            return this.getDefaultProviderAndModel();
+        }
+    }
+
+    /**
+     * 获取默认的AI提供者和模型配置
+     */
+    private getDefaultProviderAndModel(): { provider: any; modelName: string } {
+        try {
+            this.logger.log('使用默认OpenAI配置');
+            
+            // 使用默认的OpenAI提供者配置
+            const providerName = "openai";
             const config = {
                 apiKey: process.env.OPENAI_API_KEY || "your-api-key-here",
                 baseURL: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
             };
             
-            return getProvider(providerName, config);
+            this.logger.log(`默认配置: ${providerName}, baseURL: ${config.baseURL}`);
+            
+            const provider = getProvider(providerName, config);
+            
+            return {
+                provider,
+                modelName: "gpt-3.5-turbo", // 默认模型
+            };
         } catch (error) {
-            this.logger.error("获取AI提供者失败", error);
+            this.logger.error("获取默认AI提供者失败", error);
             throw HttpErrorFactory.internal("AI服务配置错误");
         }
     }
@@ -206,11 +328,14 @@ export class XhsNoteService extends BaseService<XhsNote> {
     private async performStreamGeneration(
         client: TextGenerator,
         messages: ChatCompletionMessageParam[],
+        modelName: string,
         res: Response
     ): Promise<void> {
         try {
+            this.logger.log(`开始流式生成，模型: ${modelName}`);
+            
             const stream = await client.chat.stream({
-                model: "gpt-3.5-turbo",
+                model: modelName, // 使用动态模型名称
                 messages,
                 temperature: 0.7,
                 max_tokens: 2000,
@@ -243,6 +368,8 @@ export class XhsNoteService extends BaseService<XhsNote> {
                 throw new Error("AI服务返回空内容，请重试");
             }
 
+            this.logger.log(`生成完成，内容长度: ${fullContent.length}`);
+
             // 发送完成事件
             res.write(`data: ${JSON.stringify({
                 type: "complete",
@@ -256,7 +383,23 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
         } catch (error) {
             this.logger.error("流式生成过程中出错", error);
-            throw new Error("AI服务生成失败，请稍后重试");
+            
+            // 根据错误类型提供更具体的错误信息
+            let errorMessage = "AI服务生成失败，请稍后重试";
+            
+            if (error.name === "APIConnectionError") {
+                errorMessage = "无法连接到AI服务，请检查网络连接";
+            } else if (error.message?.includes("timeout")) {
+                errorMessage = "AI服务响应超时，请稍后重试";
+            } else if (error.message?.includes("rate limit")) {
+                errorMessage = "请求过于频繁，请稍后重试";
+            } else if (error.message?.includes("invalid model")) {
+                errorMessage = "所选模型不可用，请选择其他模型";
+            } else if (error.message?.includes("API key")) {
+                errorMessage = "AI服务认证失败，请联系管理员";
+            }
+            
+            throw new Error(errorMessage);
         }
     }
 
