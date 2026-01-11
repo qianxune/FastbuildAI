@@ -29,6 +29,7 @@ const {
     selectedModel,
     generate,
     regenerate,
+    save,
     clearInput,
     clearGenerated,
     copyTitle,
@@ -114,6 +115,11 @@ const handleGenerate = async () => {
 // 处理重新生成
 const handleRegenerate = async () => {
     await regenerate()
+}
+
+// 处理保存按钮点击
+const handleSave = async () => {
+    await save()
 }
 
 // 调试模型配置
@@ -366,10 +372,10 @@ const debugModel = async () => {
                                         清空结果
                                     </UButton>
                                     
-                                    <!-- TODO: 保存功能将在后续任务中实现 -->
                                     <UButton
                                         color="primary"
-                                        disabled
+                                        @click="handleSave"
+                                        :disabled="!generatedTitle || !generatedContent"
                                     >
                                         保存笔记
                                     </UButton>
