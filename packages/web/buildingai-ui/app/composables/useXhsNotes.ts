@@ -1,13 +1,11 @@
 import type { XhsNote, PaginatedResponse } from '@/types/xhs'
-import { useUserStore } from '@buildingai/stores/user'
-import { ref, computed } from 'vue'
 
 /**
  * XHS笔记管理组合式函数
  * 提供笔记列表管理相关的状态管理和方法
  */
 export const useXhsNotes = () => {
-  // 全局状态管理
+  // 全局状态管理 - useUserStore 由 Nuxt 自动导入
   const userStore = useUserStore()
 
   // 响应式状态
