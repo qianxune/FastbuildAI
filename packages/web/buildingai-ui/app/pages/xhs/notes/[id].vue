@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { XhsNote, UpdateNoteDto } from "@/types/xhs";
+import { useXhsGroups } from "@/composables/useXhsGroups";
 
 // Vue APIs (ref, computed, watch, onMounted) 由 Nuxt 自动导入
 // Nuxt composables (useRouter, useRoute, useMessage) 由 Nuxt 自动导入
@@ -20,6 +21,9 @@ useSeoMeta({
 // 全局状态管理 - useUserStore 由 Nuxt 自动导入
 const userStore = useUserStore();
 
+// 使用分组管理组合式函数
+const { groups, fetchGroups } = useXhsGroups();
+
 // Toast 通知
 const toast = useMessage();
 
@@ -39,8 +43,10 @@ const error = ref("");
 // 编辑状态
 const editTitle = ref("");
 const editContent = ref("");
+const editGroupId = ref<string | undefined>(undefined);
 const originalTitle = ref("");
 const originalContent = ref("");
+const originalGroupId = ref<string | undefined>(undefined);
 
 // 最大字数限制
 const MAX_CONTENT_LENGTH = 2000;
@@ -50,7 +56,9 @@ const wordCount = computed(() => editContent.value.length);
 
 // 计算属性 - 是否有未保存的更改
 const hasUnsavedChanges = computed(() => {
-    return editTitle.value !== originalTitle.value || editContent.value !== originalContent.value;
+    return editTitle.value !== originalTitle.value || 
+           editContent.value !== originalContent.value ||
+           editGroupId.value !== originalGroupId.value;
 });
 
 // 计算属性 - 字数颜色
@@ -129,8 +137,10 @@ const fetchNote = async () => {
         // 初始化编辑状态
         editTitle.value = noteData.title || "";
         editContent.value = noteData.content || "";
+        editGroupId.value = noteData.groupId || undefined;
         originalTitle.value = noteData.title || "";
         originalContent.value = noteData.content || "";
+        originalGroupId.value = noteData.groupId || undefined;
     } catch (err: any) {
         console.error("获取笔记失败:", err);
 
@@ -163,6 +173,7 @@ const saveNote = async () => {
         const updateDto: UpdateNoteDto = {
             title: editTitle.value.trim(),
             content: editContent.value,
+            groupId: editGroupId.value,
         };
 
         const response = await fetch(`/api/xhs/notes/${noteId.value}`, {
@@ -197,6 +208,7 @@ const saveNote = async () => {
         note.value = updatedNote;
         originalTitle.value = updatedNote.title;
         originalContent.value = updatedNote.content;
+        originalGroupId.value = updatedNote.groupId;
 
         toast.success("保存成功");
     } catch (err: any) {
@@ -270,6 +282,9 @@ const getModeText = (mode: string): string => {
 
 // 页面加载时获取笔记
 onMounted(async () => {
+    // 加载分组列表
+    await fetchGroups();
+    // 加载笔记详情
     await fetchNote();
 });
 
@@ -388,11 +403,6 @@ onBeforeRouteLeave(async (to, from, next) => {
                                     <UIcon name="i-heroicons-tag" class="w-4 h-4" />
                                     <span>{{ getModeText(note.mode) }}</span>
                                 </span>
-
-                                <span v-if="note.group" class="flex items-center space-x-1">
-                                    <UIcon name="i-heroicons-folder" class="w-4 h-4" />
-                                    <span>{{ note.group.name }}</span>
-                                </span>
                             </div>
 
                             <div class="flex items-center space-x-4">
@@ -409,6 +419,41 @@ onBeforeRouteLeave(async (to, from, next) => {
                                     <span>更新于 {{ formatDate(note.updatedAt) }}</span>
                                 </span>
                             </div>
+                        </div>
+
+                        <!-- Group Selector -->
+                        <div class="space-y-2">
+                            <label
+                                class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                            >
+                                所属分组
+                            </label>
+                            <USelectMenu
+                                v-model="editGroupId"
+                                :items="groups"
+                                value-key="id"
+                                label-key="name"
+                                placeholder="选择分组"
+                                class="w-full max-w-xs"
+                            >
+                                <template #leading>
+                                    <UIcon name="i-heroicons-folder" class="w-4 h-4 text-gray-400" />
+                                </template>
+                                <template #item="{ item }">
+                                    <div class="flex items-center space-x-2">
+                                        <UIcon name="i-heroicons-folder" class="w-4 h-4 text-gray-400" />
+                                        <span>{{ item.name }}</span>
+                                        <UBadge
+                                            v-if="item.isDefault"
+                                            color="primary"
+                                            variant="soft"
+                                            size="xs"
+                                        >
+                                            默认
+                                        </UBadge>
+                                    </div>
+                                </template>
+                            </USelectMenu>
                         </div>
 
                         <!-- Title Input -->
