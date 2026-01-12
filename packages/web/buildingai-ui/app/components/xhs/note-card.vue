@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { XhsNote } from '@/types/xhs'
-import { computed } from 'vue'
+
+// Vue APIs (ref, computed, watch) 由 Nuxt 自动导入
 
 interface Props {
   note: XhsNote

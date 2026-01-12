@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import type { XhsNote } from "@/types/xhs";
-import { ref, computed, watch, onMounted } from "vue";
 import { useXhsNotes } from "@/composables/useXhsNotes";
 import NoteCard from "@/components/xhs/note-card.vue";
+
+// Vue APIs (ref, computed, watch, onMounted) 由 Nuxt 自动导入
+// Nuxt composables (useRouter, useRoute, useMessage) 由 Nuxt 自动导入
+// definePageMeta, useSeoMeta 由 Nuxt 自动导入
 
 // Page metadata configuration
 definePageMeta({
@@ -52,11 +55,6 @@ const route = useRoute();
 
 // 搜索输入
 const searchInput = ref("");
-
-// 删除确认模态框
-const showDeleteModal = ref(false);
-const noteToDelete = ref<string | null>(null);
-const notesToBatchDelete = ref<string[]>([]);
 
 // 页面加载时获取笔记列表
 onMounted(async () => {
@@ -122,29 +120,25 @@ const handleNoteClick = (note: XhsNote) => {
     router.push(`/xhs/notes/${note.id}`);
 };
 
-// 处理删除按钮点击
-const handleDeleteClick = (noteId: string) => {
-    noteToDelete.value = noteId;
-    showDeleteModal.value = true;
-};
-
-// 确认删除单个笔记
-const confirmDelete = async () => {
-    if (!noteToDelete.value) return;
-
+// 处理删除按钮点击 - 使用 useModal 弹出确认框
+const handleDeleteClick = async (noteId: string) => {
     try {
-        await deleteNote(noteToDelete.value);
-        showDeleteModal.value = false;
-        noteToDelete.value = null;
-    } catch (error) {
-        // 错误已在 composable 中处理
-    }
-};
+        const confirmed = await useModal({
+            color: "error",
+            title: "确认删除笔记？",
+            content: "此操作不可撤销，确定要删除这个笔记吗？",
+            confirmText: "确认删除",
+            cancelText: "取消",
+            ui: { content: "!w-sm" },
+        });
 
-// 取消删除
-const cancelDelete = () => {
-    showDeleteModal.value = false;
-    noteToDelete.value = null;
+        if (confirmed) {
+            await deleteNote(noteId);
+        }
+    } catch (error) {
+        // 用户取消删除操作
+        console.log("用户取消删除操作");
+    }
 };
 
 // 切换批量编辑模式
@@ -175,38 +169,33 @@ const toggleSelectAll = () => {
     }
 };
 
-// 处理批量删除
-const handleBatchDelete = () => {
+// 处理批量删除 - 使用 useModal 弹出确认框
+const handleBatchDelete = async () => {
     if (selectedNoteIds.value.length === 0) {
         toast.error("请选择要删除的笔记");
         return;
     }
 
-    notesToBatchDelete.value = [...selectedNoteIds.value];
-    showDeleteModal.value = true;
-};
-
-// 确认批量删除
-const confirmBatchDelete = async () => {
-    if (notesToBatchDelete.value.length === 0) return;
-
     try {
-        await batchDelete(notesToBatchDelete.value);
-        selectedNoteIds.value = [];
-        notesToBatchDelete.value = [];
-        showDeleteModal.value = false;
+        const confirmed = await useModal({
+            color: "error",
+            title: `确认删除 ${selectedNoteIds.value.length} 个笔记？`,
+            content: `你即将删除 ${selectedNoteIds.value.length} 个笔记，此操作不可撤销。`,
+            confirmText: "确认删除",
+            cancelText: "取消",
+            ui: { content: "!w-sm" },
+        });
 
-        // 退出批量模式
-        isBatchMode.value = false;
+        if (confirmed) {
+            await batchDelete(selectedNoteIds.value);
+            selectedNoteIds.value = [];
+            // 退出批量模式
+            isBatchMode.value = false;
+        }
     } catch (error) {
-        // 错误已在 composable 中处理
+        // 用户取消删除操作
+        console.log("用户取消批量删除操作");
     }
-};
-
-// 取消批量删除
-const cancelBatchDelete = () => {
-    showDeleteModal.value = false;
-    notesToBatchDelete.value = [];
 };
 
 // 处理页面变化
@@ -255,20 +244,6 @@ const isAllSelected = computed(() => {
 
 const hasSelectedNotes = computed(() => {
     return selectedNoteIds.value.length > 0;
-});
-
-const deleteModalTitle = computed(() => {
-    if (notesToBatchDelete.value.length > 0) {
-        return `确认删除 ${notesToBatchDelete.value.length} 个笔记？`;
-    }
-    return "确认删除笔记？";
-});
-
-const deleteModalDescription = computed(() => {
-    if (notesToBatchDelete.value.length > 0) {
-        return `你即将删除 ${notesToBatchDelete.value.length} 个笔记，此操作不可撤销。`;
-    }
-    return "此操作不可撤销，确定要删除这个笔记吗？";
 });
 </script>
 
@@ -467,42 +442,6 @@ const deleteModalDescription = computed(() => {
                 </div>
             </div>
         </div>
-
-        <!-- Delete confirmation modal -->
-        <UModal v-model="showDeleteModal">
-            <UCard>
-                <template #header>
-                    <h3 class="text-lg font-semibold">{{ deleteModalTitle }}</h3>
-                </template>
-
-                <p class="mb-6 text-gray-600 dark:text-gray-400">
-                    {{ deleteModalDescription }}
-                </p>
-
-                <template #footer>
-                    <div class="flex justify-end space-x-3">
-                        <UButton
-                            variant="ghost"
-                            @click="
-                                notesToBatchDelete.length > 0 ? cancelBatchDelete() : cancelDelete()
-                            "
-                        >
-                            取消
-                        </UButton>
-                        <UButton
-                            color="error"
-                            @click="
-                                notesToBatchDelete.length > 0
-                                    ? confirmBatchDelete()
-                                    : confirmDelete()
-                            "
-                        >
-                            确认删除
-                        </UButton>
-                    </div>
-                </template>
-            </UCard>
-        </UModal>
     </div>
 </template>
 
