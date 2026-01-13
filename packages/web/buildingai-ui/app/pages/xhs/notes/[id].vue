@@ -282,6 +282,17 @@ const getModeText = (mode: string): string => {
 
 // 页面加载时获取笔记
 onMounted(async () => {
+    // 检查 ID 是否是有效的 UUID（排除 "new" 等特殊路径）
+    const id = noteId.value;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    
+    if (!id || !uuidRegex.test(id)) {
+        // 如果不是有效的 UUID，可能是访问了错误的路由
+        error.value = "无效的笔记ID";
+        isLoading.value = false;
+        return;
+    }
+    
     // 加载分组列表
     await fetchGroups();
     // 加载笔记详情

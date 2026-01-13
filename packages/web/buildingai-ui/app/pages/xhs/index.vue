@@ -6,7 +6,7 @@ import { useXhsGenerate } from '@/composables/useXhsGenerate'
 definePageMeta({
     layout: "default",
     name: "XHS Note Generator",
-    auth: true, // Require authentication as per requirements
+    auth: true,
 });
 
 // SEO settings
@@ -14,6 +14,9 @@ useSeoMeta({
     title: "小红书爆款文章生成器",
     description: "使用AI快速生成符合小红书风格的笔记内容",
 });
+
+// Router
+const router = useRouter()
 
 // 使用XHS生成组合式函数
 const {
@@ -23,15 +26,8 @@ const {
     generatedContent,
     isGenerating,
     generationError,
-    generationProgress,
     isInputEmpty,
-    characterCount,
-    selectedModel,
-    generate,
-    regenerate,
     save,
-    clearInput,
-    clearGenerated,
     copyTitle,
     copyContent
 } = useXhsGenerate()
@@ -41,33 +37,24 @@ const controlsStore = useControlsStore()
 
 // Generation modes configuration
 const generationModes: GenerationMode[] = [
-    {
-        key: 'ai-generate',
-        label: 'AI生成',
-        description: '基于主题完全由AI创作内容'
-    },
-    {
-        key: 'ai-compose',
-        label: 'AI作文',
-        description: '基于用户草稿进行扩写和优化'
-    },
-    {
-        key: 'add-emoji',
-        label: '笔记加emoji',
-        description: '为现有笔记内容添加表情符号'
-    }
+    { key: 'ai-generate', label: 'AI生成', description: '基于主题完全由AI创作内容' },
+    { key: 'ai-compose', label: 'AI仿写', description: '基于用户草稿进行扩写和优化' },
+    { key: 'add-emoji', label: '笔记加emoji', description: '为现有笔记内容添加表情符号' }
 ]
 
-// 获取当前模式的描述
-const currentModeDescription = computed(() => {
-    return generationModes.find((m: GenerationMode) => m.key === mode.value)?.description || ''
-})
+// 功能卡片配置
+const featureCards = [
+    { icon: '🎯', title: 'AI一键生成小红书笔记', color: 'bg-red-50' },
+    { icon: '📝', title: '批量生成小红书笔记', color: 'bg-orange-50' },
+    { icon: '🏆', title: 'AI智能美图省时高效', color: 'bg-yellow-50' },
+    { icon: '📊', title: '海量图片模板随心用', color: 'bg-pink-50' }
+]
 
 // 获取输入框占位符文本
 const inputPlaceholder = computed(() => {
     switch (mode.value) {
         case 'ai-generate':
-            return '请输入主题，例如：分享一个超好用的护肤品'
+            return '美食探店看！这些好吃到爆的餐厅你去过几家'
         case 'ai-compose':
             return '请输入你的草稿内容，AI将帮你扩写和优化'
         case 'add-emoji':
@@ -77,44 +64,24 @@ const inputPlaceholder = computed(() => {
     }
 })
 
-// 字符计数颜色
-const characterCountColor = computed(() => {
-    if (characterCount.value > 2000) {
-        return 'text-red-500'
-    } else if (characterCount.value > 1800) {
-        return 'text-yellow-500'
-    }
-    return 'text-gray-500'
-})
-
-// 输入验证状态
-const inputValidationError = computed(() => {
-    if (content.value.length > 2000) {
-        return '输入内容不能超过2000个字符'
-    }
-    if (content.value.length > 0 && !/.*\S.*/.test(content.value)) {
-        return '输入内容不能只包含空白字符'
-    }
-    if (!selectedModel.value?.id && content.value.trim()) {
-        return '请选择AI模型'
-    }
-    return ''
-})
-
 // 处理模型选择变化
 const handleModelChange = (model: any) => {
-    // 更新全局状态中的选中模型
     controlsStore.setSelectedModel(model)
 }
 
-// 处理生成按钮点击
+// 处理生成按钮点击 - 跳转到创建页面并开始生成
 const handleGenerate = async () => {
-    await generate()
-}
-
-// 处理重新生成
-const handleRegenerate = async () => {
-    await regenerate()
+    if (isInputEmpty.value) return
+    
+    // 跳转到创建页面，传递输入内容和模式
+    router.push({
+        path: '/xhs/create',
+        query: {
+            content: content.value,
+            mode: mode.value,
+            autoGenerate: 'true'
+        }
+    })
 }
 
 // 处理保存按钮点击
@@ -122,277 +89,231 @@ const handleSave = async () => {
     await save()
 }
 
-// 调试模型配置
-const debugModel = async () => {
-    if (!selectedModel.value?.id) {
-        console.error('没有选择模型')
-        return
-    }
+// 跳转到我的笔记页面
+const goToMyNotes = () => {
+    router.push('/xhs/notes')
+}
 
-    try {
-        const response = await fetch(`/api/xhs/debug/model/${selectedModel.value.id}`)
-        const result = await response.json()
-        console.log('模型调试结果:', result)
-        
-        if (result.success) {
-            console.log('模型配置正常:', result.model)
-        } else {
-            console.error('模型配置错误:', result.message)
-        }
-    } catch (error) {
-        console.error('调试请求失败:', error)
-    }
+// 跳转到创建笔记页面
+const goToCreateNote = () => {
+    router.push('/xhs/create')
+}
+
+// 跳转到模板笔记
+const goToTemplates = () => {
+    // TODO: 实现模板笔记功能
+}
+
+// 跳转到批量生成
+const goToBatchGenerate = () => {
+    // TODO: 实现批量生成功能
 }
 </script>
 
 <template>
-    <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <div class="container mx-auto px-4 py-8">
-            <!-- Page Header -->
-            <div class="mb-8 text-center">
-                <h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-                    小红书爆款文章生成器
+    <div class="min-h-screen bg-white dark:bg-gray-900">
+        <!-- Main Content -->
+        <div class="container mx-auto px-4 py-8 max-w-5xl">
+            <!-- Header Section -->
+            <div class="text-center mb-8">
+                <!-- Brand Logo -->
+                <div class="inline-flex items-center gap-2 mb-4 px-4 py-2 bg-red-500 text-white rounded-lg">
+                    <span class="text-lg font-bold">AI小红书</span>
+                </div>
+                
+                <!-- Main Title -->
+                <h1 class="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-3">
+                    一键「<span class="text-red-500">智创</span>」爆款小红书笔记
                 </h1>
-                <p class="text-gray-600 dark:text-gray-400">
-                    使用AI快速生成符合小红书风格的笔记内容，让你的创作更加高效
+                
+                <!-- Subtitle -->
+                <p class="text-gray-500 dark:text-gray-400 text-base">
+                    输入你的内容主题，让AI为你服务到底
                 </p>
             </div>
 
-            <div class="max-w-6xl mx-auto">
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <!-- Input Section -->
-                    <div class="space-y-6">
-                        <UCard class="p-6">
-                            <template #header>
-                                <h2 class="text-xl font-semibold">内容输入</h2>
-                            </template>
+            <!-- Generation Card -->
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 mb-8">
+                <!-- Top Right Quick Actions -->
+                <div class="flex justify-end gap-3 mb-4">
+                    <UButton
+                        variant="ghost"
+                        color="neutral"
+                        size="sm"
+                        @click="goToTemplates"
+                    >
+                        <UIcon name="i-heroicons-document-duplicate" class="mr-1" />
+                        模板笔记
+                    </UButton>
+                    <UButton
+                        variant="ghost"
+                        color="neutral"
+                        size="sm"
+                        @click="goToBatchGenerate"
+                    >
+                        <UIcon name="i-heroicons-squares-plus" class="mr-1" />
+                        批量生成
+                    </UButton>
+                </div>
 
-                            <!-- Mode Selection -->
-                            <div class="mb-6">
-                                <UTabs 
-                                    v-model="mode" 
-                                    :items="generationModes.map(m => ({ value: m.key, label: m.label }))"
-                                    class="w-full"
-                                />
-                                
-                                <!-- Mode Description -->
-                                <div class="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                                    <p class="text-sm text-blue-700 dark:text-blue-300">
-                                        {{ currentModeDescription }}
-                                    </p>
-                                </div>
-                            </div>
+                <!-- Mode Selection Tabs -->
+                <div class="flex gap-2 mb-6">
+                    <button
+                        v-for="m in generationModes"
+                        :key="m.key"
+                        @click="mode = m.key"
+                        :class="[
+                            'px-6 py-2 rounded-full text-sm font-medium transition-all',
+                            mode === m.key 
+                                ? 'bg-red-500 text-white' 
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                        ]"
+                    >
+                        {{ m.label }}
+                    </button>
+                </div>
 
-                            <!-- Model Selection -->
-                            <div class="mb-6">
-                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                    选择AI模型
-                                </label>
-                                <ModelSelect
-                                    :supportedModelTypes="['llm']"
-                                    :show-billingRule="true"
-                                    :open-local-storage="true"
-                                    placeholder="选择AI模型开始生成"
-                                    @change="handleModelChange"
-                                />
-                                
-                                <!-- Debug Button (temporary) -->
-                                <div class="mt-2" v-if="selectedModel?.id">
-                                    <UButton
-                                        variant="ghost"
-                                        size="xs"
-                                        color="neutral"
-                                        @click="debugModel"
-                                    >
-                                        调试模型配置 ({{ selectedModel.id }})
-                                    </UButton>
-                                </div>
-                            </div>
+                <!-- Input Area -->
+                <div class="relative mb-4">
+                    <div class="flex items-center border border-gray-200 dark:border-gray-600 rounded-xl overflow-hidden">
+                        <input
+                            v-model="content"
+                            type="text"
+                            :placeholder="inputPlaceholder"
+                            class="flex-1 px-4 py-4 text-base bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-400"
+                        />
+                        
+                        <!-- Generate Button -->
+                        <div class="flex items-center gap-3 px-4 border-l border-gray-200 dark:border-gray-600">
+                            <UButton
+                                color="primary"
+                                size="lg"
+                                :loading="isGenerating"
+                                :disabled="isInputEmpty"
+                                @click="handleGenerate"
+                                class="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 rounded-lg px-6"
+                            >
+                                {{ isGenerating ? '生成中...' : '自动生成(消耗1字)' }}
+                            </UButton>
+                        </div>
+                    </div>
+                </div>
 
-                            <!-- Input Area -->
-                            <div class="space-y-4">
-                                <div class="relative">
-                                    <UTextarea
-                                        v-model="content"
-                                        :placeholder="inputPlaceholder"
-                                        :rows="8"
-                                        class="w-full resize-none"
-                                        :ui="{ base: 'w-full' }"
-                                    />
-                                    
-                                    <!-- Character Count -->
-                                    <div class="absolute bottom-3 right-3 text-sm" :class="characterCountColor">
-                                        {{ characterCount }}/2000
-                                    </div>
-                                </div>
-
-                                <!-- Input Validation Error -->
-                                <div v-if="inputValidationError" class="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                                    <p class="text-sm text-yellow-700 dark:text-yellow-300">
-                                        {{ inputValidationError }}
-                                    </p>
-                                </div>
-
-                                <!-- Error Message -->
-                                <div v-if="generationError" class="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                                    <div class="flex justify-between items-center">
-                                        <p class="text-sm text-red-700 dark:text-red-300">
-                                            {{ generationError }}
-                                        </p>
-                                        <UButton
-                                            variant="ghost"
-                                            size="xs"
-                                            color="error"
-                                            @click="handleGenerate"
-                                            :disabled="isInputEmpty || isGenerating"
-                                        >
-                                            重试
-                                        </UButton>
-                                    </div>
-                                </div>
-
-                                <!-- Action Buttons -->
-                                <div class="flex justify-between items-center">
-                                    <UButton
-                                        variant="ghost"
-                                        color="neutral"
-                                        size="sm"
-                                        @click="clearInput"
-                                        :disabled="isInputEmpty"
-                                    >
-                                        清空
-                                    </UButton>
-
-                                    <div class="flex gap-2">
-                                        <UButton
-                                            v-if="generatedTitle || generatedContent"
-                                            variant="outline"
-                                            color="primary"
-                                            size="lg"
-                                            @click="handleRegenerate"
-                                            :disabled="isInputEmpty || isGenerating"
-                                        >
-                                            重新生成
-                                        </UButton>
-
-                                        <UButton
-                                            color="primary"
-                                            size="lg"
-                                            :loading="isGenerating"
-                                            :disabled="isInputEmpty || !!inputValidationError"
-                                            @click="handleGenerate"
-                                        >
-                                            <template v-if="isGenerating">
-                                                生成中...
-                                            </template>
-                                            <template v-else>
-                                                自动生成(消耗1字)
-                                            </template>
-                                        </UButton>
-                                    </div>
-                                </div>
-                            </div>
-                        </UCard>
+                <!-- Bottom Actions Row -->
+                <div class="flex justify-between items-center">
+                    <!-- Left Options -->
+                    <div class="flex gap-2 items-center">
+                        <UButton
+                            variant="outline"
+                            color="neutral"
+                            size="sm"
+                            class="rounded-full"
+                        >
+                            Pro(简单问答)
+                        </UButton>
+                        <UButton
+                            variant="outline"
+                            color="neutral"
+                            size="sm"
+                            class="rounded-full"
+                        >
+                            图片模板
+                        </UButton>
+                        <UButton
+                            variant="outline"
+                            color="neutral"
+                            size="sm"
+                            class="rounded-full"
+                        >
+                            自动配图
+                        </UButton>
+                        
+                        <!-- AI Model Selection -->
+                        <div class="ml-2">
+                            <ModelSelect
+                                :supportedModelTypes="['llm']"
+                                :show-billingRule="true"
+                                :open-local-storage="true"
+                                placeholder="选择AI模型"
+                                size="sm"
+                                @change="handleModelChange"
+                            />
+                        </div>
                     </div>
 
-                    <!-- Output Section -->
-                    <div class="space-y-6">
-                        <UCard class="p-6">
-                            <template #header>
-                                <h2 class="text-xl font-semibold">生成结果</h2>
-                            </template>
-
-                            <!-- Loading Skeleton -->
-                            <div v-if="isGenerating" class="space-y-4">
-                                <!-- Progress Message -->
-                                <div v-if="generationProgress" class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                                    <p class="text-sm text-blue-700 dark:text-blue-300">
-                                        {{ generationProgress }}
-                                    </p>
-                                </div>
-                                
-                                <div class="space-y-2">
-                                    <USkeleton class="h-4 w-3/4" />
-                                    <USkeleton class="h-4 w-1/2" />
-                                </div>
-                                <div class="space-y-2">
-                                    <USkeleton class="h-4 w-full" />
-                                    <USkeleton class="h-4 w-full" />
-                                    <USkeleton class="h-4 w-3/4" />
-                                    <USkeleton class="h-4 w-5/6" />
-                                    <USkeleton class="h-4 w-2/3" />
-                                </div>
-                            </div>
-
-                            <!-- Generated Content Display -->
-                            <div v-else-if="generatedTitle || generatedContent" class="space-y-6">
-                                <!-- Title Section -->
-                                <div v-if="generatedTitle" class="space-y-2">
-                                    <div class="flex justify-between items-center">
-                                        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">标题</h3>
-                                        <UButton
-                                            variant="ghost"
-                                            size="xs"
-                                            @click="copyTitle"
-                                        >
-                                            复制标题
-                                        </UButton>
-                                    </div>
-                                    <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                        <p class="text-lg font-semibold">{{ generatedTitle }}</p>
-                                    </div>
-                                </div>
-
-                                <!-- Content Section -->
-                                <div v-if="generatedContent" class="space-y-2">
-                                    <div class="flex justify-between items-center">
-                                        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">正文</h3>
-                                        <UButton
-                                            variant="ghost"
-                                            size="xs"
-                                            @click="copyContent"
-                                        >
-                                            复制正文
-                                        </UButton>
-                                    </div>
-                                    <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                                        <div class="whitespace-pre-wrap text-gray-900 dark:text-gray-100">
-                                            {{ generatedContent }}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Action Buttons -->
-                                <div class="flex gap-2">
-                                    <UButton
-                                        variant="outline"
-                                        color="primary"
-                                        @click="clearGenerated"
-                                    >
-                                        清空结果
-                                    </UButton>
-                                    
-                                    <UButton
-                                        color="primary"
-                                        @click="handleSave"
-                                        :disabled="!generatedTitle || !generatedContent"
-                                    >
-                                        保存笔记
-                                    </UButton>
-                                </div>
-                            </div>
-
-                            <!-- Empty State -->
-                            <div v-else class="text-center py-12">
-                                <div class="text-gray-400 mb-4">
-                                    <UIcon name="i-heroicons-document-text" class="w-16 h-16 mx-auto" />
-                                </div>
-                                <p class="text-gray-500 dark:text-gray-400">
-                                    输入内容并点击生成按钮，AI将为你创作精彩的小红书笔记
-                                </p>
-                            </div>
-                        </UCard>
+                    <!-- Right Actions -->
+                    <div class="flex gap-3">
+                        <UButton
+                            variant="outline"
+                            color="neutral"
+                            size="sm"
+                            @click="goToMyNotes"
+                        >
+                            我的笔记
+                        </UButton>
+                        <UButton
+                            variant="outline"
+                            color="neutral"
+                            size="sm"
+                            @click="goToCreateNote"
+                        >
+                            创建笔记
+                        </UButton>
                     </div>
+                </div>
+            </div>
+
+            <!-- Generated Content Display (when available) -->
+            <div v-if="generatedTitle || generatedContent" class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 mb-8">
+                <h3 class="text-lg font-semibold mb-4 text-gray-900 dark:text-white">生成结果</h3>
+                
+                <!-- Title Section -->
+                <div v-if="generatedTitle" class="mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-sm text-gray-500">标题</span>
+                        <UButton variant="ghost" size="xs" @click="copyTitle">复制标题</UButton>
+                    </div>
+                    <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                        <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ generatedTitle }}</p>
+                    </div>
+                </div>
+
+                <!-- Content Section -->
+                <div v-if="generatedContent" class="mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-sm text-gray-500">正文</span>
+                        <UButton variant="ghost" size="xs" @click="copyContent">复制正文</UButton>
+                    </div>
+                    <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                        <div class="whitespace-pre-wrap text-gray-900 dark:text-gray-100">{{ generatedContent }}</div>
+                    </div>
+                </div>
+
+                <!-- Save Button -->
+                <div class="flex justify-end">
+                    <UButton color="primary" @click="handleSave" :disabled="!generatedTitle || !generatedContent">
+                        保存笔记
+                    </UButton>
+                </div>
+            </div>
+
+            <!-- Error Message -->
+            <div v-if="generationError" class="bg-red-50 dark:bg-red-900/20 rounded-xl p-4 mb-8">
+                <p class="text-red-600 dark:text-red-400">{{ generationError }}</p>
+            </div>
+
+            <!-- Feature Cards -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div
+                    v-for="(card, index) in featureCards"
+                    :key="index"
+                    :class="[
+                        'p-6 rounded-2xl border border-gray-100 dark:border-gray-700 text-center cursor-pointer hover:shadow-md transition-shadow',
+                        card.color, 'dark:bg-gray-800'
+                    ]"
+                >
+                    <div class="text-3xl mb-3">{{ card.icon }}</div>
+                    <p class="text-sm text-gray-700 dark:text-gray-300 font-medium">{{ card.title }}</p>
                 </div>
             </div>
         </div>
