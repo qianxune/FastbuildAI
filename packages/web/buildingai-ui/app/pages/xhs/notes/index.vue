@@ -11,7 +11,7 @@ import GroupManager from "@/components/xhs/group-manager.vue";
 
 // Page metadata configuration
 definePageMeta({
-    layout: "default",
+    layout: false,
     name: "XHS Notes List",
     auth: true, // Require authentication as per requirements
 });
@@ -141,8 +141,13 @@ const handleNoteClick = (note: XhsNote) => {
         return; // 批量模式下不响应点击
     }
 
-    // 导航到笔记编辑页面
-    router.push(`/xhs/notes/${note.id}`);
+    // 导航到创建/编辑页面，传递笔记ID进行编辑
+    router.push({
+        path: '/xhs/create',
+        query: {
+            noteId: note.id
+        }
+    });
 };
 
 // 处理删除按钮点击 - 使用 useModal 弹出确认框

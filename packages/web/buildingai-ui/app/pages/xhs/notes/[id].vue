@@ -7,7 +7,7 @@ import { useXhsGroups } from "@/composables/useXhsGroups";
 
 // Page metadata configuration
 definePageMeta({
-    layout: "default",
+    layout: false,
     name: "XHS Note Editor",
     auth: true, // Require authentication as per requirements
 });
