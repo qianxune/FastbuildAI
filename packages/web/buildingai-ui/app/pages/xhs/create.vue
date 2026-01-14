@@ -2,7 +2,7 @@
 import { useXhsGenerate } from '@/composables/useXhsGenerate'
 
 definePageMeta({
-    layout: "default",
+    layout: false,
     name: "XHS Note Create",
     auth: true,
 });
@@ -15,6 +15,9 @@ useSeoMeta({
 const route = useRoute()
 const router = useRouter()
 const toast = useMessage()
+
+// 全局状态管理
+const userStore = useUserStore()
 
 // 使用生成组合式函数
 const {
@@ -34,6 +37,12 @@ const noteContent = ref('')
 const activeMenu = ref('template')
 const showPreview = ref(false)
 const wordCount = computed(() => noteContent.value.length)
+
+// 编辑模式状态
+const isEditMode = ref(false)
+const editingNoteId = ref<string | null>(null)
+const isLoadingNote = ref(false)
+const isSaving = ref(false)
 
 // 菜单配置
 const menuItems = [
@@ -85,11 +94,18 @@ const emojiList = [':)', ':D', '<3', '*_*', '^_^', 'XD', ':P', ';)', ':O', '(Y)'
 // 话题列表
 const topicList = ['#今日妆容', '#好物分享', '#穿搭日记', '#美食探店', '#旅行日记', '#日常vlog', '#护肤心得', '#减肥打卡', '#健身日记', '#读书笔记']
 
-// 页面加载时检查是否需要自动生成
+// 页面加载时检查是否需要自动生成或加载已有笔记
 onMounted(async () => {
     const queryContent = route.query.content as string
     const queryMode = route.query.mode as string
     const autoGenerate = route.query.autoGenerate as string
+    const noteId = route.query.noteId as string
+    
+    // 如果有noteId，则加载已有笔记进行编辑
+    if (noteId) {
+        await loadNote(noteId)
+        return
+    }
     
     if (queryContent) {
         content.value = queryContent
@@ -103,6 +119,45 @@ onMounted(async () => {
         await handleGenerate()
     }
 })
+
+// 加载已有笔记
+const loadNote = async (noteId: string) => {
+    isLoadingNote.value = true
+    isEditMode.value = true
+    editingNoteId.value = noteId
+    
+    try {
+        const authToken = userStore.token || userStore.temporaryToken
+        if (!authToken) {
+            throw new Error('请先登录')
+        }
+        
+        const response = await fetch(`/api/xhs/notes/${noteId}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json',
+            },
+        })
+        
+        if (!response.ok) {
+            throw new Error('获取笔记失败')
+        }
+        
+        const responseData = await response.json()
+        const note = responseData.data || responseData
+        
+        noteTitle.value = note.title || ''
+        noteContent.value = note.content || ''
+        mode.value = note.mode || 'ai-generate'
+        
+    } catch (error: any) {
+        console.error('加载笔记失败:', error)
+        toast.error(error.message || '加载笔记失败')
+    } finally {
+        isLoadingNote.value = false
+    }
+}
 
 // 监听生成结果，自动填充到编辑器
 watch([generatedTitle, generatedContent], ([title, contentVal]) => {
@@ -142,11 +197,47 @@ const handleSave = async () => {
         return
     }
     
-    generatedTitle.value = noteTitle.value
-    generatedContent.value = noteContent.value
+    isSaving.value = true
     
-    await save()
-    toast.success('笔记已保存')
+    try {
+        const authToken = userStore.token || userStore.temporaryToken
+        if (!authToken) {
+            throw new Error('请先登录')
+        }
+        
+        if (isEditMode.value && editingNoteId.value) {
+            // 更新已有笔记
+            const response = await fetch(`/api/web/xhs/notes/${editingNoteId.value}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${authToken}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    title: noteTitle.value,
+                    content: noteContent.value,
+                }),
+            })
+            
+            if (!response.ok) {
+                throw new Error('更新笔记失败')
+            }
+            
+            toast.success('笔记已更新')
+        } else {
+            // 创建新笔记
+            generatedTitle.value = noteTitle.value
+            generatedContent.value = noteContent.value
+            
+            await save()
+            toast.success('笔记已保存')
+        }
+    } catch (error: any) {
+        console.error('保存笔记失败:', error)
+        toast.error(error.message || '保存失败')
+    } finally {
+        isSaving.value = false
+    }
 }
 
 // 预览笔记
@@ -302,14 +393,28 @@ const goToMyNotes = () => {
 
         <!-- 3. 笔记编辑区域 -->
         <div class="flex-1 flex flex-col bg-white dark:bg-gray-800">
-            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                <input
-                    v-model="noteTitle"
-                    type="text"
-                    placeholder="请输入笔记标题"
-                    class="w-full text-xl font-medium bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-400"
-                />
+            <!-- 加载状态 -->
+            <div v-if="isLoadingNote" class="flex-1 flex items-center justify-center">
+                <div class="text-center">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                    <p class="text-gray-500">正在加载笔记...</p>
+                </div>
             </div>
+            
+            <template v-else>
+                <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                    <div class="flex items-center justify-between">
+                        <input
+                            v-model="noteTitle"
+                            type="text"
+                            placeholder="请输入笔记标题"
+                            class="flex-1 text-xl font-medium bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-400"
+                        />
+                        <UBadge v-if="isEditMode" color="primary" variant="soft" size="sm">
+                            编辑模式
+                        </UBadge>
+                    </div>
+                </div>
             
             <div class="flex-1 p-4 overflow-y-auto">
                 <div v-if="isGenerating" class="flex items-center justify-center h-full">
@@ -334,6 +439,7 @@ const goToMyNotes = () => {
             <div class="px-4 py-2 border-t border-gray-200 dark:border-gray-700 text-right">
                 <span class="text-sm text-gray-500">{{ wordCount }} / 1000</span>
             </div>
+            </template>
         </div>
 
         <!-- 4. 右侧操作菜单 -->
@@ -356,10 +462,12 @@ const goToMyNotes = () => {
             
             <button
                 @click="handleSave"
-                class="w-16 h-16 flex flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 mb-2"
+                :disabled="isSaving"
+                class="w-16 h-16 flex flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 mb-2 disabled:opacity-50"
             >
-                <UIcon name="i-heroicons-bookmark" class="text-xl mb-1" />
-                <span class="text-xs">保存笔记</span>
+                <UIcon v-if="isSaving" name="i-heroicons-arrow-path" class="text-xl mb-1 animate-spin" />
+                <UIcon v-else name="i-heroicons-bookmark" class="text-xl mb-1" />
+                <span class="text-xs">{{ isEditMode ? '更新笔记' : '保存笔记' }}</span>
             </button>
             
             <button

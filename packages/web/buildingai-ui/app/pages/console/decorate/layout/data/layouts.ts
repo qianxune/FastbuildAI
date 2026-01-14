@@ -93,4 +93,12 @@ export const defaultMenuItems: MenuItem[] = [
         },
         icon: "i-heroicons-phone",
     },
+    {
+        id: "6",
+        title: "小红书",
+        link: {
+            path: "/xhs",
+        },
+        icon: "i-heroicons-book-open",
+    },
 ];

@@ -80,6 +80,58 @@ export class XhsNoteWebController extends BaseController {
     }
 
     /**
+     * 搜索笔记
+     * 注意：此路由必须在 notes/:id 之前定义，否则 "search" 会被当作 :id 参数
+     * 
+     * @param searchDto 搜索参数
+     * @param user 当前用户
+     * @returns 搜索结果
+     */
+    @Get("notes/search")
+    async searchNotes(@Query() searchDto: SearchNoteDto, @Playground() user: UserPlayground) {
+        const result = await this.xhsNoteService.search(user.id, searchDto);
+        return result;
+    }
+
+    /**
+     * 批量操作笔记
+     * 注意：此路由必须在 notes/:id 之前定义，否则 "batch" 会被当作 :id 参数
+     * 
+     * @param dto 批量操作DTO
+     * @param user 当前用户
+     * @returns 操作结果
+     */
+    @Post("notes/batch")
+    async batchOperateNotes(@Body() dto: BatchNoteDto, @Playground() user: UserPlayground) {
+        let affected = 0;
+        let message = "";
+
+        switch (dto.action) {
+            case BatchActionType.DELETE:
+                affected = await this.xhsNoteService.batchDelete(dto.ids, user.id);
+                message = `成功删除 ${affected} 个笔记`;
+                break;
+
+            case BatchActionType.MOVE:
+                if (!dto.groupId) {
+                    throw HttpErrorFactory.badRequest("移动操作需要指定目标分组ID");
+                }
+                affected = await this.xhsNoteService.batchMove(dto.ids, dto.groupId, user.id);
+                message = `成功移动 ${affected} 个笔记`;
+                break;
+
+            default:
+                throw HttpErrorFactory.badRequest("不支持的操作类型");
+        }
+
+        return {
+            success: true,
+            affected,
+            message
+        };
+    }
+
+    /**
      * 创建笔记
      * 
      * @param dto 创建笔记DTO
@@ -143,55 +195,5 @@ export class XhsNoteWebController extends BaseController {
     async deleteNote(@Param("id") id: string, @Playground() user: UserPlayground) {
         await this.xhsNoteService.deleteNote(id, user.id);
         return { message: "笔记删除成功" };
-    }
-
-    /**
-     * 批量操作笔记
-     * 
-     * @param dto 批量操作DTO
-     * @param user 当前用户
-     * @returns 操作结果
-     */
-    @Post("notes/batch")
-    async batchOperateNotes(@Body() dto: BatchNoteDto, @Playground() user: UserPlayground) {
-        let affected = 0;
-        let message = "";
-
-        switch (dto.action) {
-            case BatchActionType.DELETE:
-                affected = await this.xhsNoteService.batchDelete(dto.ids, user.id);
-                message = `成功删除 ${affected} 个笔记`;
-                break;
-
-            case BatchActionType.MOVE:
-                if (!dto.groupId) {
-                    throw HttpErrorFactory.badRequest("移动操作需要指定目标分组ID");
-                }
-                affected = await this.xhsNoteService.batchMove(dto.ids, dto.groupId, user.id);
-                message = `成功移动 ${affected} 个笔记`;
-                break;
-
-            default:
-                throw HttpErrorFactory.badRequest("不支持的操作类型");
-        }
-
-        return {
-            success: true,
-            affected,
-            message
-        };
-    }
-
-    /**
-     * 搜索笔记
-     * 
-     * @param searchDto 搜索参数
-     * @param user 当前用户
-     * @returns 搜索结果
-     */
-    @Get("notes/search")
-    async searchNotes(@Query() searchDto: SearchNoteDto, @Playground() user: UserPlayground) {
-        const result = await this.xhsNoteService.search(user.id, searchDto);
-        return result;
     }
 }

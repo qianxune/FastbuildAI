@@ -4,7 +4,7 @@ import { useXhsGenerate } from '@/composables/useXhsGenerate'
 
 // Page metadata configuration
 definePageMeta({
-    layout: "default",
+    layout: false,
     name: "XHS Note Generator",
     auth: true,
 });
