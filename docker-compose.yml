@@ -11,7 +11,7 @@ x-resource-config: &resource-config
 
 services:
     redis:
-        image: ccr.ccs.tencentyun.com/buildingai/redis:8.2.2
+        image: ${REDIS_IMAGE:-dockerproxy.com/library/redis:alpine}
         container_name: buildingai-redis${DOCKER_CONTAINER_SUFFIX:-}
         restart: always
         environment:
@@ -32,7 +32,14 @@ services:
             retries: 5
 
     postgres:
-        image: ccr.ccs.tencentyun.com/buildingai/postgres:17.6
+        build:
+            context: ./docker/postgres
+            dockerfile: Dockerfile
+            args:
+                PGVECTOR_IMAGE: ${PGVECTOR_IMAGE:-dockerproxy.com/pgvector/pgvector:pg17}
+                SCWS_GIT_URLS: ${SCWS_GIT_URLS:-https://gitee.com/yaowenqiang/scws.git https://github.com/hightman/scws.git}
+                SCWS_REF: ${SCWS_REF:-1.2.3}
+        image: buildingai/postgres:custom
         container_name: buildingai-postgres${DOCKER_CONTAINER_SUFFIX:-}
         restart: always
         environment:
@@ -54,7 +61,7 @@ services:
             retries: 5
 
     nodejs:
-        image: ccr.ccs.tencentyun.com/buildingai/node:22.20.0
+        image: ${NODE_IMAGE:-dockerproxy.com/library/node:22}
         container_name: buildingai-nodejs${DOCKER_CONTAINER_SUFFIX:-}
         restart: on-failure:3
         working_dir: /buildingai
@@ -100,9 +107,13 @@ services:
             - "${SERVER_PORT:-4090}:${SERVER_PORT:-4090}"
         environment:
             TZ: Asia/Shanghai
+            DB_TYPE: postgres
             SERVER_PORT: ${SERVER_PORT:-4090}
+            VITE_APP_WEB_API_PREFIX: ${VITE_APP_WEB_API_PREFIX:-/api}
+            VITE_APP_CONSOLE_API_PREFIX: ${VITE_APP_CONSOLE_API_PREFIX:-/consoleapi}
             QUICK_START_MODE: ${QUICK_START_MODE:-false}
             NPM_REGISTRY_URL: ${NPM_REGISTRY_URL:-}
+            PM2_APP_NAME: ${PM2_APP_NAME:-buildingai-api}
             DB_USERNAME: ${DB_USERNAME:-postgres}
             DB_PASSWORD: ${DB_PASSWORD:-postgres}
             DB_DATABASE: ${DB_DATABASE:-buildingai}

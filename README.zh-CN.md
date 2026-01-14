@@ -32,6 +32,17 @@ Yourself）零代码搭建具备智能体、MCP、RAG管道、知识库、大模
 > - **内存**：≥4GB RAM
 > - **存储**：≥5GB 空闲空间
 
+> **Windows 用户注意事项**：如果您在 Windows 上遇到权限错误（如 `EACCES: permission denied`），请使用以下命令代替标准安装流程：
+> ```bash
+> # 使用 Windows 专用安装命令
+> pnpm run start:windows
+> ```
+> 或者运行提供的 Windows 设置脚本：
+> ```bash
+> # 在项目根目录运行
+> scripts\windows-setup.bat
+> ```
+
 使用 [Docker](https://www.docker.com/)
 部署 BuildingAI 是最简单、稳定的部署方案。安装之前，请确保你的设备已经安装了
 [Docker](https://www.docker.com/) 和 [Docker Compose](https://docs.docker.com/compose/)

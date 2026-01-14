@@ -34,6 +34,17 @@ compute billing, and other business operations.
 > - **CPU**: ≥ 2 cores
 > - **Memory**: ≥ 4 GB RAM
 > - **Storage**: ≥ 5 GB free space
+>
+> **Windows Users Note**: If you encounter permission errors (such as `EACCES: permission denied`) on Windows, use the following commands instead of the standard installation process:
+> ```bash
+> # Use Windows-specific installation command
+> pnpm run start:windows
+> ```
+> Or run the provided Windows setup script:
+> ```bash
+> # Run from project root directory
+> scripts\windows-setup.bat
+> ```
 
 Deploying BuildingAI with [Docker](https://www.docker.com/) is the simplest and most stable option.
 Ensure that [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/)
