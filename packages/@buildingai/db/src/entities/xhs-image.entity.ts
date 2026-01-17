@@ -7,7 +7,7 @@ import { User } from "./user.entity";
  * 小红书图片实体
  * 用于跟踪用户上传和使用的图片
  */
-@AppEntity({ name: "xhs_image", comment: "小红书图片" })
+@AppEntity({ name: "xhs_images", comment: "小红书图片" })
 @Index(["userId", "createdAt"])
 @Index(["type"])
 export class XhsImage extends BaseEntity {

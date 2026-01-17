@@ -346,3 +346,93 @@ export interface GenerationMode {
    */
   description: string
 }
+
+/**
+ * 图片实体
+ */
+export interface XhsImage {
+  /**
+   * ID
+   */
+  id: string
+
+  /**
+   * 图片URL
+   */
+  url: string
+
+  /**
+   * 图片类型
+   */
+  type: 'auto' | 'template' | 'upload'
+
+  /**
+   * 用户ID
+   */
+  userId: string
+
+  /**
+   * 创建时间
+   */
+  createdAt: string
+}
+
+/**
+ * 图片模板
+ */
+export interface XhsImageTemplate {
+  /**
+   * ID
+   */
+  id: string
+
+  /**
+   * 模板名称
+   */
+  name: string
+
+  /**
+   * 模板URL
+   */
+  url: string
+
+  /**
+   * 分类
+   */
+  category: string
+
+  /**
+   * 缩略图URL
+   */
+  thumbnailUrl?: string
+
+  /**
+   * 使用次数
+   */
+  usageCount: number
+}
+
+/**
+ * 自动配图请求
+ */
+export interface AutoImageDto {
+  /**
+   * 笔记内容
+   */
+  content: string
+}
+
+/**
+ * 图片上传响应
+ */
+export interface ImageUploadResponse {
+  /**
+   * 图片URL
+   */
+  url: string
+
+  /**
+   * 图片ID
+   */
+  id?: string
+}
