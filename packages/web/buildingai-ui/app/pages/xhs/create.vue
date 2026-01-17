@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useXhsGenerate } from '@/composables/useXhsGenerate'
+import ImageSelector from '@/components/xhs/image-selector.vue'
 
 definePageMeta({
     layout: false,
@@ -37,6 +38,12 @@ const noteContent = ref('')
 const activeMenu = ref('template')
 const showPreview = ref(false)
 const wordCount = computed(() => noteContent.value.length)
+
+// 封面图片状态
+const coverImages = ref<string[]>([])
+
+// 图片选择器状态
+const showImageSelector = ref(false)
 
 // 编辑模式状态
 const isEditMode = ref(false)
@@ -207,7 +214,7 @@ const handleSave = async () => {
         
         if (isEditMode.value && editingNoteId.value) {
             // 更新已有笔记
-            const response = await fetch(`/api/web/xhs/notes/${editingNoteId.value}`, {
+            const response = await fetch(`/api/xhs/notes/${editingNoteId.value}`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${authToken}`,
@@ -216,6 +223,7 @@ const handleSave = async () => {
                 body: JSON.stringify({
                     title: noteTitle.value,
                     content: noteContent.value,
+                    coverImages: coverImages.value,
                 }),
             })
             
@@ -249,6 +257,22 @@ const handlePreview = () => {
 const handleClear = () => {
     noteTitle.value = ''
     noteContent.value = ''
+    coverImages.value = []
+}
+
+// 打开图片选择器
+const openImageSelector = () => {
+    showImageSelector.value = true
+}
+
+// 关闭图片选择器
+const closeImageSelector = () => {
+    showImageSelector.value = false
+}
+
+// 更新封面图片
+const handleUpdateCoverImages = (images: string[]) => {
+    coverImages.value = images
 }
 
 // 插入模版
@@ -439,11 +463,58 @@ const goToMyNotes = () => {
             <div class="px-4 py-2 border-t border-gray-200 dark:border-gray-700 text-right">
                 <span class="text-sm text-gray-500">{{ wordCount }} / 1000</span>
             </div>
+
+            <!-- Cover Images Preview -->
+            <div v-if="coverImages.length > 0" class="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">封面图片</span>
+                    <UButton
+                        size="xs"
+                        variant="ghost"
+                        icon="i-heroicons-pencil"
+                        @click="openImageSelector"
+                    >
+                        编辑
+                    </UButton>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <div
+                        v-for="(image, index) in coverImages"
+                        :key="index"
+                        class="relative w-16 h-16 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800 group"
+                    >
+                        <img
+                            :src="image"
+                            :alt="`封面图 ${index + 1}`"
+                            class="w-full h-full object-cover"
+                        />
+                        <div
+                            class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all flex items-center justify-center"
+                        >
+                            <UButton
+                                size="xs"
+                                color="error"
+                                icon="i-heroicons-trash"
+                                class="opacity-0 group-hover:opacity-100 transition-opacity"
+                                @click="coverImages.splice(index, 1)"
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
             </template>
         </div>
 
         <!-- 4. 右侧操作菜单 -->
         <div class="w-20 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex flex-col items-center py-4">
+            <button
+                @click="openImageSelector"
+                class="w-16 h-16 flex flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 mb-2"
+            >
+                <UIcon name="i-heroicons-photo" class="text-xl mb-1" />
+                <span class="text-xs">管理配图</span>
+            </button>
+            
             <button
                 @click="handleCopyTitle"
                 class="w-16 h-16 flex flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 mb-2"
@@ -517,5 +588,14 @@ const goToMyNotes = () => {
                 </template>
             </UCard>
         </UModal>
+
+        <!-- Image Selector Modal -->
+        <ImageSelector
+            v-if="showImageSelector"
+            :cover-images="coverImages"
+            :note-content="noteContent"
+            @update:cover-images="handleUpdateCoverImages"
+            @close="closeImageSelector"
+        />
     </div>
 </template>

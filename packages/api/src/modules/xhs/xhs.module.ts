@@ -6,9 +6,11 @@ import { SecretService } from "@buildingai/core/modules";
 
 import { XhsGroupWebController } from "./controllers/web/xhs-group.web.controller";
 import { XhsNoteWebController } from "./controllers/web/xhs-note.web.controller";
+import { XhsImageWebController } from "./controllers/web/xhs-image.web.controller";
 import { ContentModerationService } from "./services/content-moderation.service";
 import { XhsGroupService } from "./services/xhs-group.service";
 import { XhsNoteService } from "./services/xhs-note.service";
+import { XhsImageService } from "./services/xhs-image.service";
 
 /**
  * 小红书笔记生成模块
@@ -26,13 +28,14 @@ import { XhsNoteService } from "./services/xhs-note.service";
         ]),
         AiModelModule, // 导入AI模型模块
     ],
-    controllers: [XhsNoteWebController, XhsGroupWebController],
+    controllers: [XhsNoteWebController, XhsGroupWebController, XhsImageWebController],
     providers: [
         XhsNoteService, 
         XhsGroupService, 
+        XhsImageService,
         ContentModerationService,
         SecretService, // 添加SecretService
     ],
-    exports: [XhsNoteService, XhsGroupService, ContentModerationService],
+    exports: [XhsNoteService, XhsGroupService, XhsImageService, ContentModerationService],
 })
 export class XhsModule {}
