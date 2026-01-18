@@ -136,10 +136,7 @@ export class XhsGroupService extends BaseService<XhsGroup> {
         }
 
         // 将该分组下的所有笔记移动到默认分组
-        await this.noteRepository.update(
-            { groupId: id, userId },
-            { groupId: defaultGroup.id }
-        );
+        await this.noteRepository.update({ groupId: id, userId }, { groupId: defaultGroup.id });
 
         // 删除分组
         await this.groupRepository.delete(id);

@@ -1,5 +1,12 @@
 import { TypeOrmModule } from "@buildingai/db/@nestjs/typeorm";
-import { XhsGroup, XhsHotTopic, XhsImage, XhsNote, XhsTemplate, Secret } from "@buildingai/db/entities";
+import {
+    XhsGroup,
+    XhsHotTopic,
+    XhsImage,
+    XhsNote,
+    XhsTemplate,
+    Secret,
+} from "@buildingai/db/entities";
 import { Module } from "@nestjs/common";
 import { AiModelModule } from "@modules/ai/model/ai-model.module";
 import { SecretService } from "@buildingai/core/modules";
@@ -30,8 +37,8 @@ import { XhsImageService } from "./services/xhs-image.service";
     ],
     controllers: [XhsNoteWebController, XhsGroupWebController, XhsImageWebController],
     providers: [
-        XhsNoteService, 
-        XhsGroupService, 
+        XhsNoteService,
+        XhsGroupService,
         XhsImageService,
         ContentModerationService,
         SecretService, // 添加SecretService

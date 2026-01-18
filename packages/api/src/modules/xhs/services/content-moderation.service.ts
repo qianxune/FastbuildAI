@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable } from "@nestjs/common";
 
 /**
  * 内容审核服务
@@ -12,21 +12,53 @@ export class ContentModerationService {
      */
     private readonly sensitiveWords = [
         // 政治敏感词
-        '政治', '政府', '官员', '腐败', '抗议', '示威',
+        "政治",
+        "政府",
+        "官员",
+        "腐败",
+        "抗议",
+        "示威",
         // 暴力相关
-        '暴力', '杀害', '伤害', '攻击', '武器', '炸弹',
+        "暴力",
+        "杀害",
+        "伤害",
+        "攻击",
+        "武器",
+        "炸弹",
         // 色情相关
-        '色情', '裸体', '性行为', '成人内容',
+        "色情",
+        "裸体",
+        "性行为",
+        "成人内容",
         // 赌博相关
-        '赌博', '博彩', '彩票', '赌场', '下注',
+        "赌博",
+        "博彩",
+        "彩票",
+        "赌场",
+        "下注",
         // 毒品相关
-        '毒品', '吸毒', '贩毒', '大麻', '海洛因',
+        "毒品",
+        "吸毒",
+        "贩毒",
+        "大麻",
+        "海洛因",
         // 诈骗相关
-        '诈骗', '欺诈', '传销', '非法集资', '洗钱',
+        "诈骗",
+        "欺诈",
+        "传销",
+        "非法集资",
+        "洗钱",
         // 仇恨言论
-        '仇恨', '歧视', '种族主义', '恶意攻击',
+        "仇恨",
+        "歧视",
+        "种族主义",
+        "恶意攻击",
         // 其他违法内容
-        '违法', '犯罪', '非法', '黑客', '盗版'
+        "违法",
+        "犯罪",
+        "非法",
+        "黑客",
+        "盗版",
     ];
 
     /**
@@ -39,10 +71,10 @@ export class ContentModerationService {
         sensitiveWords: string[];
         message?: string;
     } {
-        if (!text || typeof text !== 'string') {
+        if (!text || typeof text !== "string") {
             return {
                 hasSensitiveWords: false,
-                sensitiveWords: []
+                sensitiveWords: [],
             };
         }
 
@@ -61,9 +93,9 @@ export class ContentModerationService {
         return {
             hasSensitiveWords,
             sensitiveWords: foundSensitiveWords,
-            message: hasSensitiveWords 
-                ? `内容包含敏感词汇：${foundSensitiveWords.join('、')}，请修改后重试`
-                : undefined
+            message: hasSensitiveWords
+                ? `内容包含敏感词汇：${foundSensitiveWords.join("、")}，请修改后重试`
+                : undefined,
         };
     }
 
@@ -73,7 +105,10 @@ export class ContentModerationService {
      * @param content 笔记内容
      * @returns 检测结果
      */
-    moderateNoteContent(title: string, content: string): {
+    moderateNoteContent(
+        title: string,
+        content: string,
+    ): {
         isValid: boolean;
         message?: string;
         violations: string[];
@@ -84,7 +119,7 @@ export class ContentModerationService {
         if (title) {
             const titleCheck = this.checkSensitiveWords(title);
             if (titleCheck.hasSensitiveWords) {
-                violations.push(`标题包含敏感词：${titleCheck.sensitiveWords.join('、')}`);
+                violations.push(`标题包含敏感词：${titleCheck.sensitiveWords.join("、")}`);
             }
         }
 
@@ -92,26 +127,26 @@ export class ContentModerationService {
         if (content) {
             const contentCheck = this.checkSensitiveWords(content);
             if (contentCheck.hasSensitiveWords) {
-                violations.push(`内容包含敏感词：${contentCheck.sensitiveWords.join('、')}`);
+                violations.push(`内容包含敏感词：${contentCheck.sensitiveWords.join("、")}`);
             }
         }
 
         // 检测内容长度是否异常（可能是垃圾内容）
         if (content && content.length > 10000) {
-            violations.push('内容过长，可能包含垃圾信息');
+            violations.push("内容过长，可能包含垃圾信息");
         }
 
         // 检测是否包含大量重复字符（可能是垃圾内容）
         if (content && this.hasExcessiveRepetition(content)) {
-            violations.push('内容包含大量重复字符，可能是垃圾信息');
+            violations.push("内容包含大量重复字符，可能是垃圾信息");
         }
 
         const isValid = violations.length === 0;
 
         return {
             isValid,
-            message: isValid ? undefined : violations.join('；'),
-            violations
+            message: isValid ? undefined : violations.join("；"),
+            violations,
         };
     }
 
@@ -127,32 +162,32 @@ export class ContentModerationService {
     } {
         const violations: string[] = [];
 
-        if (!input || typeof input !== 'string') {
-            violations.push('输入内容无效');
+        if (!input || typeof input !== "string") {
+            violations.push("输入内容无效");
             return {
                 isValid: false,
-                message: '输入内容无效',
-                violations
+                message: "输入内容无效",
+                violations,
             };
         }
 
         // 检测敏感词
         const sensitiveCheck = this.checkSensitiveWords(input);
         if (sensitiveCheck.hasSensitiveWords) {
-            violations.push(`输入内容包含敏感词：${sensitiveCheck.sensitiveWords.join('、')}`);
+            violations.push(`输入内容包含敏感词：${sensitiveCheck.sensitiveWords.join("、")}`);
         }
 
         // 检测是否为恶意输入
         if (this.isMaliciousInput(input)) {
-            violations.push('输入内容可能包含恶意信息');
+            violations.push("输入内容可能包含恶意信息");
         }
 
         const isValid = violations.length === 0;
 
         return {
             isValid,
-            message: isValid ? undefined : violations.join('；'),
-            violations
+            message: isValid ? undefined : violations.join("；"),
+            violations,
         };
     }
 
@@ -171,7 +206,7 @@ export class ContentModerationService {
         // 检测重复短语（同一个词或短语重复超过5次）
         const words = text.split(/\s+/);
         const wordCount = new Map<string, number>();
-        
+
         for (const word of words) {
             if (word.length > 1) {
                 const count = wordCount.get(word) || 0;
@@ -199,7 +234,7 @@ export class ContentModerationService {
             /insert\s+into/i,
             /update\s+set/i,
             /exec\s*\(/i,
-            /script\s*>/i
+            /script\s*>/i,
         ];
 
         for (const pattern of sqlInjectionPatterns) {
@@ -214,7 +249,7 @@ export class ContentModerationService {
             /javascript:/i,
             /on\w+\s*=/i,
             /<iframe[^>]*>/i,
-            /<object[^>]*>/i
+            /<object[^>]*>/i,
         ];
 
         for (const pattern of xssPatterns) {

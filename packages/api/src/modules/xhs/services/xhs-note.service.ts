@@ -49,13 +49,13 @@ export class XhsNoteService extends BaseService<XhsNote> {
     async generateStream(dto: GenerateNoteDto, res: Response): Promise<void> {
         try {
             this.logger.log(`开始生成笔记，接收到的DTO:`, {
-                content: dto.content?.substring(0, 50) + '...',
+                content: dto.content?.substring(0, 50) + "...",
                 mode: dto.mode,
                 aiModel: dto.aiModel,
                 aiModelType: typeof dto.aiModel,
                 aiModelDefined: dto.aiModel !== undefined,
                 aiModelNull: dto.aiModel === null,
-                aiModelEmpty: dto.aiModel === ''
+                aiModelEmpty: dto.aiModel === "",
             });
 
             // 设置SSE响应头
@@ -71,7 +71,9 @@ export class XhsNoteService extends BaseService<XhsNote> {
             }
 
             // 内容审核 - 检查生成输入
-            const moderationResult = this.contentModerationService.moderateGenerationInput(dto.content);
+            const moderationResult = this.contentModerationService.moderateGenerationInput(
+                dto.content,
+            );
             if (!moderationResult.isValid) {
                 throw HttpErrorFactory.badRequest(
                     moderationResult.message || "输入内容包含不当信息，请修改后重试",
@@ -97,10 +99,9 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
             // 等待生成完成或超时
             await Promise.race([streamPromise, timeoutPromise]);
-
         } catch (error) {
             this.logger.error("生成笔记内容失败", error);
-            
+
             let errorMessage = "生成失败，请稍后重试";
             let errorCode = "GENERATION_ERROR";
 
@@ -120,19 +121,24 @@ export class XhsNoteService extends BaseService<XhsNote> {
             } else if (error.message?.includes("AI服务")) {
                 errorMessage = "AI服务暂时不可用，请稍后重试";
                 errorCode = "AI_SERVICE_ERROR";
-            } else if (error.name === "APIConnectionError" || error.message?.includes("Connection error")) {
+            } else if (
+                error.name === "APIConnectionError" ||
+                error.message?.includes("Connection error")
+            ) {
                 errorMessage = "无法连接到AI服务，请检查网络连接或稍后重试";
                 errorCode = "CONNECTION_ERROR";
             }
-            
+
             // 发送错误事件
-            res.write(`data: ${JSON.stringify({
-                type: "error",
-                code: errorCode,
-                message: errorMessage,
-                timestamp: new Date().toISOString()
-            })}\n\n`);
-            
+            res.write(
+                `data: ${JSON.stringify({
+                    type: "error",
+                    code: errorCode,
+                    message: errorMessage,
+                    timestamp: new Date().toISOString(),
+                })}\n\n`,
+            );
+
             res.write("data: [DONE]\n\n");
             res.end();
         }
@@ -142,10 +148,12 @@ export class XhsNoteService extends BaseService<XhsNote> {
      * 获取AI提供者和模型配置
      * @param modelId 可选的模型ID，如果不提供则使用默认配置
      */
-    private async getAIProviderAndModel(modelId?: string): Promise<{ provider: any; modelName: string }> {
+    private async getAIProviderAndModel(
+        modelId?: string,
+    ): Promise<{ provider: any; modelName: string }> {
         try {
             this.logger.log(`尝试获取AI提供者，模型ID: ${modelId}`);
-            
+
             if (modelId) {
                 // 根据模型ID获取模型信息和关联的提供者
                 const model = await this.aiModelService.findOne({
@@ -153,7 +161,7 @@ export class XhsNoteService extends BaseService<XhsNote> {
                     relations: ["provider"],
                 });
 
-                this.logger.log(`查询到的模型:`, model ? `${model.name} (${model.id})` : '未找到');
+                this.logger.log(`查询到的模型:`, model ? `${model.name} (${model.id})` : "未找到");
 
                 if (!model) {
                     this.logger.warn(`模型ID ${modelId} 不存在或未激活，使用默认配置`);
@@ -183,15 +191,19 @@ export class XhsNoteService extends BaseService<XhsNote> {
                     this.logger.log(`获取到提供者密钥配置，密钥ID: ${model.provider.bindSecretId}`);
                 } catch (secretError) {
                     this.logger.error(`获取提供者密钥失败:`, secretError);
-                    throw new Error(`无法获取提供者 ${model.provider.name} 的密钥配置: ${secretError.message}`);
+                    throw new Error(
+                        `无法获取提供者 ${model.provider.name} 的密钥配置: ${secretError.message}`,
+                    );
                 }
 
                 // 构建提供者配置
                 const apiKey = getProviderSecret("apiKey", providerSecret);
                 const baseURL = getProviderSecret("baseUrl", providerSecret);
-                
-                this.logger.log(`提供者配置 - baseURL: ${baseURL}, apiKey: ${apiKey ? '已设置' : '未设置'}`);
-                
+
+                this.logger.log(
+                    `提供者配置 - baseURL: ${baseURL}, apiKey: ${apiKey ? "已设置" : "未设置"}`,
+                );
+
                 if (!apiKey) {
                     this.logger.error(`提供者 ${model.provider.name} 缺少API密钥`);
                     throw new Error(`提供者 ${model.provider.name} 缺少API密钥配置`);
@@ -201,26 +213,30 @@ export class XhsNoteService extends BaseService<XhsNote> {
                     apiKey,
                     baseURL,
                 });
-                
+
                 this.logger.log(`成功配置提供者，模型名称: ${model.model}`);
-                
+
                 return {
                     provider,
                     modelName: model.model, // 使用模型的标识符
                 };
             } else {
-                this.logger.log('未提供模型ID，使用默认配置');
+                this.logger.log("未提供模型ID，使用默认配置");
                 // 使用默认配置
                 return this.getDefaultProviderAndModel();
             }
         } catch (error) {
             this.logger.error("获取AI提供者失败", error);
             // 如果是配置错误，直接抛出，不要回退到默认配置
-            if (error.message?.includes('密钥') || error.message?.includes('配置') || error.message?.includes('绑定')) {
+            if (
+                error.message?.includes("密钥") ||
+                error.message?.includes("配置") ||
+                error.message?.includes("绑定")
+            ) {
                 throw HttpErrorFactory.internal(`AI服务配置错误: ${error.message}`);
             }
             // 其他错误回退到默认配置
-            this.logger.warn('回退到默认配置');
+            this.logger.warn("回退到默认配置");
             return this.getDefaultProviderAndModel();
         }
     }
@@ -230,19 +246,19 @@ export class XhsNoteService extends BaseService<XhsNote> {
      */
     private getDefaultProviderAndModel(): { provider: any; modelName: string } {
         try {
-            this.logger.log('使用默认OpenAI配置');
-            
+            this.logger.log("使用默认OpenAI配置");
+
             // 使用默认的OpenAI提供者配置
             const providerName = "openai";
             const config = {
                 apiKey: process.env.OPENAI_API_KEY || "your-api-key-here",
                 baseURL: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
             };
-            
+
             this.logger.log(`默认配置: ${providerName}, baseURL: ${config.baseURL}`);
-            
+
             const provider = getProvider(providerName, config);
-            
+
             return {
                 provider,
                 modelName: "gpt-3.5-turbo", // 默认模型
@@ -318,7 +334,7 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
         return [
             { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
+            { role: "user", content: userPrompt },
         ];
     }
 
@@ -329,11 +345,11 @@ export class XhsNoteService extends BaseService<XhsNote> {
         client: TextGenerator,
         messages: ChatCompletionMessageParam[],
         modelName: string,
-        res: Response
+        res: Response,
     ): Promise<void> {
         try {
             this.logger.log(`开始流式生成，模型: ${modelName}`);
-            
+
             const stream = await client.chat.stream({
                 model: modelName, // 使用动态模型名称
                 messages,
@@ -344,10 +360,12 @@ export class XhsNoteService extends BaseService<XhsNote> {
             let fullContent = "";
 
             // 发送开始事件
-            res.write(`data: ${JSON.stringify({
-                type: "start",
-                message: "开始生成内容..."
-            })}\n\n`);
+            res.write(
+                `data: ${JSON.stringify({
+                    type: "start",
+                    message: "开始生成内容...",
+                })}\n\n`,
+            );
 
             // 处理流式响应
             for await (const chunk of stream) {
@@ -356,10 +374,12 @@ export class XhsNoteService extends BaseService<XhsNote> {
                     fullContent += content;
 
                     // 发送内容块
-                    res.write(`data: ${JSON.stringify({
-                        type: "chunk",
-                        data: content
-                    })}\n\n`);
+                    res.write(
+                        `data: ${JSON.stringify({
+                            type: "chunk",
+                            data: content,
+                        })}\n\n`,
+                    );
                 }
             }
 
@@ -371,22 +391,23 @@ export class XhsNoteService extends BaseService<XhsNote> {
             this.logger.log(`生成完成，内容长度: ${fullContent.length}`);
 
             // 发送完成事件
-            res.write(`data: ${JSON.stringify({
-                type: "complete",
-                message: "生成完成",
-                fullContent
-            })}\n\n`);
+            res.write(
+                `data: ${JSON.stringify({
+                    type: "complete",
+                    message: "生成完成",
+                    fullContent,
+                })}\n\n`,
+            );
 
             // 发送结束标记
             res.write("data: [DONE]\n\n");
             res.end();
-
         } catch (error) {
             this.logger.error("流式生成过程中出错", error);
-            
+
             // 根据错误类型提供更具体的错误信息
             let errorMessage = "AI服务生成失败，请稍后重试";
-            
+
             if (error.name === "APIConnectionError") {
                 errorMessage = "无法连接到AI服务，请检查网络连接";
             } else if (error.message?.includes("timeout")) {
@@ -398,7 +419,7 @@ export class XhsNoteService extends BaseService<XhsNote> {
             } else if (error.message?.includes("API key")) {
                 errorMessage = "AI服务认证失败，请联系管理员";
             }
-            
+
             throw new Error(errorMessage);
         }
     }
@@ -412,9 +433,14 @@ export class XhsNoteService extends BaseService<XhsNote> {
      */
     async createNote(dto: CreateNoteDto, userId: string): Promise<XhsNote> {
         // 内容审核 - 检查笔记内容
-        const moderationResult = this.contentModerationService.moderateNoteContent(dto.title, dto.content);
+        const moderationResult = this.contentModerationService.moderateNoteContent(
+            dto.title,
+            dto.content,
+        );
         if (!moderationResult.isValid) {
-            throw HttpErrorFactory.badRequest(moderationResult.message || "笔记内容包含不当信息，请修改后重试");
+            throw HttpErrorFactory.badRequest(
+                moderationResult.message || "笔记内容包含不当信息，请修改后重试",
+            );
         }
 
         // 计算字数
@@ -437,7 +463,14 @@ export class XhsNoteService extends BaseService<XhsNote> {
      * @returns 笔记列表和分页信息
      */
     async findByUser(userId: string, query: QueryNoteDto) {
-        const { page = 1, limit = 20, groupId, keyword, sortBy = "createdAt", sortOrder = "DESC" } = query;
+        const {
+            page = 1,
+            limit = 20,
+            groupId,
+            keyword,
+            sortBy = "createdAt",
+            sortOrder = "DESC",
+        } = query;
 
         const queryBuilder = this.noteRepository
             .createQueryBuilder("note")
@@ -451,10 +484,9 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
         // 关键词搜索
         if (keyword) {
-            queryBuilder.andWhere(
-                "(note.title ILIKE :keyword OR note.content ILIKE :keyword)",
-                { keyword: `%${keyword}%` }
-            );
+            queryBuilder.andWhere("(note.title ILIKE :keyword OR note.content ILIKE :keyword)", {
+                keyword: `%${keyword}%`,
+            });
         }
 
         // 排序
@@ -517,10 +549,15 @@ export class XhsNoteService extends BaseService<XhsNote> {
         if (dto.title || dto.content) {
             const titleToCheck = dto.title || note.title;
             const contentToCheck = dto.content || note.content;
-            
-            const moderationResult = this.contentModerationService.moderateNoteContent(titleToCheck, contentToCheck);
+
+            const moderationResult = this.contentModerationService.moderateNoteContent(
+                titleToCheck,
+                contentToCheck,
+            );
             if (!moderationResult.isValid) {
-                throw HttpErrorFactory.badRequest(moderationResult.message || "笔记内容包含不当信息，请修改后重试");
+                throw HttpErrorFactory.badRequest(
+                    moderationResult.message || "笔记内容包含不当信息，请修改后重试",
+                );
             }
         }
 
@@ -583,43 +620,48 @@ export class XhsNoteService extends BaseService<XhsNote> {
             // 精确匹配：使用 plainto_tsquery 进行精确短语匹配
             queryBuilder.andWhere(
                 "to_tsvector('english', note.title || ' ' || note.content) @@ plainto_tsquery('english', :keyword)",
-                { keyword }
+                { keyword },
             );
         } else {
             // 模糊匹配：结合全文搜索和ILIKE查询
             // 首先尝试全文搜索，然后回退到ILIKE模糊匹配
-            const tsqueryKeyword = keyword.split(/\s+/).join(' & '); // 将空格分隔的词用 & 连接
-            
+            const tsqueryKeyword = keyword.split(/\s+/).join(" & "); // 将空格分隔的词用 & 连接
+
             queryBuilder.andWhere(
                 `(
                     to_tsvector('english', note.title || ' ' || note.content) @@ to_tsquery('english', :tsquery)
                     OR note.title ILIKE :ilike
                     OR note.content ILIKE :ilike
                 )`,
-                { 
+                {
                     tsquery: tsqueryKeyword,
-                    ilike: `%${keyword}%`
-                }
+                    ilike: `%${keyword}%`,
+                },
             );
         }
 
         // 按相关性排序：全文搜索匹配的排在前面，然后按创建时间倒序
         if (exact) {
-            queryBuilder.orderBy(
-                "ts_rank(to_tsvector('english', note.title || ' ' || note.content), plainto_tsquery('english', :keyword))",
-                "DESC"
-            ).addOrderBy("note.createdAt", "DESC");
+            queryBuilder
+                .orderBy(
+                    "ts_rank(to_tsvector('english', note.title || ' ' || note.content), plainto_tsquery('english', :keyword))",
+                    "DESC",
+                )
+                .addOrderBy("note.createdAt", "DESC");
         } else {
-            queryBuilder.orderBy(
-                `CASE 
+            queryBuilder
+                .orderBy(
+                    `CASE 
                     WHEN to_tsvector('english', note.title || ' ' || note.content) @@ to_tsquery('english', :tsquery) THEN 1
                     ELSE 2
                 END`,
-                "ASC"
-            ).addOrderBy(
-                "ts_rank(to_tsvector('english', note.title || ' ' || note.content), to_tsquery('english', :tsquery))",
-                "DESC"
-            ).addOrderBy("note.createdAt", "DESC");
+                    "ASC",
+                )
+                .addOrderBy(
+                    "ts_rank(to_tsvector('english', note.title || ' ' || note.content), to_tsquery('english', :tsquery))",
+                    "DESC",
+                )
+                .addOrderBy("note.createdAt", "DESC");
         }
 
         const items = await queryBuilder.getMany();
@@ -669,10 +711,7 @@ export class XhsNoteService extends BaseService<XhsNote> {
             throw HttpErrorFactory.forbidden("部分笔记不存在或无权限访问");
         }
 
-        const result = await this.noteRepository.update(
-            { id: In(ids), userId },
-            { groupId }
-        );
+        const result = await this.noteRepository.update({ id: In(ids), userId }, { groupId });
 
         return result.affected || 0;
     }

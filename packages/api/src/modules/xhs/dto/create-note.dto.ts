@@ -1,4 +1,13 @@
-import { IsArray, IsIn, IsNotEmpty, IsOptional, IsString, IsUUID, Length, Matches } from "class-validator";
+import {
+    IsArray,
+    IsIn,
+    IsNotEmpty,
+    IsOptional,
+    IsString,
+    IsUUID,
+    Length,
+    Matches,
+} from "class-validator";
 
 /**
  * 创建笔记DTO

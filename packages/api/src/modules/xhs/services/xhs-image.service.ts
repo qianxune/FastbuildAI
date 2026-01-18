@@ -30,7 +30,13 @@ export class XhsImageService extends BaseService<XhsImage> {
     async upload(file: Express.Multer.File, userId: string): Promise<XhsImage> {
         try {
             // 验证文件格式
-            const allowedFormats = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
+            const allowedFormats = [
+                "image/jpeg",
+                "image/jpg",
+                "image/png",
+                "image/gif",
+                "image/webp",
+            ];
             if (!allowedFormats.includes(file.mimetype)) {
                 throw HttpErrorFactory.badRequest("不支持的图片格式，仅支持 jpg, png, gif, webp");
             }
@@ -44,26 +50,26 @@ export class XhsImageService extends BaseService<XhsImage> {
             // 生成唯一文件名
             const ext = path.extname(file.originalname);
             const filename = `${uuidv4()}${ext}`;
-            
+
             // 确定存储路径
             const uploadDir = path.join(process.cwd(), "storage", "uploads", "xhs-images");
             await fs.mkdir(uploadDir, { recursive: true });
-            
+
             const filePath = path.join(uploadDir, filename);
-            
+
             // 保存文件
             await fs.writeFile(filePath, file.buffer);
-            
+
             // 生成访问URL
             const url = `/storage/uploads/xhs-images/${filename}`;
-            
+
             // 创建图片记录
             const image = this.xhsImageRepository.create({
                 url,
                 type: "upload",
                 userId,
             });
-            
+
             return await this.xhsImageRepository.save(image);
         } catch (error) {
             if (error.status) {
@@ -85,21 +91,21 @@ export class XhsImageService extends BaseService<XhsImage> {
             // TODO: 集成AI图片生成服务
             // 目前返回占位符图片
             // 实际实现时应该调用 DALL-E, Midjourney, Stable Diffusion 等服务
-            
+
             // 从内容中提取关键词作为提示词
             const prompt = this.extractKeywords(content);
-            
+
             // 模拟AI生成图片URL
             // 实际应该调用图片生成API
             const url = `/storage/uploads/xhs-images/auto-generated-${uuidv4()}.jpg`;
-            
+
             // 创建图片记录
             const image = this.xhsImageRepository.create({
                 url,
                 type: "auto",
                 userId,
             });
-            
+
             return await this.xhsImageRepository.save(image);
         } catch (error) {
             throw HttpErrorFactory.internal("自动配图失败", { error: error.message });
@@ -150,7 +156,7 @@ export class XhsImageService extends BaseService<XhsImage> {
             .split(/\s+/)
             .filter((word) => word.length > 1)
             .slice(0, 10);
-        
+
         return words.join(" ");
     }
 }

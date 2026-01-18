@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import type { XhsNote } from "@/types/xhs";
-import { useXhsNotes } from "@/composables/useXhsNotes";
-import { useXhsGroups } from "@/composables/useXhsGroups";
 import NoteCard from "@/components/xhs/note-card.vue";
 import GroupManager from "@/components/xhs/group-manager.vue";
 
 // Vue APIs (ref, computed, watch, onMounted) 由 Nuxt 自动导入
 // Nuxt composables (useRouter, useRoute, useMessage) 由 Nuxt 自动导入
 // definePageMeta, useSeoMeta 由 Nuxt 自动导入
+// Composables (useXhsNotes, useXhsGroups) 由 Nuxt 自动导入
 
 // Page metadata configuration
 definePageMeta({
@@ -47,11 +46,7 @@ const {
 } = useXhsNotes();
 
 // 使用分组管理组合式函数
-const {
-    groups,
-    isLoading: isGroupsLoading,
-    fetchGroups,
-} = useXhsGroups();
+const { groups, isLoading: isGroupsLoading, fetchGroups } = useXhsGroups();
 
 // 批量操作状态
 const isBatchMode = ref(false);
@@ -143,10 +138,10 @@ const handleNoteClick = (note: XhsNote) => {
 
     // 导航到创建/编辑页面，传递笔记ID进行编辑
     router.push({
-        path: '/xhs/create',
+        path: "/xhs/create",
         query: {
-            noteId: note.id
-        }
+            noteId: note.id,
+        },
     });
 };
 
@@ -401,22 +396,24 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                     <div class="sticky top-4">
                         <UCard class="p-4">
                             <div class="space-y-2">
-                                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                                <h3
+                                    class="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300"
+                                >
                                     笔记分组
                                 </h3>
 
                                 <!-- 全部笔记 -->
                                 <button
-                                    class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-colors"
+                                    class="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition-colors"
                                     :class="[
                                         !currentGroupId
                                             ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                                            : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
+                                            : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
                                     ]"
                                     @click="handleGroupFilter(undefined)"
                                 >
                                     <div class="flex items-center space-x-2">
-                                        <UIcon name="i-heroicons-squares-2x2" class="w-4 h-4" />
+                                        <UIcon name="i-heroicons-squares-2x2" class="h-4 w-4" />
                                         <span>全部笔记</span>
                                     </div>
                                 </button>
@@ -426,7 +423,7 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                                     <div
                                         v-for="i in 3"
                                         :key="i"
-                                        class="animate-pulse h-9 bg-gray-100 dark:bg-gray-800 rounded-lg"
+                                        class="h-9 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800"
                                     ></div>
                                 </div>
 
@@ -435,16 +432,16 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                                     <button
                                         v-for="group in groups"
                                         :key="group.id"
-                                        class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-colors"
+                                        class="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left transition-colors"
                                         :class="[
                                             currentGroupId === group.id
                                                 ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                                                : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'
+                                                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
                                         ]"
                                         @click="handleGroupFilter(group.id)"
                                     >
                                         <div class="flex items-center space-x-2">
-                                            <UIcon name="i-heroicons-folder" class="w-4 h-4" />
+                                            <UIcon name="i-heroicons-folder" class="h-4 w-4" />
                                             <span class="truncate">{{ group.name }}</span>
                                             <UBadge
                                                 v-if="group.isDefault"
@@ -459,12 +456,14 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                                 </template>
 
                                 <!-- 分组管理按钮 -->
-                                <div class="pt-2 border-t border-gray-200 dark:border-gray-700 mt-2">
+                                <div
+                                    class="mt-2 border-t border-gray-200 pt-2 dark:border-gray-700"
+                                >
                                     <button
-                                        class="w-full flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                        class="flex w-full items-center justify-center space-x-2 rounded-lg px-3 py-2 text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
                                         @click="openGroupManager"
                                     >
-                                        <UIcon name="i-heroicons-cog-6-tooth" class="w-4 h-4" />
+                                        <UIcon name="i-heroicons-cog-6-tooth" class="h-4 w-4" />
                                         <span class="text-sm">管理分组</span>
                                     </button>
                                 </div>
@@ -474,7 +473,7 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                 </div>
 
                 <!-- Notes Content -->
-                <div class="flex-1 min-w-0">
+                <div class="min-w-0 flex-1">
                     <!-- Search and filters -->
                     <div class="mb-6">
                         <div class="flex items-center space-x-4">
@@ -502,7 +501,9 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                             <!-- Current filter info -->
                             <div class="text-sm text-gray-500">
                                 <span v-if="isSearching">找到 {{ total }} 个结果</span>
-                                <span v-else-if="currentGroupId">{{ currentGroupName }} ({{ total }})</span>
+                                <span v-else-if="currentGroupId"
+                                    >{{ currentGroupName }} ({{ total }})</span
+                                >
                                 <span v-else>共 {{ total }} 个笔记</span>
                             </div>
                         </div>
@@ -534,7 +535,10 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                                 <UDropdownMenu v-if="hasSelectedNotes && groups.length > 0">
                                     <UButton variant="outline" color="primary" size="sm">
                                         批量移动
-                                        <UIcon name="i-heroicons-chevron-down" class="w-4 h-4 ml-1" />
+                                        <UIcon
+                                            name="i-heroicons-chevron-down"
+                                            class="ml-1 h-4 w-4"
+                                        />
                                     </UButton>
                                     <template #content>
                                         <UDropdownMenuItem
@@ -542,7 +546,7 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                                             :key="group.id"
                                             @click="handleBatchMove(group.id)"
                                         >
-                                            <UIcon name="i-heroicons-folder" class="w-4 h-4 mr-2" />
+                                            <UIcon name="i-heroicons-folder" class="mr-2 h-4 w-4" />
                                             {{ group.name }}
                                         </UDropdownMenuItem>
                                     </template>
@@ -581,14 +585,22 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                         <div v-for="i in 6" :key="i" class="animate-pulse">
                             <div class="rounded-lg bg-white p-6 shadow dark:bg-gray-800">
                                 <div class="space-y-3">
-                                    <div class="h-4 w-3/4 rounded bg-gray-200 dark:bg-gray-700"></div>
+                                    <div
+                                        class="h-4 w-3/4 rounded bg-gray-200 dark:bg-gray-700"
+                                    ></div>
                                     <div class="space-y-2">
                                         <div class="h-3 rounded bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-3 w-5/6 rounded bg-gray-200 dark:bg-gray-700"></div>
+                                        <div
+                                            class="h-3 w-5/6 rounded bg-gray-200 dark:bg-gray-700"
+                                        ></div>
                                     </div>
                                     <div class="flex justify-between">
-                                        <div class="h-3 w-20 rounded bg-gray-200 dark:bg-gray-700"></div>
-                                        <div class="h-3 w-16 rounded bg-gray-200 dark:bg-gray-700"></div>
+                                        <div
+                                            class="h-3 w-20 rounded bg-gray-200 dark:bg-gray-700"
+                                        ></div>
+                                        <div
+                                            class="h-3 w-16 rounded bg-gray-200 dark:bg-gray-700"
+                                        ></div>
                                     </div>
                                 </div>
                             </div>
@@ -629,7 +641,13 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                             </div>
 
                             <h3 class="mb-2 text-xl font-semibold text-gray-900 dark:text-white">
-                                {{ isSearching ? "未找到相关笔记" : currentGroupId ? "该分组暂无笔记" : "还没有笔记" }}
+                                {{
+                                    isSearching
+                                        ? "未找到相关笔记"
+                                        : currentGroupId
+                                          ? "该分组暂无笔记"
+                                          : "还没有笔记"
+                                }}
                             </h3>
 
                             <p class="mb-6 text-gray-500 dark:text-gray-400">
@@ -641,11 +659,19 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                             </p>
 
                             <div class="flex justify-center space-x-3">
-                                <UButton v-if="isSearching" variant="outline" @click="handleClearSearch">
+                                <UButton
+                                    v-if="isSearching"
+                                    variant="outline"
+                                    @click="handleClearSearch"
+                                >
                                     清空搜索
                                 </UButton>
 
-                                <UButton v-if="currentGroupId && !isSearching" variant="outline" @click="handleGroupFilter(undefined)">
+                                <UButton
+                                    v-if="currentGroupId && !isSearching"
+                                    variant="outline"
+                                    @click="handleGroupFilter(undefined)"
+                                >
                                     查看全部笔记
                                 </UButton>
 
@@ -660,10 +686,7 @@ const getGroupNoteCount = (groupId: string | undefined) => {
         </div>
 
         <!-- Group Manager Modal -->
-        <GroupManager
-            v-model="showGroupManager"
-            @groups-changed="handleGroupsChanged"
-        />
+        <GroupManager v-model="showGroupManager" @groups-changed="handleGroupsChanged" />
     </div>
 </template>
 
