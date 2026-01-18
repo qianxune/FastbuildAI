@@ -203,23 +203,23 @@ watch(isOpen, (value) => {
                             <div
                                 v-for="i in 3"
                                 :key="i"
-                                class="animate-pulse flex items-center justify-between p-3 bg-gray-100 dark:bg-gray-800 rounded-lg"
+                                class="flex animate-pulse items-center justify-between rounded-lg bg-gray-100 p-3 dark:bg-gray-800"
                             >
-                                <div class="h-4 w-24 bg-gray-200 dark:bg-gray-700 rounded"></div>
-                                <div class="h-4 w-16 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                                <div class="h-4 w-24 rounded bg-gray-200 dark:bg-gray-700"></div>
+                                <div class="h-4 w-16 rounded bg-gray-200 dark:bg-gray-700"></div>
                             </div>
                         </div>
 
                         <!-- 分组列表 -->
-                        <div v-else class="space-y-2 max-h-80 overflow-y-auto">
+                        <div v-else class="max-h-80 space-y-2 overflow-y-auto">
                             <div
                                 v-for="group in groups"
                                 :key="group.id"
-                                class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                class="flex items-center justify-between rounded-lg bg-gray-50 p-3 transition-colors hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700"
                             >
                                 <!-- 编辑模式 -->
                                 <template v-if="editingGroupId === group.id">
-                                    <div class="flex items-center space-x-2 flex-1">
+                                    <div class="flex flex-1 items-center space-x-2">
                                         <UInput
                                             v-model="editingGroupName"
                                             class="flex-1"
@@ -252,7 +252,7 @@ watch(isOpen, (value) => {
                                     <div class="flex items-center space-x-2">
                                         <UIcon
                                             name="i-heroicons-folder"
-                                            class="w-5 h-5 text-gray-400"
+                                            class="h-5 w-5 text-gray-400"
                                         />
                                         <span class="text-gray-900 dark:text-white">
                                             {{ group.name }}
@@ -292,11 +292,11 @@ watch(isOpen, (value) => {
                             <!-- 空状态 -->
                             <div
                                 v-if="groups.length === 0"
-                                class="text-center py-8 text-gray-500 dark:text-gray-400"
+                                class="py-8 text-center text-gray-500 dark:text-gray-400"
                             >
                                 <UIcon
                                     name="i-heroicons-folder-open"
-                                    class="w-12 h-12 mx-auto mb-2 opacity-50"
+                                    class="mx-auto mb-2 h-12 w-12 opacity-50"
                                 />
                                 <p>暂无分组</p>
                             </div>

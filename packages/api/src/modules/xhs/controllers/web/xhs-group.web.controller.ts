@@ -26,9 +26,9 @@ export class XhsGroupWebController extends BaseController {
     async getGroups(@Playground() user: UserPlayground): Promise<{ items: XhsGroup[] }> {
         // 确保用户有默认分组
         await this.xhsGroupService.ensureDefaultGroup(user.id);
-        
+
         const groups = await this.xhsGroupService.findByUser(user.id);
-        
+
         return { items: groups };
     }
 
@@ -39,7 +39,7 @@ export class XhsGroupWebController extends BaseController {
     @Post("groups")
     async createGroup(
         @Body() dto: CreateGroupDto,
-        @Playground() user: UserPlayground
+        @Playground() user: UserPlayground,
     ): Promise<XhsGroup> {
         return await this.xhsGroupService.createGroup(dto, user.id);
     }
@@ -52,7 +52,7 @@ export class XhsGroupWebController extends BaseController {
     async updateGroup(
         @Param("id") id: string,
         @Body() dto: UpdateGroupDto,
-        @Playground() user: UserPlayground
+        @Playground() user: UserPlayground,
     ): Promise<XhsGroup> {
         return await this.xhsGroupService.updateGroup(id, dto.name, user.id);
     }
@@ -65,7 +65,7 @@ export class XhsGroupWebController extends BaseController {
     @Delete("groups/:id")
     async deleteGroup(
         @Param("id") id: string,
-        @Playground() user: UserPlayground
+        @Playground() user: UserPlayground,
     ): Promise<{ success: boolean }> {
         await this.xhsGroupService.deleteGroup(id, user.id);
         return { success: true };

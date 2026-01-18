@@ -16,7 +16,7 @@ export class SearchNoteDto {
      * true: 精确匹配，false: 模糊匹配（默认）
      */
     @IsOptional()
-    @Transform(({ value }) => value === 'true' || value === true)
+    @Transform(({ value }) => value === "true" || value === true)
     @IsBoolean({ message: "精确匹配标志必须是布尔值" })
     exact?: boolean = false;
 }

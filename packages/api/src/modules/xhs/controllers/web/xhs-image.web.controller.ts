@@ -40,7 +40,7 @@ export class XhsImageWebController extends BaseController {
         }
 
         const image = await this.xhsImageService.upload(file, playground.id);
-        
+
         return {
             success: true,
             data: image,
@@ -53,16 +53,13 @@ export class XhsImageWebController extends BaseController {
      * POST /api/web/xhs/images/auto
      */
     @Post("images/auto")
-    async autoGenerate(
-        @Body("content") content: string,
-        @Playground() playground: UserPlayground,
-    ) {
+    async autoGenerate(@Body("content") content: string, @Playground() playground: UserPlayground) {
         if (!content || content.trim().length === 0) {
             throw HttpErrorFactory.badRequest("请提供笔记内容");
         }
 
         const image = await this.xhsImageService.generateAuto(content, playground.id);
-        
+
         return {
             success: true,
             data: image,
@@ -81,7 +78,7 @@ export class XhsImageWebController extends BaseController {
         @Query("limit", new ParseIntPipe({ optional: true })) limit: number = 20,
     ) {
         const result = await this.xhsImageService.findHistory(playground.id, page, limit);
-        
+
         return {
             success: true,
             data: result,
@@ -98,7 +95,7 @@ export class XhsImageWebController extends BaseController {
         return {
             success: true,
             data: {
-                items: []
+                items: [],
             },
         };
     }
