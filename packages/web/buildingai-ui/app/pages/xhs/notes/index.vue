@@ -3,11 +3,6 @@ import type { XhsNote } from "@/types/xhs";
 import NoteCard from "@/components/xhs/note-card.vue";
 import GroupManager from "@/components/xhs/group-manager.vue";
 
-// Vue APIs (ref, computed, watch, onMounted) 由 Nuxt 自动导入
-// Nuxt composables (useRouter, useRoute, useMessage) 由 Nuxt 自动导入
-// definePageMeta, useSeoMeta 由 Nuxt 自动导入
-// Composables (useXhsNotes, useXhsGroups) 由 Nuxt 自动导入
-
 // Page metadata configuration
 definePageMeta({
     layout: false,
@@ -71,7 +66,7 @@ const searchInput = ref("");
 // 页面加载时获取笔记列表
 onMounted(async () => {
     // 从 URL 查询参数中恢复状态
-    const urlPage = parseInt(route.query.page as string) || 1;
+    const urlPage = parseInt((route.query.page as string) || "1");
     const urlSearch = (route.query.search as string) || "";
     const urlGroupId = (route.query.groupId as string) || undefined;
 

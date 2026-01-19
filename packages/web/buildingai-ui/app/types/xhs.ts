@@ -6,433 +6,463 @@
  * 生成笔记DTO
  */
 export interface GenerateNoteDto {
-  /**
-   * 用户输入内容
-   */
-  content: string
+    /**
+     * 用户输入内容
+     */
+    content: string;
 
-  /**
-   * 生成模式
-   */
-  mode: 'ai-generate' | 'ai-compose' | 'add-emoji'
+    /**
+     * 生成模式
+     */
+    mode: "ai-generate" | "ai-compose" | "add-emoji";
 
-  /**
-   * 高级选项 - AI模型
-   */
-  aiModel?: string
+    /**
+     * 高级选项 - AI模型
+     */
+    aiModel?: string;
 
-  /**
-   * 高级选项 - 创作风格
-   */
-  style?: '活泼' | '严谨' | '专业' | '可爱'
+    /**
+     * 高级选项 - 创作风格
+     */
+    style?: "活泼" | "严谨" | "专业" | "可爱";
 
-  /**
-   * 高级选项 - 温度参数
-   */
-  temperature?: string
+    /**
+     * 高级选项 - 温度参数
+     */
+    temperature?: string;
 
-  /**
-   * 高级选项 - 最大长度
-   */
-  maxLength?: string
+    /**
+     * 高级选项 - 最大长度
+     */
+    maxLength?: string;
 
-  /**
-   * 高级选项 - emoji频率
-   */
-  emojiFrequency?: '少' | '适中' | '多'
+    /**
+     * 高级选项 - emoji频率
+     */
+    emojiFrequency?: "少" | "适中" | "多";
 
-  /**
-   * 高级选项 - 生成标题数量
-   */
-  titleCount?: string
+    /**
+     * 高级选项 - 生成标题数量
+     */
+    titleCount?: string;
 }
 
 /**
  * 创建笔记DTO
  */
 export interface CreateNoteDto {
-  /**
-   * 标题
-   */
-  title: string
+    /**
+     * 标题
+     */
+    title: string;
 
-  /**
-   * 内容
-   */
-  content: string
+    /**
+     * 内容
+     */
+    content: string;
 
-  /**
-   * 生成模式
-   */
-  mode: string
+    /**
+     * 生成模式
+     */
+    mode: string;
 
-  /**
-   * 分组ID
-   */
-  groupId?: string
+    /**
+     * 分组ID
+     */
+    groupId?: string;
 
-  /**
-   * 封面图片
-   */
-  coverImages?: string[]
+    /**
+     * 封面图片
+     */
+    coverImages?: string[];
 
-  /**
-   * 原始输入
-   */
-  originalInput?: string
+    /**
+     * 原始输入
+     */
+    originalInput?: string;
 }
 
 /**
  * 更新笔记DTO
  */
 export interface UpdateNoteDto {
-  /**
-   * 标题
-   */
-  title?: string
+    /**
+     * 标题
+     */
+    title?: string;
 
-  /**
-   * 内容
-   */
-  content?: string
+    /**
+     * 内容
+     */
+    content?: string;
 
-  /**
-   * 分组ID
-   */
-  groupId?: string
+    /**
+     * 分组ID
+     */
+    groupId?: string;
 
-  /**
-   * 封面图片
-   */
-  coverImages?: string[]
+    /**
+     * 封面图片
+     */
+    coverImages?: string[];
 }
 
 /**
  * 笔记实体
  */
 export interface XhsNote {
-  /**
-   * ID
-   */
-  id: string
+    /**
+     * ID
+     */
+    id: string;
 
-  /**
-   * 标题
-   */
-  title: string
+    /**
+     * 标题
+     */
+    title: string;
 
-  /**
-   * 内容
-   */
-  content: string
+    /**
+     * 内容
+     */
+    content: string;
 
-  /**
-   * 封面图片
-   */
-  coverImages: string[]
+    /**
+     * 封面图片
+     */
+    coverImages: string[];
 
-  /**
-   * 字数
-   */
-  wordCount: number
+    /**
+     * 字数
+     */
+    wordCount: number;
 
-  /**
-   * 生成模式
-   */
-  mode: string
+    /**
+     * 生成模式
+     */
+    mode: string;
 
-  /**
-   * 原始输入
-   */
-  originalInput?: string
+    /**
+     * 原始输入
+     */
+    originalInput?: string;
 
-  /**
-   * 用户ID
-   */
-  userId: string
+    /**
+     * 用户ID
+     */
+    userId: string;
 
-  /**
-   * 分组ID
-   */
-  groupId?: string
+    /**
+     * 分组ID
+     */
+    groupId?: string;
 
-  /**
-   * 分组信息
-   */
-  group?: XhsGroup
+    /**
+     * 分组信息
+     */
+    group?: XhsGroup;
 
-  /**
-   * 创建时间
-   */
-  createdAt: string
+    /**
+     * 创建时间
+     */
+    createdAt: string;
 
-  /**
-   * 更新时间
-   */
-  updatedAt: string
+    /**
+     * 更新时间
+     */
+    updatedAt: string;
 }
 
 /**
  * 分组实体
  */
 export interface XhsGroup {
-  /**
-   * ID
-   */
-  id: string
+    /**
+     * ID
+     */
+    id: string;
 
-  /**
-   * 名称
-   */
-  name: string
+    /**
+     * 名称
+     */
+    name: string;
 
-  /**
-   * 是否为默认分组
-   */
-  isDefault: boolean
+    /**
+     * 是否为默认分组
+     */
+    isDefault: boolean;
 
-  /**
-   * 用户ID
-   */
-  userId: string
+    /**
+     * 用户ID
+     */
+    userId: string;
 
-  /**
-   * 笔记列表
-   */
-  notes?: XhsNote[]
+    /**
+     * 笔记列表
+     */
+    notes?: XhsNote[];
 
-  /**
-   * 创建时间
-   */
-  createdAt: string
+    /**
+     * 创建时间
+     */
+    createdAt: string;
 
-  /**
-   * 更新时间
-   */
-  updatedAt: string
+    /**
+     * 更新时间
+     */
+    updatedAt: string;
 }
 
 /**
  * 查询笔记DTO
  */
 export interface QueryNoteDto {
-  /**
-   * 页码
-   */
-  page?: number
+    /**
+     * 页码
+     */
+    page?: number;
 
-  /**
-   * 每页数量
-   */
-  limit?: number
+    /**
+     * 每页数量
+     */
+    limit?: number;
 
-  /**
-   * 分组ID
-   */
-  groupId?: string
+    /**
+     * 分组ID
+     */
+    groupId?: string;
 
-  /**
-   * 关键词
-   */
-  keyword?: string
+    /**
+     * 关键词
+     */
+    keyword?: string;
 
-  /**
-   * 排序字段
-   */
-  sortBy?: string
+    /**
+     * 排序字段
+     */
+    sortBy?: string;
 
-  /**
-   * 排序方向
-   */
-  sortOrder?: 'ASC' | 'DESC'
+    /**
+     * 排序方向
+     */
+    sortOrder?: "ASC" | "DESC";
 }
 
 /**
  * 搜索笔记DTO
  */
 export interface SearchNoteDto {
-  /**
-   * 关键词
-   */
-  keyword: string
+    /**
+     * 关键词
+     */
+    keyword: string;
 
-  /**
-   * 是否精确匹配
-   */
-  exact?: boolean
+    /**
+     * 是否精确匹配
+     */
+    exact?: boolean;
 }
 
 /**
  * 分页响应
  */
 export interface PaginatedResponse<T> {
-  /**
-   * 数据列表
-   */
-  items: T[]
+    /**
+     * 数据列表
+     */
+    items: T[];
 
-  /**
-   * 总数
-   */
-  total: number
+    /**
+     * 总数
+     */
+    total: number;
 
-  /**
-   * 当前页
-   */
-  page: number
+    /**
+     * 当前页
+     */
+    page: number;
 
-  /**
-   * 每页数量
-   */
-  limit: number
+    /**
+     * 每页数量
+     */
+    limit: number;
 
-  /**
-   * 总页数
-   */
-  totalPages: number
+    /**
+     * 总页数
+     */
+    totalPages: number;
 }
 
 /**
  * 流式事件类型
  */
 export interface StreamEvent {
-  /**
-   * 事件类型
-   */
-  type: 'start' | 'chunk' | 'complete' | 'error'
+    /**
+     * 事件类型
+     */
+    type: "start" | "chunk" | "complete" | "error";
 
-  /**
-   * 事件消息
-   */
-  message?: string
+    /**
+     * 事件消息
+     */
+    message?: string;
 
-  /**
-   * 数据内容
-   */
-  data?: string
+    /**
+     * 数据内容
+     */
+    data?: string;
 
-  /**
-   * 完整内容
-   */
-  fullContent?: string
+    /**
+     * 完整内容
+     */
+    fullContent?: string;
 
-  /**
-   * 错误代码
-   */
-  code?: string
+    /**
+     * 错误代码
+     */
+    code?: string;
 
-  /**
-   * 时间戳
-   */
-  timestamp?: string
+    /**
+     * 时间戳
+     */
+    timestamp?: string;
 }
 
 /**
  * 生成模式配置
  */
 export interface GenerationMode {
-  /**
-   * 模式键
-   */
-  key: 'ai-generate' | 'ai-compose' | 'add-emoji'
+    /**
+     * 模式键
+     */
+    key: "ai-generate" | "ai-compose" | "add-emoji";
 
-  /**
-   * 显示标签
-   */
-  label: string
+    /**
+     * 显示标签
+     */
+    label: string;
 
-  /**
-   * 描述
-   */
-  description: string
+    /**
+     * 描述
+     */
+    description: string;
 }
 
 /**
  * 图片实体
  */
 export interface XhsImage {
-  /**
-   * ID
-   */
-  id: string
+    /**
+     * ID
+     */
+    id: string;
 
-  /**
-   * 图片URL
-   */
-  url: string
+    /**
+     * 图片URL
+     */
+    url: string;
 
-  /**
-   * 图片类型
-   */
-  type: 'auto' | 'template' | 'upload'
+    /**
+     * 图片类型
+     */
+    type: "auto" | "template" | "upload";
 
-  /**
-   * 用户ID
-   */
-  userId: string
+    /**
+     * 用户ID
+     */
+    userId: string;
 
-  /**
-   * 创建时间
-   */
-  createdAt: string
+    /**
+     * 创建时间
+     */
+    createdAt: string;
 }
 
 /**
  * 图片模板
  */
 export interface XhsImageTemplate {
-  /**
-   * ID
-   */
-  id: string
+    /**
+     * ID
+     */
+    id: string;
 
-  /**
-   * 模板名称
-   */
-  name: string
+    /**
+     * 模板名称
+     */
+    name: string;
 
-  /**
-   * 模板URL
-   */
-  url: string
+    /**
+     * 模板URL
+     */
+    url: string;
 
-  /**
-   * 分类
-   */
-  category: string
+    /**
+     * 分类
+     */
+    category: string;
 
-  /**
-   * 缩略图URL
-   */
-  thumbnailUrl?: string
+    /**
+     * 缩略图URL
+     */
+    thumbnailUrl?: string;
 
-  /**
-   * 使用次数
-   */
-  usageCount: number
+    /**
+     * 使用次数
+     */
+    usageCount: number;
 }
 
 /**
  * 自动配图请求
  */
 export interface AutoImageDto {
-  /**
-   * 笔记内容
-   */
-  content: string
+    /**
+     * 笔记内容
+     */
+    content: string;
 }
 
 /**
  * 图片上传响应
  */
 export interface ImageUploadResponse {
-  /**
-   * 图片URL
-   */
-  url: string
+    /**
+     * 图片URL
+     */
+    url: string;
 
-  /**
-   * 图片ID
-   */
-  id?: string
+    /**
+     * 图片ID
+     */
+    id?: string;
+}
+
+/**
+ * 批量操作响应
+ */
+export interface BatchOperationResponse {
+    /**
+     * 操作是否成功
+     */
+    success: boolean;
+
+    /**
+     * 受影响的记录数
+     */
+    affected: number;
+
+    /**
+     * 操作消息
+     */
+    message: string;
+}
+
+/**
+ * 分组列表响应
+ */
+export interface GroupListResponse {
+    /**
+     * 分组列表
+     */
+    items: XhsGroup[];
 }
