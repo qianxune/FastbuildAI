@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import type { XhsNote } from "@/types/xhs";
 import { useXhsGenerate } from "@/composables/useXhsGenerate";
 import ImageSelector from "@/components/xhs/image-selector.vue";
+import { useAuthFetch } from "~/composables/useAuthFetch";
 
 definePageMeta({
     layout: false,
@@ -16,9 +18,6 @@ useSeoMeta({
 const route = useRoute();
 const router = useRouter();
 const toast = useMessage();
-
-// 全局状态管理
-const userStore = useUserStore();
 
 // 使用生成组合式函数
 const {
@@ -145,36 +144,21 @@ const loadNote = async (noteId: string) => {
     isEditMode.value = true;
     editingNoteId.value = noteId;
 
-    try {
-        const authToken = userStore.token || userStore.temporaryToken;
-        if (!authToken) {
-            throw new Error("请先登录");
-        }
+    const { get } = useAuthFetch();
+    const { data, error: apiError } = await get<XhsNote>(`/api/xhs/notes/${noteId}`, {
+        errorMessage: "获取笔记失败",
+    });
 
-        const response = await fetch(`/api/xhs/notes/${noteId}`, {
-            method: "GET",
-            headers: {
-                Authorization: `Bearer ${authToken}`,
-                "Content-Type": "application/json",
-            },
-        });
-
-        if (!response.ok) {
-            throw new Error("获取笔记失败");
-        }
-
-        const responseData = await response.json();
-        const note = responseData.data || responseData;
-
-        noteTitle.value = note.title || "";
-        noteContent.value = note.content || "";
-        mode.value = note.mode || "ai-generate";
-    } catch (error: any) {
-        console.error("加载笔记失败:", error);
-        toast.error(error.message || "加载笔记失败");
-    } finally {
+    if (apiError) {
         isLoadingNote.value = false;
+        return;
     }
+
+    noteTitle.value = data?.title || "";
+    noteContent.value = data?.content || "";
+    coverImages.value = data?.coverImages || [];
+    mode.value = (data?.mode as "ai-generate" | "ai-compose" | "add-emoji") || "ai-generate";
+    isLoadingNote.value = false;
 };
 
 // 监听生成结果，自动填充到编辑器
@@ -217,30 +201,22 @@ const handleSave = async () => {
 
     isSaving.value = true;
 
-    try {
-        const authToken = userStore.token || userStore.temporaryToken;
-        if (!authToken) {
-            throw new Error("请先登录");
-        }
+    const { put, post } = useAuthFetch();
 
+    try {
         if (isEditMode.value && editingNoteId.value) {
             // 更新已有笔记
-            const response = await fetch(`/api/xhs/notes/${editingNoteId.value}`, {
-                method: "PUT",
-                headers: {
-                    Authorization: `Bearer ${authToken}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
+            await put(
+                `/api/xhs/notes/${editingNoteId.value}`,
+                {
                     title: noteTitle.value,
                     content: noteContent.value,
                     coverImages: coverImages.value,
-                }),
-            });
-
-            if (!response.ok) {
-                throw new Error("更新笔记失败");
-            }
+                },
+                {
+                    errorMessage: "更新笔记失败",
+                },
+            );
 
             toast.success("笔记已更新");
         } else {
@@ -249,11 +225,7 @@ const handleSave = async () => {
             generatedContent.value = noteContent.value;
 
             await save();
-            toast.success("笔记已保存");
         }
-    } catch (error: any) {
-        console.error("保存笔记失败:", error);
-        toast.error(error.message || "保存失败");
     } finally {
         isSaving.value = false;
     }
