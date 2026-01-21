@@ -61,13 +61,41 @@ const menuItems = [
 
 // 模版分类
 const templateCategories = [
-    { key: "beauty", label: "美妆", color: "bg-purple-100 text-purple-700" },
-    { key: "ootd", label: "OOTD", color: "bg-blue-100 text-blue-700" },
-    { key: "share", label: "好物分享", color: "bg-orange-100 text-orange-700" },
-    { key: "explore", label: "探店", color: "bg-red-100 text-red-700" },
-    { key: "food", label: "美食", color: "bg-yellow-100 text-yellow-700" },
-    { key: "pet", label: "萌宠", color: "bg-pink-100 text-pink-700" },
-    { key: "daily", label: "日常", color: "bg-green-100 text-green-700" },
+    {
+        key: "beauty",
+        label: "美妆",
+        color: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+    },
+    {
+        key: "ootd",
+        label: "OOTD",
+        color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+    },
+    {
+        key: "share",
+        label: "好物分享",
+        color: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+    },
+    {
+        key: "explore",
+        label: "探店",
+        color: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+    },
+    {
+        key: "food",
+        label: "美食",
+        color: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+    },
+    {
+        key: "pet",
+        label: "萌宠",
+        color: "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400",
+    },
+    {
+        key: "daily",
+        label: "日常",
+        color: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+    },
 ];
 
 // 示例模版内容
@@ -286,20 +314,20 @@ const goToMyNotes = () => {
 </script>
 
 <template>
-    <div class="flex h-screen bg-gray-50 dark:bg-gray-900">
+    <div class="flex h-screen bg-slate-50 dark:bg-slate-900">
         <!-- 1. 左侧菜单栏 -->
         <div
-            class="flex w-20 flex-col items-center border-r border-gray-200 bg-white py-4 dark:border-gray-700 dark:bg-gray-800"
+            class="flex w-20 flex-col items-center border-r border-slate-200 bg-white py-4 dark:border-slate-700 dark:bg-slate-800"
         >
             <button
                 v-for="item in menuItems"
                 :key="item.key"
                 @click="activeMenu = item.key"
                 :class="[
-                    'mb-2 flex h-16 w-16 flex-col items-center justify-center rounded-lg transition-colors',
+                    'mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg transition-all duration-200',
                     activeMenu === item.key
-                        ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30'
-                        : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700',
+                        ? 'bg-blue-50 text-blue-600 shadow-sm dark:bg-blue-900/30 dark:text-blue-400'
+                        : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700',
                 ]"
             >
                 <UIcon :name="item.icon" class="mb-1 text-xl" />
@@ -311,14 +339,14 @@ const goToMyNotes = () => {
             <!-- 底部菜单 -->
             <button
                 @click="goToMyNotes"
-                class="flex h-16 w-16 flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                class="flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
             >
                 <UIcon name="i-heroicons-document-text" class="mb-1 text-xl" />
                 <span class="text-xs">我的笔记</span>
             </button>
             <button
                 @click="goBack"
-                class="flex h-16 w-16 flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                class="flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
             >
                 <UIcon name="i-heroicons-home" class="mb-1 text-xl" />
                 <span class="text-xs">返回首页</span>
@@ -327,7 +355,7 @@ const goToMyNotes = () => {
 
         <!-- 2. 菜单内容区域 -->
         <div
-            class="w-72 overflow-y-auto border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
+            class="w-72 overflow-y-auto border-r border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800"
         >
             <!-- 模版内容 -->
             <div v-if="activeMenu === 'template'" class="p-4">
@@ -335,7 +363,10 @@ const goToMyNotes = () => {
                     <button
                         v-for="cat in templateCategories"
                         :key="cat.key"
-                        :class="['rounded-full px-3 py-1 text-sm', cat.color]"
+                        :class="[
+                            'cursor-pointer rounded-full px-3 py-1 text-sm font-medium transition-all duration-150 hover:opacity-80',
+                            cat.color,
+                        ]"
                     >
                         {{ cat.label }}
                     </button>
@@ -346,14 +377,16 @@ const goToMyNotes = () => {
                         v-for="(tpl, idx) in sampleTemplates"
                         :key="idx"
                         @click="insertTemplate(tpl)"
-                        class="cursor-pointer rounded-lg bg-gray-50 p-3 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600"
+                        class="cursor-pointer rounded-lg bg-slate-50 p-3 transition-all duration-200 hover:bg-slate-100 hover:shadow-sm dark:bg-slate-700 dark:hover:bg-slate-600"
                     >
                         <h4
-                            class="mb-1 line-clamp-1 text-sm font-medium text-gray-900 dark:text-white"
+                            class="mb-1 line-clamp-1 text-sm font-medium text-slate-900 dark:text-white"
                         >
                             {{ tpl.title }}
                         </h4>
-                        <p class="line-clamp-3 text-xs text-gray-500 dark:text-gray-400">
+                        <p
+                            class="line-clamp-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400"
+                        >
                             {{ tpl.preview }}
                         </p>
                     </div>
@@ -362,26 +395,30 @@ const goToMyNotes = () => {
 
             <!-- 格式内容 -->
             <div v-else-if="activeMenu === 'format'" class="p-4">
-                <h3 class="mb-3 font-medium text-gray-900 dark:text-white">文本格式</h3>
+                <h3 class="mb-3 text-sm font-semibold text-slate-900 dark:text-white">文本格式</h3>
                 <div class="space-y-2">
                     <button
-                        class="w-full rounded px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition-colors duration-150 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
                     >
+                        <UIcon name="i-heroicons-bold" class="mr-2 inline-block" />
                         加粗
                     </button>
                     <button
-                        class="w-full rounded px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition-colors duration-150 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
                     >
+                        <UIcon name="i-heroicons-italic" class="mr-2 inline-block" />
                         斜体
                     </button>
                     <button
-                        class="w-full rounded px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition-colors duration-150 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
                     >
+                        <UIcon name="i-heroicons-underline" class="mr-2 inline-block" />
                         下划线
                     </button>
                     <button
-                        class="w-full rounded px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition-colors duration-150 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
                     >
+                        <UIcon name="i-heroicons-minus" class="mr-2 inline-block" />
                         分割线
                     </button>
                 </div>
@@ -389,13 +426,13 @@ const goToMyNotes = () => {
 
             <!-- 表情内容 -->
             <div v-else-if="activeMenu === 'emoji'" class="p-4">
-                <h3 class="mb-3 font-medium text-gray-900 dark:text-white">常用表情</h3>
+                <h3 class="mb-3 text-sm font-semibold text-slate-900 dark:text-white">常用表情</h3>
                 <div class="grid grid-cols-5 gap-2">
                     <button
                         v-for="emoji in emojiList"
                         :key="emoji"
                         @click="insertEmoji(emoji)"
-                        class="flex h-10 w-10 items-center justify-center rounded text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                        class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg text-lg transition-colors duration-150 hover:bg-slate-100 dark:hover:bg-slate-700"
                     >
                         {{ emoji }}
                     </button>
@@ -404,13 +441,13 @@ const goToMyNotes = () => {
 
             <!-- 话题内容 -->
             <div v-else-if="activeMenu === 'topic'" class="p-4">
-                <h3 class="mb-3 font-medium text-gray-900 dark:text-white">热门话题</h3>
+                <h3 class="mb-3 text-sm font-semibold text-slate-900 dark:text-white">热门话题</h3>
                 <div class="space-y-2">
                     <button
                         v-for="topic in topicList"
                         :key="topic"
                         @click="insertTopic(topic)"
-                        class="block w-full rounded px-3 py-2 text-left text-sm text-blue-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        class="block w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-blue-600 transition-all duration-150 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
                     >
                         {{ topic }}
                     </button>
@@ -419,31 +456,38 @@ const goToMyNotes = () => {
 
             <!-- 文案库内容 -->
             <div v-else-if="activeMenu === 'library'" class="p-4">
-                <h3 class="mb-3 font-medium text-gray-900 dark:text-white">文案库</h3>
-                <p class="text-sm text-gray-500">收藏的文案将显示在这里</p>
+                <h3 class="mb-3 text-sm font-semibold text-slate-900 dark:text-white">文案库</h3>
+                <div class="rounded-lg bg-slate-50 p-4 text-center dark:bg-slate-700">
+                    <UIcon
+                        name="i-heroicons-folder-open"
+                        class="mx-auto mb-2 text-3xl text-slate-400"
+                    />
+                    <p class="text-sm text-slate-500 dark:text-slate-400">收藏的文案将显示在这里</p>
+                </div>
             </div>
         </div>
 
         <!-- 3. 笔记编辑区域 -->
-        <div class="flex flex-1 flex-col bg-white dark:bg-gray-800">
+        <div class="flex flex-1 flex-col bg-white dark:bg-slate-800">
             <!-- 加载状态 -->
             <div v-if="isLoadingNote" class="flex flex-1 items-center justify-center">
                 <div class="text-center">
                     <div
                         class="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-500"
                     ></div>
-                    <p class="text-gray-500">正在加载笔记...</p>
+                    <p class="text-sm text-slate-500 dark:text-slate-400">正在加载笔记...</p>
                 </div>
             </div>
 
             <template v-else>
-                <div class="border-b border-gray-200 p-4 dark:border-gray-700">
+                <!-- 标题栏 -->
+                <div class="border-b border-slate-200 p-4 dark:border-slate-700">
                     <div class="flex items-center justify-between">
                         <input
                             v-model="noteTitle"
                             type="text"
                             placeholder="请输入笔记标题"
-                            class="flex-1 border-none bg-transparent text-xl font-medium text-gray-900 placeholder-gray-400 outline-none dark:text-white"
+                            class="flex-1 border-none bg-transparent text-xl font-medium text-slate-900 placeholder-slate-400 outline-none dark:text-white dark:placeholder-slate-500"
                         />
                         <UBadge v-if="isEditMode" color="primary" variant="soft" size="sm">
                             编辑模式
@@ -451,42 +495,64 @@ const goToMyNotes = () => {
                     </div>
                 </div>
 
+                <!-- 内容编辑区 -->
                 <div class="flex-1 overflow-y-auto p-4">
+                    <!-- 生成中状态 -->
                     <div v-if="isGenerating" class="flex h-full items-center justify-center">
                         <div class="text-center">
                             <div
                                 class="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-500"
                             ></div>
-                            <p class="text-gray-500">正在生成内容...</p>
+                            <p class="text-sm text-slate-500 dark:text-slate-400">
+                                正在生成内容...
+                            </p>
                         </div>
                     </div>
 
+                    <!-- 错误状态 -->
                     <div
                         v-else-if="generationError"
-                        class="mb-4 rounded-lg bg-red-50 p-4 dark:bg-red-900/20"
+                        class="rounded-lg bg-red-50 p-4 dark:bg-red-900/20"
                     >
-                        <p class="text-red-600 dark:text-red-400">{{ generationError }}</p>
+                        <div class="flex items-start gap-3">
+                            <UIcon
+                                name="i-heroicons-exclamation-circle"
+                                class="mt-0.5 text-xl text-red-600 dark:text-red-400"
+                            />
+                            <div class="flex-1">
+                                <h4 class="mb-1 text-sm font-medium text-red-800 dark:text-red-300">
+                                    生成失败
+                                </h4>
+                                <p class="text-sm text-red-600 dark:text-red-400">
+                                    {{ generationError }}
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
+                    <!-- 内容输入框 -->
                     <textarea
                         v-else
                         v-model="noteContent"
                         placeholder="请输入笔记内容"
-                        class="h-full w-full resize-none border-none bg-transparent text-base leading-relaxed text-gray-900 placeholder-gray-400 outline-none dark:text-white"
+                        class="h-full w-full resize-none border-none bg-transparent text-base leading-relaxed text-slate-900 placeholder-slate-400 outline-none dark:text-white dark:placeholder-slate-500"
                     ></textarea>
                 </div>
 
-                <div class="border-t border-gray-200 px-4 py-2 text-right dark:border-gray-700">
-                    <span class="text-sm text-gray-500">{{ wordCount }} / 1000</span>
+                <!-- 字数统计 -->
+                <div class="border-t border-slate-200 px-4 py-2 text-right dark:border-slate-700">
+                    <span class="text-sm text-slate-500 dark:text-slate-400"
+                        >{{ wordCount }} / 1000</span
+                    >
                 </div>
 
-                <!-- Cover Images Preview -->
+                <!-- 封面图片预览 -->
                 <div
                     v-if="coverImages.length > 0"
-                    class="border-t border-gray-200 px-4 py-3 dark:border-gray-700"
+                    class="border-t border-slate-200 px-4 py-3 dark:border-slate-700"
                 >
                     <div class="mb-2 flex items-center justify-between">
-                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                        <span class="text-sm font-medium text-slate-700 dark:text-slate-300"
                             >封面图片</span
                         >
                         <UButton
@@ -502,7 +568,7 @@ const goToMyNotes = () => {
                         <div
                             v-for="(image, index) in coverImages"
                             :key="index"
-                            class="group relative h-16 w-16 overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800"
+                            class="group relative h-16 w-16 overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-700"
                         >
                             <img
                                 :src="image"
@@ -510,13 +576,13 @@ const goToMyNotes = () => {
                                 class="h-full w-full object-cover"
                             />
                             <div
-                                class="bg-opacity-0 group-hover:bg-opacity-40 absolute inset-0 flex items-center justify-center bg-black transition-all"
+                                class="bg-opacity-0 group-hover:bg-opacity-40 absolute inset-0 flex items-center justify-center bg-black transition-all duration-200"
                             >
                                 <UButton
                                     size="xs"
                                     color="error"
                                     icon="i-heroicons-trash"
-                                    class="opacity-0 transition-opacity group-hover:opacity-100"
+                                    class="opacity-0 transition-opacity duration-200 group-hover:opacity-100"
                                     @click="coverImages.splice(index, 1)"
                                 />
                             </div>
@@ -528,11 +594,12 @@ const goToMyNotes = () => {
 
         <!-- 4. 右侧操作菜单 -->
         <div
-            class="flex w-20 flex-col items-center border-l border-gray-200 bg-white py-4 dark:border-gray-700 dark:bg-gray-800"
+            class="flex w-20 flex-col items-center border-l border-slate-200 bg-white py-4 dark:border-slate-700 dark:bg-slate-800"
         >
             <button
                 @click="openImageSelector"
-                class="mb-2 flex h-16 w-16 flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                aria-label="管理配图"
+                class="mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
             >
                 <UIcon name="i-heroicons-photo" class="mb-1 text-xl" />
                 <span class="text-xs">管理配图</span>
@@ -540,7 +607,8 @@ const goToMyNotes = () => {
 
             <button
                 @click="handleCopyTitle"
-                class="mb-2 flex h-16 w-16 flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                aria-label="复制标题"
+                class="mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
             >
                 <UIcon name="i-heroicons-clipboard-document" class="mb-1 text-xl" />
                 <span class="text-xs">复制标题</span>
@@ -548,7 +616,8 @@ const goToMyNotes = () => {
 
             <button
                 @click="handleCopyContent"
-                class="mb-2 flex h-16 w-16 flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                aria-label="复制正文"
+                class="mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
             >
                 <UIcon name="i-heroicons-document-duplicate" class="mb-1 text-xl" />
                 <span class="text-xs">复制正文</span>
@@ -557,7 +626,8 @@ const goToMyNotes = () => {
             <button
                 @click="handleSave"
                 :disabled="isSaving"
-                class="mb-2 flex h-16 w-16 flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-gray-700"
+                aria-label="保存笔记"
+                class="mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-700"
             >
                 <UIcon
                     v-if="isSaving"
@@ -570,7 +640,8 @@ const goToMyNotes = () => {
 
             <button
                 @click="handlePreview"
-                class="mb-2 flex h-16 w-16 flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                aria-label="预览笔记"
+                class="mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
             >
                 <UIcon name="i-heroicons-eye" class="mb-1 text-xl" />
                 <span class="text-xs">预览笔记</span>
@@ -578,16 +649,20 @@ const goToMyNotes = () => {
 
             <div class="flex-1"></div>
 
+            <!-- 发布按钮 (主要CTA) -->
             <button
-                class="mb-4 flex h-14 w-14 flex-col items-center justify-center rounded-xl bg-blue-500 text-white hover:bg-blue-600"
+                aria-label="发布笔记"
+                class="mb-4 flex h-14 w-14 cursor-pointer flex-col items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg transition-all duration-200 hover:bg-blue-700 hover:shadow-xl"
             >
                 <UIcon name="i-heroicons-paper-airplane" class="text-xl" />
                 <span class="mt-1 text-xs">发布</span>
             </button>
 
+            <!-- 清空按钮 -->
             <button
                 @click="handleClear"
-                class="flex h-16 w-16 flex-col items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                aria-label="清空笔记"
+                class="flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
             >
                 <UIcon name="i-heroicons-trash" class="mb-1 text-xl" />
                 <span class="text-xs">清空</span>
@@ -598,19 +673,66 @@ const goToMyNotes = () => {
         <UModal v-model="showPreview">
             <UCard class="max-w-md">
                 <template #header>
-                    <h3 class="text-lg font-semibold">笔记预览</h3>
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">
+                            笔记预览
+                        </h3>
+                        <UButton
+                            variant="ghost"
+                            icon="i-heroicons-x-mark"
+                            size="sm"
+                            @click="showPreview = false"
+                        />
+                    </div>
                 </template>
 
                 <div class="space-y-4">
-                    <h4 class="text-lg font-bold">{{ noteTitle || "未填写标题" }}</h4>
-                    <div class="whitespace-pre-wrap text-gray-700 dark:text-gray-300">
-                        {{ noteContent || "未填写内容" }}
+                    <div>
+                        <h4
+                            class="mb-2 text-xs font-medium text-slate-500 uppercase dark:text-slate-400"
+                        >
+                            标题
+                        </h4>
+                        <p class="text-lg font-bold text-slate-900 dark:text-white">
+                            {{ noteTitle || "未填写标题" }}
+                        </p>
+                    </div>
+
+                    <div>
+                        <h4
+                            class="mb-2 text-xs font-medium text-slate-500 uppercase dark:text-slate-400"
+                        >
+                            正文
+                        </h4>
+                        <div
+                            class="text-sm leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-300"
+                        >
+                            {{ noteContent || "未填写内容" }}
+                        </div>
+                    </div>
+
+                    <div v-if="coverImages.length > 0">
+                        <h4
+                            class="mb-2 text-xs font-medium text-slate-500 uppercase dark:text-slate-400"
+                        >
+                            封面图片
+                        </h4>
+                        <div class="grid grid-cols-3 gap-2">
+                            <img
+                                v-for="(image, index) in coverImages"
+                                :key="index"
+                                :src="image"
+                                :alt="`封面图 ${index + 1}`"
+                                class="aspect-square rounded-lg object-cover"
+                            />
+                        </div>
                     </div>
                 </div>
 
                 <template #footer>
-                    <div class="flex justify-end">
-                        <UButton @click="showPreview = false">关闭</UButton>
+                    <div class="flex justify-end gap-2">
+                        <UButton variant="outline" @click="showPreview = false">关闭</UButton>
+                        <UButton color="primary">发布笔记</UButton>
                     </div>
                 </template>
             </UCard>
