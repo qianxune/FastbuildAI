@@ -77,7 +77,7 @@ export const tryListen = async (
 
     while (retries < maxRetries) {
         try {
-            await app.listen(currentPort);
+            await app.listen(currentPort, "0.0.0.0");
             // Log when port is changed
             if (currentPort !== initialPort) {
                 TerminalLogger.success(

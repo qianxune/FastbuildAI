@@ -104,7 +104,7 @@ services:
             - /buildingai/packages/@buildingai/utils/node_modules
             - /buildingai/packages/@buildingai/wechat-sdk/node_modules
         ports:
-            - "${SERVER_PORT:-4090}:${SERVER_PORT:-4090}"
+            - "0.0.0.0:${SERVER_PORT:-4090}:${SERVER_PORT:-4090}"
         environment:
             TZ: Asia/Shanghai
             DB_TYPE: postgres
