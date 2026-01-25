@@ -111,7 +111,8 @@ export const tryListen = async (
  */
 export const setAssetsDir = async (app: NestExpressApplication) => {
     const enabledIdentifiers = getCachedExtensionList();
-    const rootDir = path.join(process.cwd(), "..", "..");
+    // 使用当前工作目录作为项目根目录（Docker 中是 /buildingai）
+    const rootDir = process.cwd();
 
     const extensionsAssets = enabledIdentifiers.map((item) => {
         return {
