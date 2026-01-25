@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { XhsNote } from "@/types/xhs";
-import { useXhsGenerate } from "@/composables/useXhsGenerate";
-import ImageSelector from "@/components/xhs/image-selector.vue";
-import { useAuthFetch } from "~/composables/useAuthFetch";
+import { ref, computed, watch, onMounted } from "vue";
+import type { XhsNote } from "../../types/xhs";
+import { useXhsGenerate } from "../../composables/useXhsGenerate";
+import { useAuthFetch } from "../../composables/useAuthFetch";
 
 definePageMeta({
     layout: false,
@@ -41,14 +41,50 @@ const wordCount = computed(() => noteContent.value.length);
 // 封面图片状态
 const coverImages = ref<string[]>([]);
 
-// 图片选择器状态
-const showImageSelector = ref(false);
+// 图片工具栏配置中的活动标签
+const activeImageTab = ref<"auto" | "template" | "history" | "upload">("auto");
 
 // 编辑模式状态
 const isEditMode = ref(false);
 const editingNoteId = ref<string | null>(null);
 const isLoadingNote = ref(false);
 const isSaving = ref(false);
+
+// 图片工具栏展开状态
+const showImageToolbar = ref(false);
+
+// 图片预览状态
+const previewImageUrl = ref<string | null>(null);
+const showImagePreview = ref(false);
+
+// 图片工具栏配置
+const imageToolbarItems = [
+    {
+        key: "auto" as const,
+        label: "自动配图",
+        description: "根据正文自动配图",
+        icon: "i-heroicons-sparkles",
+        badge: "推荐",
+    },
+    {
+        key: "template" as const,
+        label: "图片模板",
+        description: "模版一键套用",
+        icon: "i-heroicons-photo",
+    },
+    {
+        key: "history" as const,
+        label: "历史图片",
+        description: "过往使用图片",
+        icon: "i-heroicons-clock",
+    },
+    {
+        key: "upload" as const,
+        label: "本地上传",
+        description: "上传已生成好的图片",
+        icon: "i-heroicons-arrow-up-tray",
+    },
+];
 
 // 菜单配置
 const menuItems = [
@@ -271,21 +307,6 @@ const handleClear = () => {
     coverImages.value = [];
 };
 
-// 打开图片选择器
-const openImageSelector = () => {
-    showImageSelector.value = true;
-};
-
-// 关闭图片选择器
-const closeImageSelector = () => {
-    showImageSelector.value = false;
-};
-
-// 更新封面图片
-const handleUpdateCoverImages = (images: string[]) => {
-    coverImages.value = images;
-};
-
 // 插入模版
 const insertTemplate = (template: { title: string; preview: string }) => {
     noteTitle.value = template.title;
@@ -310,6 +331,188 @@ const goBack = () => {
 // 跳转到我的笔记
 const goToMyNotes = () => {
     router.push("/xhs/notes");
+};
+
+// 切换图片工具栏显示
+const toggleImageToolbar = () => {
+    showImageToolbar.value = !showImageToolbar.value;
+};
+
+// 处理图片预览
+const handlePreviewImage = (imageUrl: string) => {
+    console.log("Preview image URL:", imageUrl);
+    previewImageUrl.value = imageUrl;
+    showImagePreview.value = true;
+    console.log("Preview modal opened with URL:", previewImageUrl.value);
+};
+
+// 关闭图片预览
+const closeImagePreview = () => {
+    showImagePreview.value = false;
+    previewImageUrl.value = null;
+};
+
+// 从预览模态框中删除当前图片
+const handleDeletePreviewImage = () => {
+    if (!previewImageUrl.value) return;
+
+    const index = coverImages.value.indexOf(previewImageUrl.value);
+    if (index !== -1) {
+        coverImages.value.splice(index, 1);
+        toast.success("图片已删除");
+    }
+    closeImagePreview();
+};
+
+// 移除单张图片
+const handleRemoveImage = (index: number) => {
+    coverImages.value.splice(index, 1);
+    toast.success("图片已移除");
+};
+
+// 一键清空所有图片
+const handleClearAllImages = () => {
+    if (coverImages.value.length === 0) {
+        toast.warning("暂无图片");
+        return;
+    }
+    coverImages.value = [];
+    toast.success("已清空所有图片");
+};
+
+// 文件上传相关
+const fileInput = ref<HTMLInputElement | null>(null);
+const isUploading = ref(false);
+const uploadProgress = ref(0);
+
+// 处理图片工具选择
+const handleImageToolSelect = (key: "auto" | "template" | "history" | "upload") => {
+    activeImageTab.value = key;
+
+    switch (key) {
+        case "auto":
+            // TODO: 实现自动配图功能
+            toast.info("自动配图功能开发中...");
+            break;
+        case "template":
+            // TODO: 实现图片模板功能
+            toast.info("图片模板功能开发中...");
+            break;
+        case "history":
+            // TODO: 实现历史图片功能
+            toast.info("历史图片功能开发中...");
+            break;
+        case "upload":
+            // 直接触发文件选择
+            fileInput.value?.click();
+            break;
+    }
+};
+
+// 处理文件选择
+const handleFileChange = async (event: Event) => {
+    const target = event.target as HTMLInputElement;
+    const files = target.files;
+
+    if (!files || files.length === 0) return;
+
+    // 验证文件类型和大小
+    const validTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    const maxSize = 5 * 1024 * 1024; // 5MB
+
+    for (const file of Array.from(files)) {
+        if (!validTypes.includes(file.type)) {
+            toast.error(`${file.name}: 只支持 JPG、PNG、GIF、WEBP 格式的图片`);
+            continue;
+        }
+
+        if (file.size > maxSize) {
+            toast.error(`${file.name}: 图片大小不能超过 5MB`);
+            continue;
+        }
+
+        // 检查图片数量限制
+        if (coverImages.value.length >= 9) {
+            toast.warning("最多只能上传 9 张图片");
+            break;
+        }
+
+        await uploadImage(file);
+    }
+
+    // 清空 input
+    if (target) {
+        target.value = "";
+    }
+};
+
+// 上传单张图片
+const uploadImage = async (file: File) => {
+    isUploading.value = true;
+    uploadProgress.value = 0;
+
+    try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        // 模拟上传进度
+        const progressInterval = setInterval(() => {
+            if (uploadProgress.value < 90) {
+                uploadProgress.value += 10;
+            }
+        }, 200);
+
+        // 使用原生 fetch 上传文件，不要手动设置 Content-Type
+        const userStore = useUserStore();
+        const authToken = userStore.token || userStore.temporaryToken;
+
+        if (!authToken) {
+            toast.error("请先登录");
+            clearInterval(progressInterval);
+            return;
+        }
+
+        const response = await fetch("/api/xhs/images/upload", {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${authToken}`,
+            },
+            body: formData,
+        });
+
+        clearInterval(progressInterval);
+        uploadProgress.value = 100;
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || "图片上传失败");
+        }
+
+        const result = await response.json();
+        console.log("Upload response:", result);
+
+        // API 返回格式: { code: 20000, data: { data: { url: '...' }, success: true } }
+        const imageUrl = result?.data?.data?.url;
+
+        if (imageUrl) {
+            // 确保 URL 是绝对路径（以 / 开头）
+            const absoluteUrl = imageUrl.startsWith("/") ? imageUrl : `/${imageUrl}`;
+            console.log("Image URL from API:", imageUrl);
+            console.log("Absolute URL:", absoluteUrl);
+            coverImages.value.push(absoluteUrl);
+            console.log("Updated coverImages:", coverImages.value);
+            toast.success("图片上传成功");
+        } else {
+            console.error("No URL in response:", result);
+            toast.error("上传成功但未返回图片地址");
+        }
+    } catch (error) {
+        console.error("Image upload failed:", error);
+        toast.error(error instanceof Error ? error.message : "图片上传失败，请重试");
+    } finally {
+        isUploading.value = false;
+        uploadProgress.value = 0;
+    }
 };
 </script>
 
@@ -480,6 +683,190 @@ const goToMyNotes = () => {
             </div>
 
             <template v-else>
+                <!-- 图片工具栏 -->
+                <div
+                    class="border-b border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
+                >
+                    <!-- 工具栏切换按钮 -->
+                    <button
+                        @click="toggleImageToolbar"
+                        class="flex w-full items-center justify-between px-4 py-3 text-left transition-colors duration-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                        <div class="flex items-center gap-2">
+                            <UIcon
+                                name="i-heroicons-photo"
+                                class="text-lg text-blue-600 dark:text-blue-400"
+                            />
+                            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                点击下方按钮可制作配图
+                            </span>
+                        </div>
+                        <UIcon
+                            :name="
+                                showImageToolbar
+                                    ? 'i-heroicons-chevron-up'
+                                    : 'i-heroicons-chevron-down'
+                            "
+                            class="text-slate-400 transition-transform duration-200"
+                        />
+                    </button>
+
+                    <!-- 工具栏内容 -->
+                    <Transition
+                        enter-active-class="transition-all duration-200 ease-out"
+                        enter-from-class="max-h-0 opacity-0"
+                        enter-to-class="max-h-40 opacity-100"
+                        leave-active-class="transition-all duration-200 ease-in"
+                        leave-from-class="max-h-40 opacity-100"
+                        leave-to-class="max-h-0 opacity-0"
+                    >
+                        <div v-if="showImageToolbar" class="overflow-hidden">
+                            <div class="grid grid-cols-4 gap-3 px-4 pb-4">
+                                <button
+                                    v-for="item in imageToolbarItems"
+                                    :key="item.key"
+                                    @click="handleImageToolSelect(item.key)"
+                                    :class="[
+                                        'group relative flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all duration-200',
+                                        activeImageTab === item.key
+                                            ? 'border-blue-500 bg-blue-50 shadow-sm dark:border-blue-400 dark:bg-blue-900/30'
+                                            : 'border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:hover:border-blue-600',
+                                    ]"
+                                >
+                                    <!-- 推荐标签 -->
+                                    <div
+                                        v-if="item.badge"
+                                        class="absolute -top-1 -right-1 rounded-full bg-gradient-to-r from-red-500 to-orange-500 px-2 py-0.5 text-xs font-medium text-white shadow-sm"
+                                    >
+                                        {{ item.badge }}
+                                    </div>
+
+                                    <!-- 图标 -->
+                                    <div
+                                        :class="[
+                                            'flex h-12 w-12 items-center justify-center rounded-lg transition-colors duration-200',
+                                            activeImageTab === item.key
+                                                ? 'bg-blue-100 text-blue-600 dark:bg-blue-800 dark:text-blue-300'
+                                                : 'bg-slate-100 text-slate-600 group-hover:bg-blue-50 group-hover:text-blue-600 dark:bg-slate-700 dark:text-slate-400 dark:group-hover:bg-blue-900/50',
+                                        ]"
+                                    >
+                                        <UIcon :name="item.icon" class="text-2xl" />
+                                    </div>
+
+                                    <!-- 文本 -->
+                                    <div class="text-center">
+                                        <div
+                                            :class="[
+                                                'text-sm font-medium',
+                                                activeImageTab === item.key
+                                                    ? 'text-blue-600 dark:text-blue-400'
+                                                    : 'text-slate-700 dark:text-slate-300',
+                                            ]"
+                                        >
+                                            {{ item.label }}
+                                        </div>
+                                        <div
+                                            class="mt-0.5 text-xs text-slate-500 dark:text-slate-400"
+                                        >
+                                            {{ item.description }}
+                                        </div>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+                    </Transition>
+                </div>
+
+                <!-- 已上传图片预览区域 -->
+                <div
+                    v-if="coverImages.length > 0"
+                    class="border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-800"
+                >
+                    <div class="mb-3 flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                已上传图片
+                            </span>
+                            <span
+                                class="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
+                            >
+                                {{ coverImages.length }}/9
+                            </span>
+                        </div>
+                        <button
+                            @click="handleClearAllImages"
+                            class="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-red-600 transition-colors duration-150 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                        >
+                            <UIcon name="i-heroicons-trash" class="text-sm" />
+                            一键清空
+                        </button>
+                    </div>
+
+                    <!-- 图片网格 -->
+                    <div class="grid grid-cols-6 gap-3">
+                        <div
+                            v-for="(image, index) in coverImages"
+                            :key="index"
+                            class="group relative aspect-square overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-700"
+                        >
+                            <!-- 图片 -->
+                            <img
+                                :src="image"
+                                :alt="`图片 ${index + 1}`"
+                                class="h-full w-full cursor-pointer object-cover"
+                                @click="handlePreviewImage(image)"
+                            />
+
+                            <!-- 悬停遮罩 -->
+                            <div
+                                class="absolute inset-0 flex items-center justify-center bg-black/0 transition-all duration-200 group-hover:bg-black/50"
+                            >
+                                <div
+                                    class="flex gap-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                                >
+                                    <!-- 预览按钮 -->
+                                    <button
+                                        @click.stop="handlePreviewImage(image)"
+                                        class="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-slate-700 transition-transform duration-150 hover:scale-110 dark:bg-slate-800/90 dark:text-slate-300"
+                                        aria-label="预览图片"
+                                    >
+                                        <UIcon name="i-heroicons-eye" class="text-lg" />
+                                    </button>
+
+                                    <!-- 删除按钮 -->
+                                    <button
+                                        @click.stop="handleRemoveImage(index)"
+                                        class="flex h-8 w-8 items-center justify-center rounded-full bg-red-500/90 text-white transition-transform duration-150 hover:scale-110"
+                                        aria-label="删除图片"
+                                    >
+                                        <UIcon name="i-heroicons-trash" class="text-lg" />
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- 图片序号 -->
+                            <div
+                                class="absolute top-1 left-1 rounded bg-black/50 px-1.5 py-0.5 text-xs font-medium text-white"
+                            >
+                                {{ index + 1 }}
+                            </div>
+                        </div>
+
+                        <!-- 添加更多按钮 -->
+                        <button
+                            v-if="coverImages.length < 9"
+                            @click="fileInput?.click()"
+                            class="flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 transition-all duration-200 hover:border-blue-400 hover:bg-blue-50 dark:border-slate-600 dark:bg-slate-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
+                        >
+                            <UIcon
+                                name="i-heroicons-plus"
+                                class="text-2xl text-slate-400 dark:text-slate-500"
+                            />
+                            <span class="text-xs text-slate-500 dark:text-slate-400">添加</span>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- 标题栏 -->
                 <div class="border-b border-slate-200 p-4 dark:border-slate-700">
                     <div class="flex items-center justify-between">
@@ -545,50 +932,6 @@ const goToMyNotes = () => {
                         >{{ wordCount }} / 1000</span
                     >
                 </div>
-
-                <!-- 封面图片预览 -->
-                <div
-                    v-if="coverImages.length > 0"
-                    class="border-t border-slate-200 px-4 py-3 dark:border-slate-700"
-                >
-                    <div class="mb-2 flex items-center justify-between">
-                        <span class="text-sm font-medium text-slate-700 dark:text-slate-300"
-                            >封面图片</span
-                        >
-                        <UButton
-                            size="xs"
-                            variant="ghost"
-                            icon="i-heroicons-pencil"
-                            @click="openImageSelector"
-                        >
-                            编辑
-                        </UButton>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        <div
-                            v-for="(image, index) in coverImages"
-                            :key="index"
-                            class="group relative h-16 w-16 overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-700"
-                        >
-                            <img
-                                :src="image"
-                                :alt="`封面图 ${index + 1}`"
-                                class="h-full w-full object-cover"
-                            />
-                            <div
-                                class="bg-opacity-0 group-hover:bg-opacity-40 absolute inset-0 flex items-center justify-center bg-black transition-all duration-200"
-                            >
-                                <UButton
-                                    size="xs"
-                                    color="error"
-                                    icon="i-heroicons-trash"
-                                    class="opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-                                    @click="coverImages.splice(index, 1)"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </template>
         </div>
 
@@ -596,15 +939,6 @@ const goToMyNotes = () => {
         <div
             class="flex w-20 flex-col items-center border-l border-slate-200 bg-white py-4 dark:border-slate-700 dark:bg-slate-800"
         >
-            <button
-                @click="openImageSelector"
-                aria-label="管理配图"
-                class="mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
-            >
-                <UIcon name="i-heroicons-photo" class="mb-1 text-xl" />
-                <span class="text-xs">管理配图</span>
-            </button>
-
             <button
                 @click="handleCopyTitle"
                 aria-label="复制标题"
@@ -738,13 +1072,61 @@ const goToMyNotes = () => {
             </UCard>
         </UModal>
 
-        <!-- Image Selector Modal -->
-        <ImageSelector
-            v-if="showImageSelector"
-            :cover-images="coverImages"
-            :note-content="noteContent"
-            @update:cover-images="handleUpdateCoverImages"
-            @close="closeImageSelector"
+        <!-- 隐藏的文件输入框 -->
+        <input
+            ref="fileInput"
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            multiple
+            class="hidden"
+            @change="handleFileChange"
         />
+
+        <!-- 图片预览对话框 -->
+        <Teleport to="body">
+            <Transition name="fade">
+                <div
+                    v-if="showImagePreview"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="图片预览"
+                    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+                    @click.self="closeImagePreview"
+                    @keydown.escape="closeImagePreview"
+                >
+                    <div
+                        class="relative max-h-[90vh] max-w-[90vw] rounded-xl bg-white p-4 shadow-2xl dark:bg-slate-800"
+                    >
+                        <!-- 关闭按钮 -->
+                        <button
+                            class="absolute -top-3 -right-3 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white text-slate-500 shadow-lg transition-colors hover:bg-slate-100 hover:text-slate-700 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                            aria-label="关闭预览"
+                            @click="closeImagePreview"
+                        >
+                            <UIcon name="i-heroicons-x-mark" class="h-5 w-5" />
+                        </button>
+                        <!-- 预览图片 -->
+                        <img
+                            v-if="previewImageUrl"
+                            :src="previewImageUrl"
+                            alt="预览图片"
+                            class="max-h-[80vh] max-w-[85vw] rounded-lg object-contain"
+                        />
+                    </div>
+                </div>
+            </Transition>
+        </Teleport>
     </div>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+    transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+    opacity: 0;
+}
+</style>
