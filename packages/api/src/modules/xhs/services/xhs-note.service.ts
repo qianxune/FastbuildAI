@@ -715,4 +715,41 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
         return result.affected || 0;
     }
+
+    /**
+     * 更新笔记的发布状态
+     *
+     * @param id 笔记ID
+     * @param userId 用户ID
+     * @param publishData 发布数据
+     * @returns 更新后的笔记
+     */
+    async updatePublishStatus(
+        id: string,
+        userId: string,
+        publishData: {
+            isPublished: boolean;
+            publishedAt?: Date;
+            xhsNoteId?: string;
+            xhsNoteUrl?: string;
+        },
+    ): Promise<XhsNote> {
+        // 验证笔记是否存在且属于当前用户
+        const note = await this.noteRepository.findOne({
+            where: { id, userId },
+        });
+
+        if (!note) {
+            throw HttpErrorFactory.notFound("笔记不存在或无权限访问");
+        }
+
+        // 直接更新实体属性并保存
+        Object.assign(note, publishData);
+        await this.noteRepository.save(note);
+
+        return await this.noteRepository.findOne({
+            where: { id },
+            relations: ["group"],
+        });
+    }
 }

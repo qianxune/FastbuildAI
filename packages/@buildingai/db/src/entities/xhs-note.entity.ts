@@ -15,40 +15,25 @@ export class XhsNote extends BaseEntity {
     /**
      * 笔记标题
      */
-    @Column({
-        type: "varchar",
-        length: 200,
-        comment: "笔记标题",
-    })
+    @Column({ type: "varchar", length: 200, comment: "笔记标题" })
     title: string;
 
     /**
      * 笔记正文内容
      */
-    @Column({
-        type: "text",
-        comment: "笔记正文内容",
-    })
+    @Column({ type: "text", comment: "笔记正文内容" })
     content: string;
 
     /**
      * 封面图片URL列表
      */
-    @Column({
-        type: "jsonb",
-        nullable: true,
-        comment: "封面图片URL列表",
-    })
+    @Column({ type: "jsonb", nullable: true, comment: "封面图片URL列表" })
     coverImages?: string[];
 
     /**
      * 字数统计
      */
-    @Column({
-        type: "int",
-        default: 0,
-        comment: "字数统计",
-    })
+    @Column({ type: "int", default: 0, comment: "字数统计" })
     wordCount: number;
 
     /**
@@ -65,39 +50,26 @@ export class XhsNote extends BaseEntity {
     /**
      * 用户原始输入
      */
-    @Column({
-        type: "text",
-        nullable: true,
-        comment: "用户原始输入内容",
-    })
+    @Column({ type: "text", nullable: true, comment: "用户原始输入内容" })
     originalInput?: string;
 
     /**
      * 所属用户ID
      */
-    @Column({
-        type: "uuid",
-        comment: "所属用户ID",
-    })
+    @Column({ type: "uuid", comment: "所属用户ID" })
     @Index()
     userId: string;
 
     /**
      * 所属分组ID
      */
-    @Column({
-        type: "uuid",
-        nullable: true,
-        comment: "所属分组ID",
-    })
+    @Column({ type: "uuid", nullable: true, comment: "所属分组ID" })
     groupId?: string;
 
     /**
      * 所属用户
      */
-    @ManyToOne(() => User, {
-        onDelete: "CASCADE",
-    })
+    @ManyToOne(() => User, { onDelete: "CASCADE" })
     @JoinColumn({ name: "user_id" })
     user: Relation<User>;
 
@@ -110,4 +82,38 @@ export class XhsNote extends BaseEntity {
     })
     @JoinColumn({ name: "group_id" })
     group?: Relation<XhsGroup>;
+
+    /**
+     * 是否已发布到小红书
+     */
+    @Column({ type: "boolean", default: false, comment: "是否已发布到小红书" })
+    isPublished: boolean;
+
+    /**
+     * 发布时间
+     */
+    @Column({ type: "timestamp", nullable: true, comment: "发布到小红书的时间" })
+    publishedAt?: Date;
+
+    /**
+     * 小红书笔记ID
+     */
+    @Column({
+        type: "varchar",
+        length: 100,
+        nullable: true,
+        comment: "小红书平台上的笔记ID",
+    })
+    xhsNoteId?: string;
+
+    /**
+     * 小红书笔记URL
+     */
+    @Column({
+        type: "varchar",
+        length: 500,
+        nullable: true,
+        comment: "小红书平台上的笔记URL",
+    })
+    xhsNoteUrl?: string;
 }

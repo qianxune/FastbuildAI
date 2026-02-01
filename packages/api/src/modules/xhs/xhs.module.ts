@@ -14,10 +14,12 @@ import { SecretService } from "@buildingai/core/modules";
 import { XhsGroupWebController } from "./controllers/web/xhs-group.web.controller";
 import { XhsNoteWebController } from "./controllers/web/xhs-note.web.controller";
 import { XhsImageWebController } from "./controllers/web/xhs-image.web.controller";
+import { XhsPublishWebController } from "./controllers/web/xhs-publish.web.controller";
 import { ContentModerationService } from "./services/content-moderation.service";
 import { XhsGroupService } from "./services/xhs-group.service";
 import { XhsNoteService } from "./services/xhs-note.service";
 import { XhsImageService } from "./services/xhs-image.service";
+import { XhsPublishService } from "./services/xhs-publish.service";
 
 /**
  * 小红书笔记生成模块
@@ -35,14 +37,26 @@ import { XhsImageService } from "./services/xhs-image.service";
         ]),
         AiModelModule, // 导入AI模型模块
     ],
-    controllers: [XhsNoteWebController, XhsGroupWebController, XhsImageWebController],
+    controllers: [
+        XhsNoteWebController,
+        XhsGroupWebController,
+        XhsImageWebController,
+        XhsPublishWebController,
+    ],
     providers: [
         XhsNoteService,
         XhsGroupService,
         XhsImageService,
+        XhsPublishService,
         ContentModerationService,
         SecretService, // 添加SecretService
     ],
-    exports: [XhsNoteService, XhsGroupService, XhsImageService, ContentModerationService],
+    exports: [
+        XhsNoteService,
+        XhsGroupService,
+        XhsImageService,
+        XhsPublishService,
+        ContentModerationService,
+    ],
 })
 export class XhsModule {}
