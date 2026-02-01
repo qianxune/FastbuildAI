@@ -4,9 +4,10 @@ import { ExtensionsService, QueryExtensionDto } from "@buildingai/core/modules";
 import { BuildFileUrl } from "@buildingai/decorators/file-url.decorator";
 import { Public } from "@buildingai/decorators/public.decorator";
 import { DictService } from "@buildingai/dict";
+import { HttpErrorFactory } from "@buildingai/errors";
 import { WebController } from "@common/decorators/controller.decorator";
 import { ExtensionMarketService } from "@modules/extension/services/extension-market.service";
-import { Get, Query } from "@nestjs/common";
+import { Get, Param, Query } from "@nestjs/common";
 
 @WebController("extension")
 export class ExtensionWebController extends BaseController {
@@ -16,6 +17,23 @@ export class ExtensionWebController extends BaseController {
         private readonly extensionMarketService: ExtensionMarketService,
     ) {
         super();
+    }
+
+    /**
+     * Get stored extension info by identifier
+     *
+     * @param identifier Extension identifier
+     * @returns Extension details
+     */
+    @Get("detail/:identifier")
+    @BuildFileUrl(["**.aliasIcon", "**.icon"])
+    @Public()
+    async getDetailByIdentifier(@Param("identifier") identifier: string) {
+        const extension = await this.extensionsService.findByIdentifier(identifier);
+        if (!extension) {
+            throw HttpErrorFactory.notFound("Extension does not exist");
+        }
+        return extension;
     }
 
     /**
@@ -40,12 +58,7 @@ export class ExtensionWebController extends BaseController {
             extensionsList = await this.extensionMarketService.getMixedApplicationList();
         } else {
             // If no platform secret, only fetch local installed extensions
-            const installedExtensions = await this.extensionsService.findAll();
-            extensionsList = installedExtensions.map((ext) => ({
-                ...ext,
-                isInstalled: true,
-                aliasShow: true,
-            }));
+            extensionsList = await this.extensionsService.findAll();
         }
 
         // Extension filter conditions
@@ -73,13 +86,7 @@ export class ExtensionWebController extends BaseController {
         }
 
         // 默认只返回已启用且已安装的应用
-        // status 可能是布尔值 true 或数字 1 (ExtensionStatus.ENABLED)
-        extensionsList = extensionsList.filter(
-            (ext) =>
-                (ext.status === true || ext.status === 1) &&
-                ext.isInstalled === true &&
-                ext.aliasShow === true,
-        );
+        extensionsList = extensionsList.filter((ext) => ext.status === 1 && ext.aliasShow === true);
 
         return this.paginationResult(extensionsList, extensionsList.length, query);
     }
