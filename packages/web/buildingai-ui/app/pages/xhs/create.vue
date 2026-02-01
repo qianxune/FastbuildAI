@@ -514,6 +514,166 @@ const uploadImage = async (file: File) => {
         uploadProgress.value = 0;
     }
 };
+
+// 发布相关状态
+const isPublishing = ref(false);
+const showPublishConfirm = ref(false);
+
+// 登录二维码相关状态
+const showLoginQrCode = ref(false);
+const loginQrCodeUrl = ref<string | null>(null);
+const isLoadingQrCode = ref(false);
+const isCheckingLoginStatus = ref(false);
+
+// 发布笔记到小红书
+const handlePublish = async () => {
+    // 验证内容
+    if (!noteTitle.value?.trim()) {
+        toast.warning("请填写标题");
+        return;
+    }
+
+    if (!noteContent.value?.trim()) {
+        toast.warning("请填写正文内容");
+        return;
+    }
+
+    // 如果没有配图，提示但允许继续
+    if (coverImages.value.length === 0) {
+        showPublishConfirm.value = true;
+        return;
+    }
+
+    await doPublish();
+};
+
+// 确认发布（无配图时）
+const confirmPublishWithoutImages = async () => {
+    showPublishConfirm.value = false;
+    await doPublish();
+};
+
+// 获取登录二维码
+const fetchLoginQrCode = async () => {
+    isLoadingQrCode.value = true;
+    const { get } = useAuthFetch();
+
+    try {
+        const { data, error: apiError } = await get<{
+            success: boolean;
+            qrCodeUrl?: string;
+            qrCodeBase64?: string;
+            message: string;
+        }>("/api/xhs/publish/login-qrcode", { showError: false });
+
+        if (apiError || !data?.success) {
+            toast.error(data?.message || apiError || "获取登录二维码失败");
+            return;
+        }
+
+        // 优先使用 base64，其次使用 URL
+        loginQrCodeUrl.value = data.qrCodeBase64 || data.qrCodeUrl || null;
+
+        if (!loginQrCodeUrl.value) {
+            toast.error("获取登录二维码失败");
+        }
+    } catch (error) {
+        console.error("Fetch QR code failed:", error);
+        toast.error("获取登录二维码失败");
+    } finally {
+        isLoadingQrCode.value = false;
+    }
+};
+
+// 检查登录状态（用于轮询）
+const checkLoginStatusAndPublish = async () => {
+    isCheckingLoginStatus.value = true;
+    const { get } = useAuthFetch();
+
+    try {
+        const { data } = await get<{
+            isLoggedIn: boolean;
+            message: string;
+        }>("/api/xhs/publish/login-status", { showError: false });
+
+        if (data?.isLoggedIn) {
+            showLoginQrCode.value = false;
+            loginQrCodeUrl.value = null;
+            toast.success("登录成功！正在发布...");
+            await doPublish();
+        } else {
+            toast.info("请使用小红书 App 扫描二维码登录");
+        }
+    } catch (error) {
+        console.error("Check login status failed:", error);
+    } finally {
+        isCheckingLoginStatus.value = false;
+    }
+};
+
+// 关闭登录二维码弹窗
+const closeLoginQrCode = () => {
+    showLoginQrCode.value = false;
+    loginQrCodeUrl.value = null;
+};
+
+// 刷新二维码
+const refreshQrCode = async () => {
+    await fetchLoginQrCode();
+};
+
+// 执行发布
+const doPublish = async () => {
+    isPublishing.value = true;
+
+    const { post } = useAuthFetch();
+
+    try {
+        const { data, error: apiError } = await post<{
+            success: boolean;
+            message: string;
+            noteId?: string;
+            noteUrl?: string;
+        }>(
+            "/api/xhs/publish",
+            {
+                title: noteTitle.value,
+                content: noteContent.value,
+                images: coverImages.value,
+            },
+            {
+                showError: false,
+            },
+        );
+
+        if (apiError || !data?.success) {
+            const errorMsg = data?.message || apiError || "发布失败，请稍后重试";
+
+            // 检查是否是登录过期的错误
+            if (errorMsg.includes("登录") || errorMsg.includes("过期")) {
+                toast.warning("小红书登录已过期，请扫码登录");
+                showLoginQrCode.value = true;
+                await fetchLoginQrCode();
+                return;
+            }
+
+            toast.error(errorMsg);
+            return;
+        }
+
+        toast.success(data.message || "笔记已成功发布到小红书！");
+
+        // 如果返回了笔记链接，可以提示用户
+        if (data.noteUrl) {
+            console.log("Published note URL:", data.noteUrl);
+        }
+    } catch (error) {
+        console.error("Publish failed:", error);
+        toast.error("发布失败，请检查网络连接后重试");
+    } finally {
+        isPublishing.value = false;
+    }
+};
 </script>
 
 <template>
@@ -985,11 +1145,22 @@ const uploadImage = async (file: File) => {
 
             <!-- 发布按钮 (主要CTA) -->
             <button
+                @click="handlePublish"
+                :disabled="isPublishing"
                 aria-label="发布笔记"
-                class="mb-4 flex h-14 w-14 cursor-pointer flex-col items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg transition-all duration-200 hover:bg-blue-700 hover:shadow-xl"
+                :class="[
+                    'mb-4 flex h-14 w-14 cursor-pointer flex-col items-center justify-center rounded-xl shadow-lg transition-all duration-200',
+                    isPublishing
+                        ? 'bg-blue-400 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700 hover:shadow-xl',
+                    'text-white',
+                ]"
             >
-                <UIcon name="i-heroicons-paper-airplane" class="text-xl" />
-                <span class="mt-1 text-xs">发布</span>
+                <UIcon
+                    :name="isPublishing ? 'i-heroicons-arrow-path' : 'i-heroicons-paper-airplane'"
+                    :class="['text-xl', isPublishing ? 'animate-spin' : '']"
+                />
+                <span class="mt-1 text-xs">{{ isPublishing ? "发布中" : "发布" }}</span>
             </button>
 
             <!-- 清空按钮 -->
@@ -1066,7 +1237,156 @@ const uploadImage = async (file: File) => {
                 <template #footer>
                     <div class="flex justify-end gap-2">
                         <UButton variant="outline" @click="showPreview = false">关闭</UButton>
-                        <UButton color="primary">发布笔记</UButton>
+                        <UButton
+                            color="primary"
+                            @click="showPreview = false; handlePublish()"
+                            :loading="isPublishing"
+                        >
+                            发布笔记
+                        </UButton>
+                    </div>
+                </template>
+            </UCard>
+        </UModal>
+
+        <!-- 发布确认弹窗（无配图时） -->
+        <UModal v-model="showPublishConfirm">
+            <UCard class="max-w-sm">
+                <template #header>
+                    <div class="flex items-center gap-2">
+                        <UIcon
+                            name="i-heroicons-exclamation-triangle"
+                            class="text-xl text-amber-500"
+                        />
+                        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">
+                            发布提示
+                        </h3>
+                    </div>
+                </template>
+
+                <p class="text-sm text-slate-600 dark:text-slate-400">
+                    您的笔记还没有添加配图，建议添加至少一张图片以获得更好的展示效果。
+                </p>
+                <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">确定要继续发布吗？</p>
+
+                <template #footer>
+                    <div class="flex justify-end gap-2">
+                        <UButton variant="outline" @click="showPublishConfirm = false">
+                            返回添加配图
+                        </UButton>
+                        <UButton
+                            color="primary"
+                            @click="confirmPublishWithoutImages"
+                            :loading="isPublishing"
+                        >
+                            继续发布
+                        </UButton>
+                    </div>
+                </template>
+            </UCard>
+        </UModal>
+
+        <!-- 小红书登录二维码弹窗 -->
+        <UModal v-model="showLoginQrCode">
+            <UCard class="max-w-md">
+                <template #header>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <div
+                                class="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30"
+                            >
+                                <UIcon
+                                    name="i-heroicons-qr-code"
+                                    class="text-xl text-red-600 dark:text-red-400"
+                                />
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-semibold text-slate-900 dark:text-white">
+                                    小红书登录
+                                </h3>
+                                <p class="text-xs text-slate-500 dark:text-slate-400">
+                                    请使用小红书 App 扫码登录
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            class="cursor-pointer rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
+                            @click="closeLoginQrCode"
+                        >
+                            <UIcon name="i-heroicons-x-mark" class="text-xl" />
+                        </button>
+                    </div>
+                </template>
+
+                <div class="flex flex-col items-center py-4">
+                    <!-- 加载状态 -->
+                    <div
+                        v-if="isLoadingQrCode"
+                        class="flex h-64 w-64 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-700"
+                    >
+                        <div class="text-center">
+                            <div
+                                class="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-red-200 border-t-red-500"
+                            ></div>
+                            <p class="text-sm text-slate-500 dark:text-slate-400">
+                                正在获取二维码...
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- 二维码图片 -->
+                    <div
+                        v-else-if="loginQrCodeUrl"
+                        class="rounded-xl border-2 border-slate-200 bg-white p-4 dark:border-slate-600 dark:bg-slate-800"
+                    >
+                        <img
+                            :src="loginQrCodeUrl"
+                            alt="小红书登录二维码"
+                            class="h-56 w-56 object-contain"
+                        />
+                    </div>
+
+                    <!-- 获取失败 -->
+                    <div
+                        v-else
+                        class="flex h-64 w-64 flex-col items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-700"
+                    >
+                        <UIcon
+                            name="i-heroicons-exclamation-circle"
+                            class="mb-2 text-4xl text-slate-400"
+                        />
+                        <p class="text-sm text-slate-500 dark:text-slate-400">获取二维码失败</p>
+                    </div>
+
+                    <!-- 提示文字 -->
+                    <div class="mt-4 text-center">
+                        <p class="text-sm text-slate-600 dark:text-slate-400">
+                            打开小红书 App，扫描上方二维码
+                        </p>
+                        <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                            扫码成功后点击下方按钮继续发布
+                        </p>
+                    </div>
+                </div>
+
+                <template #footer>
+                    <div class="flex justify-between gap-3">
+                        <UButton
+                            variant="outline"
+                            :loading="isLoadingQrCode"
+                            @click="refreshQrCode"
+                        >
+                            <UIcon name="i-heroicons-arrow-path" class="mr-1" />
+                            刷新二维码
+                        </UButton>
+                        <UButton
+                            color="primary"
+                            :loading="isCheckingLoginStatus"
+                            @click="checkLoginStatusAndPublish"
+                        >
+                            <UIcon name="i-heroicons-check" class="mr-1" />
+                            我已扫码登录
+                        </UButton>
                     </div>
                 </template>
             </UCard>
