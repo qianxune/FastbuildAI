@@ -1,0 +1,17 @@
+{
+    "identifier": "image-studio",
+    "name": "Image Studio",
+    "type": "application",
+    "version": "0.1.0",
+    "description": "AI 图片创作工作台，支持模型选择、批量生成、历史记录与下载。",
+    "homepage": "",
+    "author": {
+        "avatar": "/static/avatars/buildingai.png",
+        "name": "BuildingAI Teams",
+        "homepage": ""
+    },
+    "changelog": [],
+    "engine": {
+        "buildingai": ">=26.0.0"
+    }
+}
