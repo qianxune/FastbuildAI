@@ -385,14 +385,126 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const isUploading = ref(false);
 const uploadProgress = ref(0);
 
+// 自动配图功能
+const isGeneratingImage = ref(false);
+
+const handleAutoImageGenerate = async () => {
+    if (!noteContent.value || !noteContent.value.trim()) {
+        toast.warning("请先输入笔记内容");
+        return;
+    }
+
+    if (coverImages.value.length >= 9) {
+        toast.warning("最多只能上传 9 张图片");
+        return;
+    }
+
+    isGeneratingImage.value = true;
+    try {
+        const { get, post } = useAuthFetch();
+
+        // 获取可用的AI模型和提供商
+        console.log("🔍 正在获取AI模型和提供商列表...");
+
+        // 并行获取模型和提供商列表
+        const [modelsResponse, providersResponse] = await Promise.all([
+            get<
+                Array<{
+                    id: string;
+                    providerId: string;
+                    isActive: boolean;
+                    name: string;
+                }>
+            >("/consoleapi/ai-models", { showError: false }),
+            get<
+                Array<{
+                    id: string;
+                    provider: string;
+                    name: string;
+                }>
+            >("/consoleapi/ai-providers", { showError: false }),
+        ]);
+
+        const modelsData = modelsResponse.data;
+        const providersData = providersResponse.data;
+
+        console.log("📦 模型列表:", modelsData?.length, "个");
+        console.log("📦 提供商列表:", providersData);
+
+        // 查找智谱AI提供商
+        let modelId: string | undefined;
+        if (providersData && Array.isArray(providersData)) {
+            const zhipuProvider = providersData.find((p) => p.provider === "zhipuai");
+            console.log("🔍 智谱AI提供商:", zhipuProvider);
+
+            if (zhipuProvider && modelsData && Array.isArray(modelsData)) {
+                // 查找该提供商下激活的模型
+                const zhipuModel = modelsData.find(
+                    (model) => model.providerId === zhipuProvider.id && model.isActive,
+                );
+                if (zhipuModel) {
+                    modelId = zhipuModel.id;
+                    console.log("✅ 找到智谱AI模型:", modelId, zhipuModel.name);
+                } else {
+                    console.warn("⚠️ 未找到激活的智谱AI模型");
+                }
+            } else {
+                console.warn("⚠️ 未找到智谱AI提供商");
+            }
+        } else {
+            console.warn("⚠️ 提供商列表为空或获取失败");
+        }
+
+        console.log("📤 发送自动配图请求, modelId:", modelId);
+
+        // 调用自动配图API
+        const { data, error: apiError } = await post<{ url?: string; data?: { url: string } }>(
+            "/api/xhs/images/auto",
+            {
+                content: noteContent.value,
+                modelId,
+            },
+            { errorMessage: "自动配图失败" },
+        );
+
+        if (apiError) {
+            return;
+        }
+
+        console.log("📥 自动配图响应:", data);
+
+        // 处理响应格式：可能是 { url: '...' } 或 { success: true, data: { url: '...' } }
+        const imageUrl = data?.url || data?.data?.url;
+
+        if (imageUrl) {
+            // 将相对路径转换为绝对路径
+            const absoluteUrl = imageUrl.startsWith("http")
+                ? imageUrl
+                : `${window.location.origin}${imageUrl}`;
+
+            console.log("🖼️ 图片URL:", absoluteUrl);
+            coverImages.value.push(absoluteUrl);
+            console.log("📷 当前图片列表:", coverImages.value);
+            toast.success("自动配图成功");
+        } else {
+            console.warn("⚠️ 响应中没有url字段:", data);
+            toast.warning("图片生成成功但未返回URL");
+        }
+    } catch (error) {
+        console.error("Auto image generation failed:", error);
+        toast.error("自动配图失败，请重试");
+    } finally {
+        isGeneratingImage.value = false;
+    }
+};
+
 // 处理图片工具选择
-const handleImageToolSelect = (key: "auto" | "template" | "history" | "upload") => {
+const handleImageToolSelect = async (key: "auto" | "template" | "history" | "upload") => {
     activeImageTab.value = key;
 
     switch (key) {
         case "auto":
-            // TODO: 实现自动配图功能
-            toast.info("自动配图功能开发中...");
+            await handleAutoImageGenerate();
             break;
         case "template":
             // TODO: 实现图片模板功能
@@ -1151,7 +1263,7 @@ const doPublish = async () => {
                 :class="[
                     'mb-4 flex h-14 w-14 cursor-pointer flex-col items-center justify-center rounded-xl shadow-lg transition-all duration-200',
                     isPublishing
-                        ? 'bg-blue-400 cursor-not-allowed'
+                        ? 'cursor-not-allowed bg-blue-400'
                         : 'bg-blue-600 hover:bg-blue-700 hover:shadow-xl',
                     'text-white',
                 ]"
@@ -1239,7 +1351,10 @@ const doPublish = async () => {
                         <UButton variant="outline" @click="showPreview = false">关闭</UButton>
                         <UButton
                             color="primary"
-                            @click="showPreview = false; handlePublish()"
+                            @click="
+                                showPreview = false;
+                                handlePublish();
+                            "
                             :loading="isPublishing"
                         >
                             发布笔记

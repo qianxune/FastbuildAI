@@ -53,12 +53,16 @@ export class XhsImageWebController extends BaseController {
      * POST /api/web/xhs/images/auto
      */
     @Post("images/auto")
-    async autoGenerate(@Body("content") content: string, @Playground() playground: UserPlayground) {
+    async autoGenerate(
+        @Body("content") content: string,
+        @Body("modelId") modelId: string | undefined,
+        @Playground() playground: UserPlayground,
+    ) {
         if (!content || content.trim().length === 0) {
             throw HttpErrorFactory.badRequest("请提供笔记内容");
         }
 
-        const image = await this.xhsImageService.generateAuto(content, playground.id);
+        const image = await this.xhsImageService.generateAuto(content, playground.id, modelId);
 
         return {
             success: true,
