@@ -1,6 +1,6 @@
 import { BaseService } from "@buildingai/base";
 import { InjectRepository } from "@buildingai/db/@nestjs/typeorm";
-import { XhsProduct } from "@buildingai/db/entities";
+import { XhsNote, XhsProduct } from "@buildingai/db/entities";
 import { In, Repository } from "@buildingai/db/typeorm";
 import { HttpErrorFactory } from "@buildingai/errors";
 import { Injectable, Logger } from "@nestjs/common";
@@ -15,6 +15,10 @@ export interface ImportProductResult {
     errors?: Array<{ row: number; message: string }>;
 }
 
+export interface XhsProductWithNoteCount extends XhsProduct {
+    noteCount: number;
+}
+
 /**
  * XHS product/SKU service (Miaoshou import)
  */
@@ -25,8 +29,30 @@ export class XhsProductService extends BaseService<XhsProduct> {
     constructor(
         @InjectRepository(XhsProduct)
         private readonly productRepository: Repository<XhsProduct>,
+        @InjectRepository(XhsNote)
+        private readonly noteRepository: Repository<XhsNote>,
     ) {
         super(productRepository);
+    }
+
+    /**
+     * 批量获取商品的笔记数量 (product_id -> count)
+     */
+    private async getNoteCountsByProductIds(productIds: string[]): Promise<Map<string, number>> {
+        if (!productIds.length) return new Map();
+        const rows = await this.noteRepository
+            .createQueryBuilder("n")
+            .select("n.productId", "productId")
+            .addSelect("COUNT(n.id)", "cnt")
+            .where("n.productId IN (:...ids)", { ids: productIds })
+            .andWhere("n.productId IS NOT NULL")
+            .groupBy("n.productId")
+            .getRawMany<{ productId: string; cnt: string }>();
+        const map = new Map<string, number>();
+        for (const r of rows) {
+            map.set(r.productId, parseInt(r.cnt, 10) || 0);
+        }
+        return map;
     }
     
     async importFromExcel(file: Express.Multer.File, userId: string): Promise<ImportProductResult> {
@@ -152,12 +178,11 @@ export class XhsProductService extends BaseService<XhsProduct> {
     async findByUser(
         userId: string,
         query: QueryProductDto,
-    ): Promise<{ items: XhsProduct[]; total: number; page: number; limit: number }> {
-        const { page = 1, limit = 20, keyword } = query;
+    ): Promise<{ items: XhsProductWithNoteCount[]; total: number; page: number; limit: number }> {
+        const { page = 1, limit = 20, keyword, sortBy = "createdAt", sortOrder = "DESC" } = query;
         const qb = this.productRepository
             .createQueryBuilder("p")
-            .where("p.userId = :userId", { userId })
-            .orderBy("p.createdAt", "DESC");
+            .where("p.userId = :userId", { userId });
 
         if (keyword?.trim()) {
             qb.andWhere(
@@ -166,12 +191,36 @@ export class XhsProductService extends BaseService<XhsProduct> {
             );
         }
 
+        if (sortBy === "noteCount") {
+            const allProducts = await qb.orderBy("p.createdAt", "DESC").getMany();
+            const noteCountMap = await this.getNoteCountsByProductIds(allProducts.map((p) => p.id));
+            const itemsWithCount: XhsProductWithNoteCount[] = allProducts.map((p) => ({
+                ...p,
+                noteCount: noteCountMap.get(p.id) ?? 0,
+            }));
+            itemsWithCount.sort((a, b) => {
+                const diff = a.noteCount - b.noteCount;
+                return sortOrder === "ASC" ? diff : -diff;
+            });
+            const total = itemsWithCount.length;
+            const start = (page - 1) * limit;
+            const paginated = itemsWithCount.slice(start, start + limit);
+            return { items: paginated, total, page, limit };
+        }
+
+        qb.orderBy("p.createdAt", sortOrder);
         const [items, total] = await qb
             .skip((page - 1) * limit)
             .take(limit)
             .getManyAndCount();
 
-        return { items, total, page, limit };
+        const noteCountMap = await this.getNoteCountsByProductIds(items.map((p) => p.id));
+        const itemsWithCount: XhsProductWithNoteCount[] = items.map((p) => ({
+            ...p,
+            noteCount: noteCountMap.get(p.id) ?? 0,
+        }));
+
+        return { items: itemsWithCount, total, page, limit };
     }
     
     async findOneForUser(id: string, userId: string): Promise<XhsProduct> {
@@ -205,6 +254,7 @@ export class XhsProductService extends BaseService<XhsProduct> {
             productId: string;
             productName: string;
             skuCount: number;
+            noteCount: number;
             skus: XhsProduct[];
             imageUrl?: string;
             sourceUrl?: string;
@@ -214,7 +264,7 @@ export class XhsProductService extends BaseService<XhsProduct> {
         page: number;
         limit: number;
     }> {
-        const { page = 1, limit = 20, keyword } = query;
+        const { page = 1, limit = 20, keyword, sortBy = "createdAt", sortOrder = "DESC" } = query;
 
         // 构建查询
         const qb = this.productRepository
@@ -260,11 +310,27 @@ export class XhsProductService extends BaseService<XhsProduct> {
             groupMap.get(productId)!.skus.push(product);
         }
 
-        // 转换为数组并排序（按第一个SKU的创建时间）
-        const groups = Array.from(groupMap.values()).sort((a, b) => {
+        // 批量获取笔记数量
+        const allSkuIds = Array.from(groupMap.values()).flatMap((g) => g.skus.map((s) => s.id));
+        const noteCountMap = await this.getNoteCountsByProductIds(allSkuIds);
+
+        // 转换为数组，添加 noteCount，并排序
+        const groupsWithCount = Array.from(groupMap.values()).map((group) => {
+            const noteCount = group.skus.reduce(
+                (sum, sku) => sum + (noteCountMap.get(sku.id) ?? 0),
+                0,
+            );
+            return { ...group, noteCount };
+        });
+
+        const groups = groupsWithCount.sort((a, b) => {
+            if (sortBy === "noteCount") {
+                const diff = a.noteCount - b.noteCount;
+                return sortOrder === "ASC" ? diff : -diff;
+            }
             const timeA = a.skus[0]?.createdAt?.getTime() || 0;
             const timeB = b.skus[0]?.createdAt?.getTime() || 0;
-            return timeB - timeA;
+            return sortOrder === "ASC" ? timeA - timeB : timeB - timeA;
         });
 
         // 分页
@@ -272,7 +338,7 @@ export class XhsProductService extends BaseService<XhsProduct> {
         const start = (page - 1) * limit;
         const paginatedGroups = groups.slice(start, start + limit);
 
-        // 添加 skuCount
+        // 添加 skuCount（noteCount 已在上面的 groupsWithCount 中计算）
         const items = paginatedGroups.map((group) => ({
             ...group,
             skuCount: group.skus.length,

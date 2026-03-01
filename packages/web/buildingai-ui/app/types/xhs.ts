@@ -162,6 +162,11 @@ export interface XhsNote {
     group?: XhsGroup;
 
     /**
+     * 关联的商品ID（SKU）
+     */
+    productId?: string;
+
+    /**
      * 创建时间
      */
     createdAt: string;
@@ -490,6 +495,8 @@ export interface XhsProduct {
   productUrl?: string
   createdAt: string
   updatedAt: string
+  /** 关联的笔记数量 */
+  noteCount?: number
 }
 
 /**
@@ -509,6 +516,8 @@ export interface XhsProductGroup {
   productId: string
   productName: string
   skuCount: number
+  /** 组内所有 SKU 的笔记数之和 */
+  noteCount?: number
   skus: XhsProduct[]
   imageUrl?: string
   sourceUrl?: string

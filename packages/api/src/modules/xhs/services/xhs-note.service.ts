@@ -470,6 +470,7 @@ export class XhsNoteService extends BaseService<XhsNote> {
             page = 1,
             limit = 20,
             groupId,
+            productId,
             keyword,
             sortBy = "createdAt",
             sortOrder = "DESC",
@@ -483,6 +484,18 @@ export class XhsNoteService extends BaseService<XhsNote> {
         // 分组筛选
         if (groupId) {
             queryBuilder.andWhere("note.groupId = :groupId", { groupId });
+        }
+
+        // 商品ID筛选（支持单个或多个）
+        const productIds = query.productIds
+            ? query.productIds.split(",").map((s) => s.trim()).filter(Boolean)
+            : productId
+              ? [productId]
+              : [];
+        if (productIds.length === 1) {
+            queryBuilder.andWhere("note.productId = :productId", { productId: productIds[0] });
+        } else if (productIds.length > 1) {
+            queryBuilder.andWhere("note.productId IN (:...productIds)", { productIds });
         }
 
         // 关键词搜索

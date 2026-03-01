@@ -32,6 +32,21 @@ export class QueryNoteDto {
     groupId?: string;
 
     /**
+     * 商品ID筛选（关联笔记的商品，单个）
+     */
+    @IsOptional()
+    @IsUUID(4, { message: "商品ID必须是有效的UUID格式" })
+    productId?: string;
+
+    /**
+     * 商品ID列表筛选（多个商品，逗号分隔）
+     * 与 productId 互斥，优先使用 productIds
+     */
+    @IsOptional()
+    @IsString({ message: "商品ID列表必须是字符串" })
+    productIds?: string;
+
+    /**
      * 搜索关键词
      */
     @IsOptional()

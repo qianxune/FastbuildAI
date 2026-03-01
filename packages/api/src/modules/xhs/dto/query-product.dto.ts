@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Max, Min } from "class-validator";
+import { IsIn, IsInt, IsOptional, IsString, Max, Min } from "class-validator";
 import { Transform } from "class-transformer";
 
 /**
@@ -21,4 +21,12 @@ export class QueryProductDto {
     @IsOptional()
     @IsString({ message: "搜索关键词必须是字符串" })
     keyword?: string;
+
+    @IsOptional()
+    @IsIn(["createdAt", "noteCount"], { message: "排序字段只能是 createdAt 或 noteCount" })
+    sortBy?: string = "createdAt";
+
+    @IsOptional()
+    @IsIn(["ASC", "DESC"], { message: "排序方向只能是 ASC 或 DESC" })
+    sortOrder?: "ASC" | "DESC" = "DESC";
 }

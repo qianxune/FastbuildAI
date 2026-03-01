@@ -21,17 +21,28 @@ export const useXhsProducts = () => {
     const error = ref("");
     const keyword = ref("");
     const viewMode = ref<"list" | "grouped">("grouped");
+    const sortBy = ref<"createdAt" | "noteCount">("createdAt");
+    const sortOrder = ref<"ASC" | "DESC">("DESC");
 
     const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.value)));
 
-    const fetchProducts = async (opts?: { page?: number; keyword?: string }) => {
+    const fetchProducts = async (opts?: {
+        page?: number;
+        keyword?: string;
+        sortBy?: "createdAt" | "noteCount";
+        sortOrder?: "ASC" | "DESC";
+    }) => {
         isLoading.value = true;
         error.value = "";
         const p = opts?.page ?? page.value;
         const kw = opts?.keyword !== undefined ? opts.keyword : keyword.value;
+        const sb = opts?.sortBy ?? sortBy.value;
+        const so = opts?.sortOrder ?? sortOrder.value;
         const params = new URLSearchParams({
             page: String(p),
             limit: String(limit.value),
+            sortBy: sb,
+            sortOrder: so,
         });
         if (kw?.trim()) params.set("keyword", kw.trim());
 
@@ -54,14 +65,23 @@ export const useXhsProducts = () => {
         isLoading.value = false;
     };
 
-    const fetchProductsGrouped = async (opts?: { page?: number; keyword?: string }) => {
+    const fetchProductsGrouped = async (opts?: {
+        page?: number;
+        keyword?: string;
+        sortBy?: "createdAt" | "noteCount";
+        sortOrder?: "ASC" | "DESC";
+    }) => {
         isLoading.value = true;
         error.value = "";
         const p = opts?.page ?? page.value;
         const kw = opts?.keyword !== undefined ? opts.keyword : keyword.value;
+        const sb = opts?.sortBy ?? sortBy.value;
+        const so = opts?.sortOrder ?? sortOrder.value;
         const params = new URLSearchParams({
             page: String(p),
             limit: String(limit.value),
+            sortBy: sb,
+            sortOrder: so,
         });
         if (kw?.trim()) params.set("keyword", kw.trim());
 
@@ -147,6 +167,8 @@ export const useXhsProducts = () => {
         error,
         keyword,
         viewMode,
+        sortBy,
+        sortOrder,
         fetchProducts,
         fetchProductsGrouped,
         fetchByIds,
