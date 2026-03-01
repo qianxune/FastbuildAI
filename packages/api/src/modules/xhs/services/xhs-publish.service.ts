@@ -311,64 +311,77 @@ export class XhsPublishService {
      */
     async getLoginQrCode(): Promise<LoginQrCodeResult> {
         try {
-            const response = await this.callMcpTool("get_login_qrcode", {});
+            // 确保会话已初始化
+            await this.ensureSession()
 
-            if (response.error) {
+            if (!this.sessionId) {
                 return {
                     success: false,
-                    message: response.error.message,
-                };
+                    message: '小红书 MCP 服务未初始化，请检查服务配置',
+                }
             }
 
-            const content = response.result?.content || [];
-            let qrCodeUrl: string | undefined;
-            let qrCodeBase64: string | undefined;
-            let message = "";
+            const response = await this.callMcpTool('get_login_qrcode', {})
+
+            if (response.error) {
+                this.logger.error(`Get login QR code error: ${response.error.message}`)
+                return {
+                    success: false,
+                    message: `获取二维码失败: ${response.error.message}`,
+                }
+            }
+
+            const content = response.result?.content || []
+            let qrCodeUrl: string | undefined
+            let qrCodeBase64: string | undefined
+            let message = ''
 
             // 解析返回内容，可能包含图片或文本
             for (const item of content) {
-                if (item.type === "image") {
+                if (item.type === 'image') {
                     // MCP 图片格式: { type: "image", data: "base64...", mimeType: "image/png" }
                     if (item.data && item.mimeType) {
-                        qrCodeBase64 = `data:${item.mimeType};base64,${item.data}`;
+                        qrCodeBase64 = `data:${item.mimeType};base64,${item.data}`
                     } else if (item.text) {
-                        if (item.text.startsWith("data:image")) {
-                            qrCodeBase64 = item.text;
-                        } else if (item.text.startsWith("http")) {
-                            qrCodeUrl = item.text;
+                        if (item.text.startsWith('data:image')) {
+                            qrCodeBase64 = item.text
+                        } else if (item.text.startsWith('http')) {
+                            qrCodeUrl = item.text
                         }
                     }
-                } else if (item.type === "text" && item.text) {
+                } else if (item.type === 'text' && item.text) {
                     // 检查文本中是否包含 URL 或 base64
-                    if (item.text.startsWith("http")) {
-                        qrCodeUrl = item.text;
-                    } else if (item.text.startsWith("data:image")) {
-                        qrCodeBase64 = item.text;
+                    if (item.text.startsWith('http')) {
+                        qrCodeUrl = item.text
+                    } else if (item.text.startsWith('data:image')) {
+                        qrCodeBase64 = item.text
                     } else {
-                        message = item.text;
+                        message = item.text
                     }
                 }
             }
 
             if (!qrCodeUrl && !qrCodeBase64) {
+                this.logger.warn('No QR code found in response:', JSON.stringify(content))
                 return {
                     success: false,
-                    message: message || "获取二维码失败，请稍后重试",
-                };
+                    message: message || '获取二维码失败，请稍后重试',
+                }
             }
 
             return {
                 success: true,
                 qrCodeUrl,
                 qrCodeBase64,
-                message: message || "请使用小红书 App 扫描二维码登录",
-            };
+                message: message || '请使用小红书 App 扫描二维码登录',
+            }
         } catch (error) {
-            this.logger.error(`Get login QR code failed: ${error.message}`);
+            this.logger.error(`Get login QR code failed:`, error)
+            const errorMessage = error instanceof Error ? error.message : '未知错误'
             return {
                 success: false,
-                message: `获取登录二维码失败: ${error.message}`,
-            };
+                message: `获取登录二维码失败: ${errorMessage}`,
+            }
         }
     }
 
@@ -378,8 +391,11 @@ export class XhsPublishService {
     async publishContent(params: PublishContentParams): Promise<PublishResult> {
         const { title, content, images } = params;
 
+        this.logger.log(`📝 收到发布请求: title="${title}", images=${images?.length || 0}`);
+
         // 验证必填字段
         if (!title?.trim()) {
+            this.logger.warn('❌ 标题为空');
             return {
                 success: false,
                 message: "标题不能为空",
@@ -387,6 +403,7 @@ export class XhsPublishService {
         }
 
         if (!content?.trim()) {
+            this.logger.warn('❌ 内容为空');
             return {
                 success: false,
                 message: "正文内容不能为空",
@@ -395,7 +412,10 @@ export class XhsPublishService {
 
         try {
             // 先检查登录状态
+            this.logger.log('🔐 检查登录状态...');
             const loginStatus = await this.checkLoginStatus();
+            this.logger.log(`🔐 登录状态: ${loginStatus.isLoggedIn ? '已登录' : '未登录'}`);
+            
             if (!loginStatus.isLoggedIn) {
                 return {
                     success: false,
@@ -412,22 +432,30 @@ export class XhsPublishService {
             // 如果有图片，添加图片参数
             if (images && images.length > 0) {
                 // 将相对路径转换为绝对路径（如果需要）
-                publishArgs.images = images.map((img) => {
+                const imageUrls = images.map((img) => {
                     if (img.startsWith("/")) {
                         // 如果是相对路径，转换为完整的服务器URL
                         // 注意：MCP服务器在Docker中运行，需要使用Docker宿主机IP而不是localhost
                         const serverUrl = process.env.SERVER_URL || "http://172.17.0.1:4090";
-                        return `${serverUrl}${img}`;
+                        const fullUrl = `${serverUrl}${img}`;
+                        this.logger.debug(`📸 图片路径转换: ${img} -> ${fullUrl}`);
+                        return fullUrl;
                     }
                     return img;
                 });
+                publishArgs.images = imageUrls;
+                this.logger.log(`📸 准备发布 ${imageUrls.length} 张图片`);
             }
 
-            this.logger.log(`Publishing content: ${title}`);
+            this.logger.log(`🚀 调用MCP发布工具...`);
+            this.logger.debug(`发布参数: ${JSON.stringify(publishArgs, null, 2)}`);
 
             const response = await this.callMcpTool("publish_content", publishArgs);
 
+            this.logger.log(`📡 MCP响应: ${JSON.stringify(response, null, 2)}`);
+
             if (response.error) {
+                this.logger.error(`❌ MCP返回错误: ${response.error.message}`);
                 return {
                     success: false,
                     message: `发布失败: ${response.error.message}`,
@@ -437,7 +465,11 @@ export class XhsPublishService {
             const resultText = response.result?.content?.[0]?.text || "";
             const isError = response.result?.isError;
 
+            this.logger.log(`📄 MCP结果文本: ${resultText}`);
+            this.logger.log(`❓ 是否错误: ${isError}`);
+
             if (isError) {
+                this.logger.error(`❌ MCP标记为错误: ${resultText}`);
                 return {
                     success: false,
                     message: resultText || "发布失败，请稍后重试",
@@ -452,13 +484,16 @@ export class XhsPublishService {
             const idMatch = resultText.match(/note[_-]?id[:\s]*([a-zA-Z0-9]+)/i);
             if (idMatch) {
                 noteId = idMatch[1];
+                this.logger.log(`📝 提取到笔记ID: ${noteId}`);
             }
 
             const urlMatch = resultText.match(/(https?:\/\/[^\s]+xiaohongshu[^\s]+)/i);
             if (urlMatch) {
                 noteUrl = urlMatch[1];
+                this.logger.log(`🔗 提取到笔记URL: ${noteUrl}`);
             }
 
+            this.logger.log(`✅ 发布成功!`);
             return {
                 success: true,
                 message: resultText || "笔记发布成功！",
@@ -466,7 +501,7 @@ export class XhsPublishService {
                 noteUrl,
             };
         } catch (error) {
-            this.logger.error(`Publish content failed: ${error.message}`);
+            this.logger.error(`❌ 发布异常: ${error.message}`, error.stack);
             return {
                 success: false,
                 message: `发布失败: ${error.message}`,

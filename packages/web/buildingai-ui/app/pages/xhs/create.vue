@@ -682,7 +682,6 @@ const uploadImage = async (file: File) => {
 
 // 发布相关状态
 const isPublishing = ref(false);
-const showPublishConfirm = ref(false);
 
 // 登录二维码相关状态
 const showLoginQrCode = ref(false);
@@ -705,16 +704,9 @@ const handlePublish = async () => {
 
     // 如果没有配图，提示但允许继续
     if (coverImages.value.length === 0) {
-        showPublishConfirm.value = true;
-        return;
+        toast.warning("笔记还没有添加配图，建议添加至少一张图片以获得更好的展示效果");
     }
 
-    await doPublish();
-};
-
-// 确认发布（无配图时）
-const confirmPublishWithoutImages = async () => {
-    showPublishConfirm.value = false;
     await doPublish();
 };
 
@@ -1417,42 +1409,7 @@ const doPublish = async () => {
             </UCard>
         </UModal>
 
-        <!-- 发布确认弹窗（无配图时） -->
-        <UModal v-model="showPublishConfirm">
-            <UCard class="max-w-sm">
-                <template #header>
-                    <div class="flex items-center gap-2">
-                        <UIcon
-                            name="i-heroicons-exclamation-triangle"
-                            class="text-xl text-amber-500"
-                        />
-                        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">
-                            发布提示
-                        </h3>
-                    </div>
-                </template>
 
-                <p class="text-sm text-slate-600 dark:text-slate-400">
-                    您的笔记还没有添加配图，建议添加至少一张图片以获得更好的展示效果。
-                </p>
-                <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">确定要继续发布吗？</p>
-
-                <template #footer>
-                    <div class="flex justify-end gap-2">
-                        <UButton variant="outline" @click="showPublishConfirm = false">
-                            返回添加配图
-                        </UButton>
-                        <UButton
-                            color="primary"
-                            @click="confirmPublishWithoutImages"
-                            :loading="isPublishing"
-                        >
-                            继续发布
-                        </UButton>
-                    </div>
-                </template>
-            </UCard>
-        </UModal>
 
         <!-- 小红书登录二维码弹窗 -->
         <UModal v-model="showLoginQrCode">

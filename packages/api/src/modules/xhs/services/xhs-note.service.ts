@@ -273,69 +273,72 @@ export class XhsNoteService extends BaseService<XhsNote> {
      * 根据生成模式构建消息
      */
     private buildMessages(dto: GenerateNoteDto): ChatCompletionMessageParam[] {
-        const { content, mode, style = "活泼", emojiFrequency = "适中" } = dto;
+        const { content, mode, style = '活泼', emojiFrequency = '适中' } = dto
 
-        let systemPrompt = "";
-        let userPrompt = "";
+        let systemPrompt = ''
+        let userPrompt = ''
 
         switch (mode) {
-            case "ai-generate":
+            case 'ai-generate':
                 systemPrompt = `你是一个专业的小红书内容创作助手。请根据用户提供的主题，生成符合小红书风格的笔记内容。
 
 要求：
 1. 生成吸引人的标题和详细的正文内容
-2. 风格：${style}
-3. 适当添加emoji表情，频率：${emojiFrequency}
-4. 内容要有趣、实用、易读
-5. 使用小红书常见的表达方式和格式
+2. 标题必须控制在20个字符以内（包括emoji和标点符号）
+3. 风格：${style}
+4. 适当添加emoji表情，频率：${emojiFrequency}
+5. 内容要有趣、实用、易读
+6. 使用小红书常见的表达方式和格式
 
 请按以下格式输出：
-标题：[生成的标题]
-正文：[生成的正文内容]`;
-                userPrompt = `请为以下主题生成小红书笔记内容：${content}`;
-                break;
+标题：[生成的标题，不超过20个字符]
+正文：[生成的正文内容]`
+                userPrompt = `请为以下主题生成小红书笔记内容：${content}`
+                break
 
-            case "ai-compose":
+            case 'ai-compose':
                 systemPrompt = `你是一个专业的小红书内容创作助手。请根据用户提供的草稿内容，进行扩写和优化，使其更符合小红书风格。
 
 要求：
 1. 保持原有内容的核心思想
 2. 扩展内容，使其更丰富详细
-3. 风格：${style}
-4. 适当添加emoji表情，频率：${emojiFrequency}
-5. 优化语言表达，使其更生动有趣
-6. 添加合适的标题
+3. 标题必须控制在20个字符以内（包括emoji和标点符号）
+4. 风格：${style}
+5. 适当添加emoji表情，频率：${emojiFrequency}
+6. 优化语言表达，使其更生动有趣
+7. 添加合适的标题
 
 请按以下格式输出：
-标题：[生成的标题]
-正文：[优化后的正文内容]`;
-                userPrompt = `请优化和扩写以下内容：${content}`;
-                break;
+标题：[生成的标题，不超过20个字符]
+正文：[优化后的正文内容]`
+                userPrompt = `请优化和扩写以下内容：${content}`
+                break
 
-            case "add-emoji":
+            case 'add-emoji':
                 systemPrompt = `你是一个专业的小红书内容创作助手。请为用户提供的笔记内容添加合适的emoji表情符号。
 
 要求：
 1. 保持原有内容不变，只添加emoji
-2. emoji频率：${emojiFrequency}
-3. emoji要与内容相关且自然
-4. 不要过度使用emoji
-5. 保持内容的可读性
+2. 标题必须控制在20个字符以内（包括emoji和标点符号）
+3. emoji频率：${emojiFrequency}
+4. emoji要与内容相关且自然
+5. 不要过度使用emoji
+6. 保持内容的可读性
 
 请按以下格式输出：
-标题：[添加emoji后的标题]
-正文：[添加emoji后的正文内容]`;
-                userPrompt = `请为以下内容添加合适的emoji：${content}`;
-                break;
+标题：[添加emoji后的标题，不超过20个字符]
+正文：[添加emoji后的正文内容]`
+                userPrompt = `请为以下内容添加合适的emoji：${content}`
+                break
 
             default:
-                throw new Error("不支持的生成模式");
+                throw new Error('不支持的生成模式')
         }
 
         return [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-        ];
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+        ]
     }
 
     /**

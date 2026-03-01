@@ -257,6 +257,136 @@ export class XhsImageService extends BaseService<XhsImage> {
     /**
      * 下载远程图片并保存到本地存储
      */
+    /**
+     * 下载外部图片到本地
+     * @param imageUrl 外部图片URL
+     * @param userId 用户ID
+     * @returns 本地图片路径
+     */
+    async downloadExternalImage(imageUrl: string, userId: string): Promise<string> {
+        const maxRetries = 3
+        let lastError: Error | null = null
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                this.logger.log(`⬇️ 开始下载外部图片 (尝试 ${attempt}/${maxRetries}): ${imageUrl}`)
+
+                // 验证URL格式
+                let url: URL
+                try {
+                    url = new URL(imageUrl)
+                } catch (urlError) {
+                    throw new Error(`无效的图片URL: ${imageUrl}`)
+                }
+
+                // 下载图片，添加超时和重试
+                const controller = new AbortController()
+                const timeout = setTimeout(() => controller.abort(), 30000) // 30秒超时
+
+                let response: Response
+                try {
+                    response = await fetch(imageUrl, {
+                        signal: controller.signal,
+                        headers: {
+                            'User-Agent':
+                                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            Accept: 'image/*,*/*',
+                            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                            Referer: url.origin,
+                        },
+                    })
+                } finally {
+                    clearTimeout(timeout)
+                }
+
+                if (!response.ok) {
+                    throw new Error(
+                        `下载图片失败: HTTP ${response.status} ${response.statusText}`,
+                    )
+                }
+
+                const arrayBuffer = await response.arrayBuffer()
+                const buffer = Buffer.from(arrayBuffer)
+
+                // 验证图片大小
+                if (buffer.length === 0) {
+                    throw new Error('下载的图片文件为空')
+                }
+
+                if (buffer.length > 10 * 1024 * 1024) {
+                    // 10MB限制
+                    throw new Error('图片文件过大（超过10MB）')
+                }
+
+                // 从URL中提取文件扩展名，如果没有则默认使用 .jpg
+                const urlPath = url.pathname
+                let ext = path.extname(urlPath)
+
+                // 如果没有扩展名，尝试从Content-Type获取
+                if (!ext) {
+                    const contentType = response.headers.get('content-type')
+                    if (contentType?.includes('jpeg') || contentType?.includes('jpg')) {
+                        ext = '.jpg'
+                    } else if (contentType?.includes('png')) {
+                        ext = '.png'
+                    } else if (contentType?.includes('webp')) {
+                        ext = '.webp'
+                    } else if (contentType?.includes('gif')) {
+                        ext = '.gif'
+                    } else {
+                        ext = '.jpg' // 默认
+                    }
+                }
+
+                const filename = `product-${uuidv4()}${ext}`
+
+                // 确定存储路径
+                const projectRoot = process.cwd()
+                const uploadDir = path.join(projectRoot, 'storage', 'uploads', 'xhs-images')
+                await fs.mkdir(uploadDir, { recursive: true })
+
+                const filePath = path.join(uploadDir, filename)
+
+                // 保存文件
+                await fs.writeFile(filePath, buffer)
+                this.logger.log(`✅ 图片已保存: ${filePath} (${buffer.length} bytes)`)
+
+                // 保存到数据库
+                const image = this.xhsImageRepository.create({
+                    url: `/uploads/xhs-images/${filename}`,
+                    type: 'upload',
+                    userId,
+                })
+                await this.xhsImageRepository.save(image)
+
+                // 返回本地访问URL
+                return `/uploads/xhs-images/${filename}`
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error))
+                const errorMessage = lastError.message
+
+                this.logger.warn(
+                    `下载外部图片失败 (尝试 ${attempt}/${maxRetries}) [${imageUrl}]: ${errorMessage}`,
+                )
+
+                // 如果不是最后一次尝试，等待后重试
+                if (attempt < maxRetries) {
+                    const waitTime = attempt * 1000 // 递增等待时间
+                    this.logger.log(`等待 ${waitTime}ms 后重试...`)
+                    await new Promise((resolve) => setTimeout(resolve, waitTime))
+                }
+            }
+        }
+
+        // 所有重试都失败
+        const errorMessage = lastError?.message || '未知错误'
+        this.logger.error(`下载外部图片失败，已重试 ${maxRetries} 次 [${imageUrl}]: ${errorMessage}`)
+        throw new Error(`图片下载失败 (已重试${maxRetries}次): ${errorMessage}`)
+    }
+
+    /**
+     * 下载并保存图片（私有方法，用于AI生成的图片）
+     */
     private async downloadAndSaveImage(remoteUrl: string): Promise<string> {
         try {
             this.logger.log(`⬇️ 开始下载图片: ${remoteUrl}`);

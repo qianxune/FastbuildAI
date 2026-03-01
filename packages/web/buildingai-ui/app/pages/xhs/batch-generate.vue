@@ -1,0 +1,777 @@
+<script setup lang="ts">
+import type { XhsProduct } from "@/types/xhs";
+import { useXhsPublish } from "@/composables/useXhsPublish";
+import NotePreviewModal from "@/components/xhs/note-preview-modal.vue";
+
+definePageMeta({
+    layout: false,
+    name: "XHS Batch Generate",
+    auth: true,
+});
+
+useSeoMeta({
+    title: "批量生成笔记 - 小红书",
+    description: "批量生成小红书笔记",
+});
+
+interface GenerationTask {
+    productId: string;
+    product: XhsProduct;
+    status: "pending" | "generating" | "success" | "error" | "publishing";
+    progress: number;
+    title: string;
+    content: string;
+    error?: string;
+    noteId?: string;
+    isPublished?: boolean;
+}
+
+const route = useRoute();
+const router = useRouter();
+const toast = useMessage();
+const { publishNote, checkLoginStatus } = useXhsPublish();
+
+const productIds = ref<string[]>([]);
+const modelId = ref<string>("");
+const tasks = ref<GenerationTask[]>([]);
+const isGenerating = ref(false);
+const isPublishing = ref(false);
+const selectedTaskIds = ref<string[]>([]);
+
+// 发布进度
+const publishProgress = ref(0);
+const publishTotal = ref(0);
+const publishCurrent = ref(0);
+const showPublishProgress = ref(false);
+
+// 预览弹窗
+const showPreviewModal = ref(false);
+const currentTask = ref<GenerationTask | null>(null);
+
+// 加载商品信息
+onMounted(async () => {
+    const idsStr = route.query.productIds as string;
+    modelId.value = (route.query.modelId as string) || "";
+
+    if (!idsStr) {
+        toast.error("未选择商品");
+        router.push("/xhs/products");
+        return;
+    }
+
+    if (!modelId.value) {
+        toast.error("未选择AI模型");
+        router.push("/xhs/products");
+        return;
+    }
+
+    productIds.value = idsStr.split(",").filter(Boolean);
+
+    // 加载商品信息
+    await loadProducts();
+
+    // 自动开始生成
+    await startBatchGenerate();
+});
+
+// 加载商品信息
+const loadProducts = async () => {
+    const { get } = useAuthFetch();
+    const { data, error } = await get<{ items: XhsProduct[] }>(
+        `/api/xhs/products/by-ids?ids=${productIds.value.join(",")}`,
+    );
+
+    if (error || !data) {
+        toast.error("加载商品信息失败");
+        return;
+    }
+
+    tasks.value = data.items.map((product) => ({
+        productId: product.id,
+        product,
+        status: "pending",
+        progress: 0,
+        title: "",
+        content: "",
+    }));
+};
+
+// 开始批量生成
+const startBatchGenerate = async () => {
+    isGenerating.value = true;
+
+    for (const task of tasks.value) {
+        if (task.status === "success") continue;
+
+        task.status = "generating";
+        task.progress = 0;
+
+        try {
+            await generateSingleNote(task);
+        } catch (err) {
+            console.error("Generation failed:", err);
+        }
+    }
+
+    isGenerating.value = false;
+    toast.success("批量生成完成");
+};
+
+// 生成单条笔记
+const generateSingleNote = async (task: GenerationTask) => {
+    const product = task.product;
+    const prompt = `根据以下商品生成小红书笔记：
+
+商品名称：${product.name}
+${product.spec ? `规格：${product.spec}` : ""}
+${product.description ? `描述：${product.description}` : ""}`;
+
+    try {
+        const userStore = useUserStore();
+        const authToken = userStore.token || userStore.temporaryToken;
+
+        if (!authToken) {
+            task.status = "error";
+            task.error = "请先登录";
+            return;
+        }
+
+        const response = await fetch("/api/xhs/generate", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "text/event-stream",
+                Authorization: `Bearer ${authToken}`,
+            },
+            body: JSON.stringify({
+                content: prompt,
+                mode: "ai-generate",
+                aiModel: modelId.value,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            task.status = "error";
+            task.error = errorText || "生成失败";
+            return;
+        }
+
+        if (!response.body) {
+            task.status = "error";
+            task.error = "响应体为空";
+            return;
+        }
+
+        // 处理流式响应
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullContent = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+                if (line.startsWith("data: ")) {
+                    const data = line.slice(6);
+
+                    if (data === "[DONE]") {
+                        // 解析最终内容
+                        parseGeneratedContent(task, fullContent);
+                        task.status = "success";
+                        task.progress = 100;
+                        return;
+                    }
+
+                    try {
+                        const event = JSON.parse(data);
+                        if (event.type === "chunk" && event.data) {
+                            fullContent += event.data;
+                            task.progress = Math.min(90, task.progress + 10);
+                        } else if (event.type === "complete" && event.fullContent) {
+                            fullContent = event.fullContent;
+                        }
+                    } catch (parseError) {
+                        console.warn("解析事件数据失败:", parseError);
+                    }
+                }
+            }
+        }
+
+        // 如果循环结束但没有收到 [DONE]，也尝试解析内容
+        if (fullContent) {
+            parseGeneratedContent(task, fullContent);
+            task.status = "success";
+            task.progress = 100;
+        } else {
+            task.status = "error";
+            task.error = "未收到生成内容";
+        }
+    } catch (err) {
+        task.status = "error";
+        task.error = err instanceof Error ? err.message : "生成失败";
+    }
+};
+
+// 解析生成的内容
+const parseGeneratedContent = (task: GenerationTask, fullContent: string) => {
+    const lines = fullContent.split("\n");
+    let title = "";
+    let content = "";
+    let isContentSection = false;
+
+    for (const line of lines) {
+        const trimmedLine = line.trim();
+
+        if (trimmedLine.startsWith("标题：") || trimmedLine.startsWith("标题:")) {
+            title = trimmedLine.replace(/^标题[：:]/, "").trim();
+        } else if (trimmedLine.startsWith("正文：") || trimmedLine.startsWith("正文:")) {
+            content = trimmedLine.replace(/^正文[：:]/, "").trim();
+            isContentSection = true;
+        } else if (isContentSection && trimmedLine) {
+            content += (content ? "\n" : "") + trimmedLine;
+        } else if (!title && !isContentSection && trimmedLine) {
+            title = trimmedLine;
+        }
+    }
+
+    task.title = title;
+    task.content = content;
+};
+
+// 切换任务选择
+const toggleTaskSelection = (taskId: string) => {
+    const index = selectedTaskIds.value.indexOf(taskId);
+    if (index >= 0) {
+        selectedTaskIds.value.splice(index, 1);
+    } else {
+        selectedTaskIds.value.push(taskId);
+    }
+};
+
+// 全选/取消全选
+const toggleSelectAll = () => {
+    const successTasks = tasks.value.filter((t) => t.status === "success");
+    if (selectedTaskIds.value.length === successTasks.length) {
+        selectedTaskIds.value = [];
+    } else {
+        selectedTaskIds.value = successTasks.map((t) => t.productId);
+    }
+};
+
+// 预览笔记
+const previewNote = (task: GenerationTask) => {
+    currentTask.value = task;
+    showPreviewModal.value = true;
+};
+
+// 关闭预览弹窗
+const closePreviewModal = () => {
+    showPreviewModal.value = false;
+    currentTask.value = null;
+};
+
+// 保存编辑后的内容
+const handleSaveEdit = (data: { title: string; content: string }) => {
+    if (currentTask.value) {
+        currentTask.value.title = data.title;
+        currentTask.value.content = data.content;
+        toast.success("内容已更新");
+    }
+};
+
+// 从预览弹窗发布
+const publishFromModal = async () => {
+    if (currentTask.value) {
+        await publishSingle(currentTask.value);
+        closePreviewModal();
+    }
+};
+
+// 重新生成单条笔记
+const regenerateNote = async (task: GenerationTask) => {
+    if (isGenerating.value) {
+        toast.warning("正在生成中，请稍候");
+        return;
+    }
+
+    task.status = "generating";
+    task.progress = 0;
+    task.title = "";
+    task.content = "";
+    task.error = undefined;
+
+    try {
+        await generateSingleNote(task);
+        toast.success("重新生成成功");
+    } catch (err) {
+        console.error("Regeneration failed:", err);
+        toast.error("重新生成失败");
+    }
+};
+
+// 单条发布
+const publishSingle = async (task: GenerationTask) => {
+    if (!task.title || !task.content) {
+        toast.error("笔记内容不完整");
+        return;
+    }
+
+    if (task.isPublished) {
+        toast.warning("该笔记已发布");
+        return;
+    }
+
+    // 检查登录状态
+    const loginStatus = await checkLoginStatus();
+    if (!loginStatus.isLoggedIn) {
+        toast.error("请先登录小红书");
+        return;
+    }
+
+    task.status = "publishing";
+
+    // 显示单条发布进度
+    showPublishProgress.value = true;
+    publishTotal.value = 1;
+    publishCurrent.value = 0;
+    publishProgress.value = 0;
+
+    try {
+        // 准备图片列表
+        const images: string[] = [];
+        if (task.product.imageUrl) {
+            images.push(task.product.imageUrl);
+        }
+        if (task.product.extraImages?.length) {
+            images.push(...task.product.extraImages);
+        }
+
+        // 发布笔记
+        const result = await publishNote({
+            title: task.title,
+            content: task.content,
+            images,
+            productId: task.productId,
+        });
+
+        publishCurrent.value = 1;
+        publishProgress.value = 100;
+
+        if (result.success) {
+            task.isPublished = true;
+            task.noteId = result.noteId;
+            task.status = "success";
+            toast.success("发布成功！");
+        } else {
+            task.status = "success";
+            toast.error(result.message || "发布失败");
+        }
+    } catch (err) {
+        task.status = "success";
+        toast.error(err instanceof Error ? err.message : "发布失败");
+    } finally {
+        // 延迟隐藏进度条
+        setTimeout(() => {
+            showPublishProgress.value = false;
+        }, 1000);
+    }
+};
+
+// 批量发布
+const publishBatch = async () => {
+    if (selectedTaskIds.value.length === 0) {
+        toast.warning("请选择要发布的笔记");
+        return;
+    }
+
+    // 立即显示进度条（在任何异步操作之前）
+    isPublishing.value = true;
+    showPublishProgress.value = true;
+
+    const selectedTasks = tasks.value.filter((t) => selectedTaskIds.value.includes(t.productId));
+    publishTotal.value = selectedTasks.length;
+    publishCurrent.value = 0;
+    publishProgress.value = 0;
+
+    // 检查登录状态
+    const loginStatus = await checkLoginStatus();
+    if (!loginStatus.isLoggedIn) {
+        toast.error("请先登录小红书");
+        isPublishing.value = false;
+        showPublishProgress.value = false;
+        return;
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < selectedTasks.length; i++) {
+        const task = selectedTasks[i];
+
+        if (!task) continue;
+
+        if (task.isPublished) {
+            publishCurrent.value++;
+            publishProgress.value = Math.round((publishCurrent.value / publishTotal.value) * 100);
+            continue;
+        }
+
+        task.status = "publishing";
+
+        // 准备图片列表
+        const images: string[] = [];
+        if (task.product.imageUrl) {
+            images.push(task.product.imageUrl);
+        }
+        if (task.product.extraImages?.length) {
+            images.push(...task.product.extraImages);
+        }
+
+        try {
+            const result = await publishNote({
+                title: task.title,
+                content: task.content,
+                images,
+                productId: task.productId,
+            });
+
+            if (result.success) {
+                task.isPublished = true;
+                task.noteId = result.noteId;
+                task.status = "success";
+                successCount++;
+            } else {
+                task.status = "success";
+                task.error = result.message;
+                failCount++;
+                console.error(`发布失败: ${task.product.name}`, result.message);
+            }
+        } catch (err) {
+            task.status = "success";
+            task.error = err instanceof Error ? err.message : "发布失败";
+            failCount++;
+            console.error(`发布异常: ${task.product.name}`, err);
+        }
+
+        publishCurrent.value++;
+        publishProgress.value = Math.round((publishCurrent.value / publishTotal.value) * 100);
+
+        // 避免请求过快
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    isPublishing.value = false;
+
+    // 延迟隐藏进度条
+    setTimeout(() => {
+        showPublishProgress.value = false;
+    }, 2000);
+
+    if (successCount > 0) {
+        toast.success(`成功发布 ${successCount} 条笔记`);
+    }
+    if (failCount > 0) {
+        toast.warning(`${failCount} 条笔记发布失败`);
+    }
+};
+
+// 返回商品列表
+const goBack = () => {
+    router.push("/xhs/products");
+};
+
+// 获取状态图标
+const getStatusIcon = (status: string) => {
+    switch (status) {
+        case "pending":
+            return "i-heroicons-clock";
+        case "generating":
+            return "i-heroicons-arrow-path";
+        case "success":
+            return "i-heroicons-check-circle";
+        case "error":
+            return "i-heroicons-x-circle";
+        default:
+            return "i-heroicons-question-mark-circle";
+    }
+};
+
+// 获取状态颜色
+const getStatusColor = (status: string) => {
+    switch (status) {
+        case "pending":
+            return "text-gray-500";
+        case "generating":
+            return "text-blue-500";
+        case "success":
+            return "text-green-500";
+        case "error":
+            return "text-red-500";
+        default:
+            return "text-gray-500";
+    }
+};
+</script>
+
+<template>
+    <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <div class="container mx-auto px-4 py-8">
+            <!-- Header -->
+            <div class="mb-8 flex items-center justify-between">
+                <div>
+                    <h1 class="mb-2 text-3xl font-bold text-gray-900 dark:text-white">
+                        批量生成笔记
+                    </h1>
+                    <p class="text-gray-600 dark:text-gray-400">
+                        共 {{ tasks.length }} 个商品，已完成
+                        {{ tasks.filter((t) => t.status === "success").length }} 个
+                    </p>
+                </div>
+                <div class="flex gap-3">
+                    <UButton
+                        variant="outline"
+                        color="neutral"
+                        :disabled="isGenerating || isPublishing"
+                        @click="publishBatch"
+                    >
+                        <UIcon name="i-heroicons-paper-airplane" class="mr-1" />
+                        批量发布 ({{ selectedTaskIds.length }})
+                    </UButton>
+                    <UButton variant="ghost" color="neutral" @click="goBack">
+                        <UIcon name="i-heroicons-arrow-left" class="mr-1" />
+                        返回商品列表
+                    </UButton>
+                </div>
+            </div>
+
+            <!-- 发布进度条 -->
+            <div
+                v-if="showPublishProgress"
+                class="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20"
+            >
+                <div class="mb-2 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <UIcon
+                            name="i-heroicons-arrow-path"
+                            class="h-5 w-5 animate-spin text-blue-600 dark:text-blue-400"
+                        />
+                        <span class="font-medium text-blue-900 dark:text-blue-100">
+                            正在发布笔记...
+                        </span>
+                    </div>
+                    <span class="text-sm text-blue-700 dark:text-blue-300">
+                        {{ publishCurrent }} / {{ publishTotal }}
+                    </span>
+                </div>
+                <div class="h-2 w-full overflow-hidden rounded-full bg-blue-200 dark:bg-blue-800">
+                    <div
+                        class="h-full bg-blue-600 transition-all duration-300 dark:bg-blue-400"
+                        :style="{ width: `${publishProgress}%` }"
+                    ></div>
+                </div>
+                <p class="mt-2 text-xs text-blue-700 dark:text-blue-300">
+                    {{ publishProgress }}% 完成
+                </p>
+            </div>
+
+            <!-- Task List -->
+            <UCard>
+                <div
+                    class="mb-4 flex items-center justify-between border-b border-gray-200 pb-4 dark:border-gray-700"
+                >
+                    <div class="flex items-center gap-2">
+                        <input
+                            type="checkbox"
+                            :checked="
+                                selectedTaskIds.length > 0 &&
+                                selectedTaskIds.length ===
+                                    tasks.filter((t) => t.status === 'success').length
+                            "
+                            :indeterminate="
+                                selectedTaskIds.length > 0 &&
+                                selectedTaskIds.length <
+                                    tasks.filter((t) => t.status === 'success').length
+                            "
+                            @change="toggleSelectAll"
+                            class="rounded border-gray-300"
+                        />
+                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                            >全选</span
+                        >
+                    </div>
+                    <div v-if="isGenerating" class="flex items-center gap-2 text-sm text-blue-600">
+                        <UIcon name="i-heroicons-arrow-path" class="h-4 w-4 animate-spin" />
+                        <span>正在生成中...</span>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <div
+                        v-for="task in tasks"
+                        :key="task.productId"
+                        class="rounded-lg border border-gray-200 p-4 transition-all hover:shadow-md dark:border-gray-700"
+                    >
+                        <div class="flex items-start gap-4">
+                            <!-- Checkbox -->
+                            <input
+                                v-if="task.status === 'success'"
+                                type="checkbox"
+                                :checked="selectedTaskIds.includes(task.productId)"
+                                @change="toggleTaskSelection(task.productId)"
+                                class="mt-1 rounded border-gray-300"
+                            />
+                            <div v-else class="w-4"></div>
+
+                            <!-- Product Image -->
+                            <div class="flex-shrink-0">
+                                <img
+                                    v-if="task.product.imageUrl"
+                                    :src="task.product.imageUrl"
+                                    :alt="task.product.name"
+                                    class="h-16 w-16 rounded object-cover"
+                                />
+                                <div
+                                    v-else
+                                    class="flex h-16 w-16 items-center justify-center rounded bg-gray-100 dark:bg-gray-700"
+                                >
+                                    <UIcon name="i-heroicons-photo" class="h-8 w-8 text-gray-400" />
+                                </div>
+                            </div>
+
+                            <!-- Content -->
+                            <div class="min-w-0 flex-1">
+                                <div class="mb-2 flex items-center justify-between">
+                                    <h3 class="font-medium text-gray-900 dark:text-white">
+                                        {{ task.product.name }}
+                                    </h3>
+                                    <div class="flex items-center gap-2">
+                                        <UIcon
+                                            :name="getStatusIcon(task.status)"
+                                            :class="getStatusColor(task.status)"
+                                        />
+                                        <span class="text-sm" :class="getStatusColor(task.status)">
+                                            {{
+                                                task.status === "pending"
+                                                    ? "等待中"
+                                                    : task.status === "generating"
+                                                      ? "生成中"
+                                                      : task.status === "success"
+                                                        ? "已完成"
+                                                        : "失败"
+                                            }}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- Progress Bar -->
+                                <div v-if="task.status === 'generating'" class="mb-2">
+                                    <div
+                                        class="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700"
+                                    >
+                                        <div
+                                            class="h-full bg-blue-500 transition-all duration-300"
+                                            :style="{ width: `${task.progress}%` }"
+                                        ></div>
+                                    </div>
+                                </div>
+
+                                <!-- Generated Content Preview -->
+                                <div v-if="task.status === 'success'" class="mt-2 space-y-1">
+                                    <p class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        标题: {{ task.title }}
+                                    </p>
+                                    <p
+                                        class="line-clamp-2 text-sm text-gray-600 dark:text-gray-400"
+                                    >
+                                        {{ task.content }}
+                                    </p>
+                                </div>
+
+                                <!-- Error Message -->
+                                <div v-if="task.status === 'error'" class="mt-2">
+                                    <p class="text-sm text-red-600 dark:text-red-400">
+                                        {{ task.error }}
+                                    </p>
+                                </div>
+
+                                <!-- Actions -->
+                                <div v-if="task.status === 'success'" class="mt-3 flex gap-2">
+                                    <UButton
+                                        size="sm"
+                                        variant="outline"
+                                        color="neutral"
+                                        @click="previewNote(task)"
+                                    >
+                                        <UIcon name="i-heroicons-eye" class="mr-1" />
+                                        预览
+                                    </UButton>
+                                    <UButton
+                                        size="sm"
+                                        variant="outline"
+                                        color="neutral"
+                                        :disabled="isGenerating"
+                                        @click="regenerateNote(task)"
+                                    >
+                                        <UIcon name="i-heroicons-arrow-path" class="mr-1" />
+                                        重新生成
+                                    </UButton>
+                                    <UButton
+                                        v-if="!task.isPublished"
+                                        size="sm"
+                                        color="primary"
+                                        :disabled="isPublishing"
+                                        @click="publishSingle(task)"
+                                    >
+                                        <UIcon name="i-heroicons-paper-airplane" class="mr-1" />
+                                        发布
+                                    </UButton>
+                                    <UButton
+                                        v-else
+                                        size="sm"
+                                        color="success"
+                                        variant="outline"
+                                        disabled
+                                    >
+                                        <UIcon name="i-heroicons-check-circle" class="mr-1" />
+                                        已发布
+                                    </UButton>
+                                </div>
+
+                                <!-- Publishing Status -->
+                                <div v-if="task.status === 'publishing'" class="mt-3">
+                                    <div class="flex items-center gap-2 text-sm text-blue-600">
+                                        <UIcon
+                                            name="i-heroicons-arrow-path"
+                                            class="h-4 w-4 animate-spin"
+                                        />
+                                        <span>正在发布到小红书...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </UCard>
+        </div>
+
+        <!-- 预览弹窗 -->
+        <NotePreviewModal
+            v-if="currentTask"
+            :is-open="showPreviewModal"
+            :title="currentTask.title"
+            :content="currentTask.content"
+            :product="currentTask.product"
+            @close="closePreviewModal"
+            @save="handleSaveEdit"
+            @publish="publishFromModal"
+        />
+    </div>
+</template>

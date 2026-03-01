@@ -63,8 +63,14 @@ export class XhsNote extends BaseEntity {
     /**
      * 所属分组ID
      */
-    @Column({ type: "uuid", nullable: true, comment: "所属分组ID" })
-    groupId?: string;
+    @Column({ type: 'uuid', nullable: true, comment: '所属分组ID' })
+    groupId?: string
+
+    /**
+     * 关联的商品ID
+     */
+    @Column({ type: 'uuid', nullable: true, comment: '关联的商品ID' })
+    productId?: string
 
     /**
      * 所属用户

@@ -59,7 +59,28 @@ export class CreateNoteDto {
      * 封面图片URL列表
      */
     @IsOptional()
-    @IsArray({ message: "封面图片必须是数组" })
-    @IsString({ each: true, message: "每个图片URL必须是字符串" })
-    coverImages?: string[];
+    @IsArray({ message: '封面图片必须是数组' })
+    @IsString({ each: true, message: '每个图片URL必须是字符串' })
+    coverImages?: string[]
+
+    /**
+     * 关联的商品ID
+     */
+    @IsOptional()
+    @IsUUID(4, { message: '商品ID必须是有效的UUID格式' })
+    productId?: string
+
+    /**
+     * 小红书笔记ID
+     */
+    @IsOptional()
+    @IsString({ message: '小红书笔记ID必须是字符串' })
+    xhsNoteId?: string
+
+    /**
+     * 小红书笔记URL
+     */
+    @IsOptional()
+    @IsString({ message: '小红书笔记URL必须是字符串' })
+    xhsNoteUrl?: string
 }

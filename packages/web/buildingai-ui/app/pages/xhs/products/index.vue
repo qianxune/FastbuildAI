@@ -59,7 +59,45 @@ const isEmpty = computed(() => {
     return products.value.length === 0;
 });
 
-const hasSelected = computed(() => selectedIds.value.length > 0);
+const hasSelected = computed(() => selectedIds.value.length > 0)
+
+// 单条生成 - 跳转到笔记编辑页
+const goToSingleGenerate = () => {
+  if (selectedIds.value.length !== 1) return
+
+  // 检查是否选择了模型
+  if (!selectedModelId.value) {
+    toast.warning('请先选择AI模型')
+    return
+  }
+
+  router.push({
+    path: '/xhs/create',
+    query: {
+      productIds: selectedIds.value[0],
+      modelId: selectedModelId.value,
+    },
+  })
+}
+
+// 批量生成 - 跳转到批量生成页面
+const goToBatchGenerate = () => {
+  if (selectedIds.value.length === 0) return
+
+  // 检查是否选择了模型
+  if (!selectedModelId.value) {
+    toast.warning('请先选择AI模型')
+    return
+  }
+
+  router.push({
+    path: '/xhs/batch-generate',
+    query: {
+      productIds: selectedIds.value.join(','),
+      modelId: selectedModelId.value,
+    },
+  })
+}
 
 const toggleExpand = (productId: string) => {
     if (expandedGroups.value.has(productId)) {
@@ -279,19 +317,28 @@ const openLink = (url: string) => {
                             Import Excel
                         </UButton>
                         <UButton
+                            v-if="selectedIds.length === 1"
                             color="primary"
-                            :disabled="!hasSelected"
-                            @click="goToCreateWithProducts"
+                            @click="goToSingleGenerate"
                         >
                             <UIcon name="i-heroicons-document-plus" class="mr-1" />
-                            Generate notes ({{ selectedIds.length }} selected)
+                            Single Generate
+                        </UButton>
+                        <UButton
+                            v-else
+                            color="primary"
+                            :disabled="selectedIds.length === 0"
+                            @click="goToBatchGenerate"
+                        >
+                            <UIcon name="i-heroicons-sparkles" class="mr-1" />
+                            Batch Generate ({{ selectedIds.length }} selected)
                         </UButton>
                         <UButton
                             variant="outline"
                             color="neutral"
                             @click="
                                 () => {
-                                    router.push('/xhs/notes');
+                                    router.push('/xhs/notes')
                                 }
                             "
                         >
@@ -302,7 +349,7 @@ const openLink = (url: string) => {
                             color="neutral"
                             @click="
                                 () => {
-                                    router.push('/xhs');
+                                    router.push('/xhs')
                                 }
                             "
                         >

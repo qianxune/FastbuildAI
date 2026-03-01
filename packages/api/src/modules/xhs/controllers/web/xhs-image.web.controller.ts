@@ -6,14 +6,16 @@ import {
     UseInterceptors,
     UploadedFile,
     ParseIntPipe,
-} from "@nestjs/common";
-import { FileInterceptor } from "@nestjs/platform-express";
-import { WebController } from "@common/decorators/controller.decorator";
-import { BaseController } from "@buildingai/base";
-import { Playground } from "@buildingai/decorators/playground.decorator";
-import { type UserPlayground } from "@buildingai/db";
-import { HttpErrorFactory } from "@buildingai/errors";
-import { XhsImageService } from "../../services/xhs-image.service";
+    Logger,
+} from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
+import { WebController } from '@common/decorators/controller.decorator'
+import { BaseController } from '@buildingai/base'
+import { Playground } from '@buildingai/decorators/playground.decorator'
+import { type UserPlayground } from '@buildingai/db'
+import { HttpErrorFactory } from '@buildingai/errors'
+import { XhsImageService } from '../../services/xhs-image.service'
+import { DownloadImageDto } from '../../dto/download-image.dto'
 
 /**
  * 小红书图片管理控制器
@@ -21,6 +23,8 @@ import { XhsImageService } from "../../services/xhs-image.service";
  */
 @WebController("xhs")
 export class XhsImageWebController extends BaseController {
+    protected readonly logger = new Logger(XhsImageWebController.name)
+
     constructor(private readonly xhsImageService: XhsImageService) {
         super();
     }
@@ -87,6 +91,34 @@ export class XhsImageWebController extends BaseController {
             success: true,
             data: result,
         };
+    }
+
+    /**
+     * 下载外部图片到本地
+     * POST /api/web/xhs/images/download
+     */
+    @Post('images/download')
+    async downloadImage(@Body() dto: DownloadImageDto, @Playground() playground: UserPlayground) {
+        try {
+            const localPath = await this.xhsImageService.downloadExternalImage(
+                dto.imageUrl,
+                playground.id,
+            )
+
+            return {
+                success: true,
+                localPath,
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : '未知错误'
+            this.logger.error(`❌ 图片下载控制器错误: ${errorMessage}`, error instanceof Error ? error.stack : '')
+            
+            // 返回错误而不是抛出异常，这样前端能收到详细的错误信息
+            return {
+                success: false,
+                error: errorMessage,
+            }
+        }
     }
 
     /**
