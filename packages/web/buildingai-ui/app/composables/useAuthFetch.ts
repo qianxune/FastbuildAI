@@ -145,10 +145,19 @@ export const useAuthFetch = () => {
      * @returns 解析后的数据
      */
     const parseResponseData = async <T>(response: Response): Promise<T> => {
-        const responseData = await response.json();
+        const contentType = response.headers.get('content-type')
+
+        // 检查是否返回了 HTML 而不是 JSON
+        if (contentType?.includes('text/html')) {
+          throw new Error(
+            `API 返回了 HTML 页面而不是 JSON 数据 (状态码: ${response.status}). 请检查 API 路由配置或后端服务是否正常运行。`,
+          )
+        }
+
+        const responseData = await response.json()
         // API 返回格式: { code, message, data: ... }
-        return (responseData.data !== undefined ? responseData.data : responseData) as T;
-    };
+        return (responseData.data !== undefined ? responseData.data : responseData) as T
+    }
 
     /**
      * GET 请求

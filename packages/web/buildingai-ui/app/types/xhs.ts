@@ -466,3 +466,61 @@ export interface GroupListResponse {
      */
     items: XhsGroup[];
 }
+
+/**
+ * 商品/SKU 实体（妙手导入）
+ */
+export interface XhsProduct {
+  id: string
+  userId: string
+  name: string
+  skuCode?: string
+  externalSkuId?: string
+  externalProductId?: string
+  spec?: string
+  price?: string
+  costPrice?: string
+  stock?: number
+  imageUrl?: string
+  extraImages?: string[]
+  description?: string
+  sourceId?: string
+  sourceTitle?: string
+  sourceUrl?: string
+  productUrl?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 商品导入结果
+ */
+export interface ImportProductResult {
+  success: number
+  skipped: number
+  failed: number
+  errors?: Array<{ row: number; message: string }>
+}
+
+/**
+ * 商品分组（SPU）
+ */
+export interface XhsProductGroup {
+  productId: string
+  productName: string
+  skuCount: number
+  skus: XhsProduct[]
+  imageUrl?: string
+  sourceUrl?: string
+  productUrl?: string
+}
+
+/**
+ * 商品分组列表响应
+ */
+export interface ProductGroupListResponse {
+  items: XhsProductGroup[]
+  total: number
+  page: number
+  limit: number
+}

@@ -99,6 +99,11 @@ const goToCreateNote = () => {
     router.push("/xhs/create");
 };
 
+// 跳转到商品管理
+const goToProductManage = () => {
+    router.push("/xhs/products");
+};
+
 // 跳转到模板笔记
 const goToTemplates = () => {
     // TODO: 实现模板笔记功能
@@ -228,6 +233,14 @@ const goToBatchGenerate = () => {
                     <div class="flex gap-3">
                         <UButton variant="outline" color="neutral" size="sm" @click="goToMyNotes">
                             我的笔记
+                        </UButton>
+                        <UButton
+                            variant="outline"
+                            color="neutral"
+                            size="sm"
+                            @click="goToProductManage"
+                        >
+                            商品管理
                         </UButton>
                         <UButton
                             variant="outline"

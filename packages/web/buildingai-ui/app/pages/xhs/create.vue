@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from "vue";
-import type { XhsNote } from "../../types/xhs";
-import { useXhsGenerate } from "../../composables/useXhsGenerate";
-import { useAuthFetch } from "../../composables/useAuthFetch";
+import type { XhsNote } from '../../types/xhs'
+import type { AiModel } from '@buildingai/service/webapi/ai-conversation'
+import { useXhsGenerate } from '../../composables/useXhsGenerate'
+import { useAuthFetch } from '../../composables/useAuthFetch'
+import { useXhsProducts } from '~/composables/useXhsProducts'
 
 definePageMeta({
-    layout: false,
+  layout: false,
     name: "XHS Note Create",
     auth: true,
 });
@@ -182,6 +183,8 @@ onMounted(async () => {
     const queryMode = route.query.mode as string;
     const autoGenerate = route.query.autoGenerate as string;
     const noteId = route.query.noteId as string;
+    const productIdsStr = route.query.productIds as string;
+    const modelId = route.query.modelId as string;
 
     // 如果有noteId，则加载已有笔记进行编辑
     if (noteId) {
@@ -189,7 +192,57 @@ onMounted(async () => {
         return;
     }
 
-    if (queryContent) {
+    // 如果从商品管理传入了modelId，设置到全局状态
+    if (modelId) {
+        const controlsStore = useControlsStore();
+        // 需要先加载模型列表，然后设置选中的模型
+        const { get } = useAuthFetch();
+        try {
+            const { data } = await get<AiModel[]>('/consoleapi/ai-models', { showError: false });
+            if (data && Array.isArray(data)) {
+                const selectedModel = data.find(m => m.id === modelId);
+                if (selectedModel) {
+                    controlsStore.selectedModel = selectedModel;
+                }
+            }
+        } catch (err) {
+            console.error('Failed to load model:', err);
+        }
+    }
+
+    // 如果从商品管理选择了商品，拉取商品信息并填充主题与可选配图
+    if (productIdsStr) {
+        const ids = productIdsStr.split(',').map((s) => s.trim()).filter(Boolean)
+        if (ids.length > 0) {
+            const { fetchByIds } = useXhsProducts()
+            try {
+                const list = await fetchByIds(ids)
+                if (list.length > 0) {
+                    const lines = list.map(
+                        (p, i) =>
+                            `${i + 1}. [${p.name}]${p.spec ? ` 规格：${p.spec}` : ''}${p.description ? ` 描述：${p.description}` : ''}`,
+                    )
+                    content.value = '根据以下商品生成小红书笔记：\n\n' + lines.join('\n')
+                    const allUrls: string[] = []
+                    for (const p of list) {
+                        if (p.imageUrl) allUrls.push(p.imageUrl)
+                        if (p.extraImages?.length) allUrls.push(...p.extraImages)
+                    }
+                    if (allUrls.length > 0) {
+                        coverImages.value = [...new Set(allUrls)].slice(0, 9)
+                    }
+                    toast.success(`已根据 ${list.length} 个商品填充主题，正在自动生成笔记...`)
+                    
+                    // 自动生成笔记
+                    await handleGenerate()
+                }
+            } catch (e) {
+                toast.error('获取商品信息失败')
+            }
+        }
+    }
+
+    if (queryContent && !productIdsStr) {
         content.value = queryContent;
     }
     if (queryMode) {
@@ -197,7 +250,7 @@ onMounted(async () => {
     }
 
     // 如果需要自动生成
-    if (autoGenerate === "true" && queryContent) {
+    if (autoGenerate === "true" && content.value) {
         await handleGenerate();
     }
 });

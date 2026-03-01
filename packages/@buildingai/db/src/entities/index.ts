@@ -48,4 +48,5 @@ export { XhsGroup } from "./xhs-group.entity";
 export { XhsHotTopic } from "./xhs-hot-topic.entity";
 export { XhsImage } from "./xhs-image.entity";
 export { XhsNote } from "./xhs-note.entity";
+export { XhsProduct } from "./xhs-product.entity";
 export { XhsTemplate } from "./xhs-template.entity";

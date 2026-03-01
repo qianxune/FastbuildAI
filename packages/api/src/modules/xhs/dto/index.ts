@@ -4,6 +4,7 @@ export * from "./create-note.dto";
 export * from "./generate-note.dto";
 export * from "./publish-note.dto";
 export * from "./query-note.dto";
+export * from "./query-product.dto";
 export * from "./search-note.dto";
 export * from "./update-group.dto";
 export * from "./update-note.dto";

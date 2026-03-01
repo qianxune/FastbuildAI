@@ -4,6 +4,7 @@ import {
     XhsHotTopic,
     XhsImage,
     XhsNote,
+    XhsProduct,
     XhsTemplate,
     Secret,
 } from "@buildingai/db/entities";
@@ -14,11 +15,13 @@ import { SecretService } from "@buildingai/core/modules";
 import { XhsGroupWebController } from "./controllers/web/xhs-group.web.controller";
 import { XhsNoteWebController } from "./controllers/web/xhs-note.web.controller";
 import { XhsImageWebController } from "./controllers/web/xhs-image.web.controller";
+import { XhsProductWebController } from "./controllers/web/xhs-product.web.controller";
 import { XhsPublishWebController } from "./controllers/web/xhs-publish.web.controller";
 import { ContentModerationService } from "./services/content-moderation.service";
 import { XhsGroupService } from "./services/xhs-group.service";
 import { XhsNoteService } from "./services/xhs-note.service";
 import { XhsImageService } from "./services/xhs-image.service";
+import { XhsProductService } from "./services/xhs-product.service";
 import { XhsPublishService } from "./services/xhs-publish.service";
 
 /**
@@ -32,6 +35,7 @@ import { XhsPublishService } from "./services/xhs-publish.service";
             XhsGroup,
             XhsHotTopic,
             XhsImage,
+            XhsProduct,
             XhsTemplate,
             Secret, // 添加Secret实体
         ]),
@@ -41,12 +45,14 @@ import { XhsPublishService } from "./services/xhs-publish.service";
         XhsNoteWebController,
         XhsGroupWebController,
         XhsImageWebController,
+        XhsProductWebController,
         XhsPublishWebController,
     ],
     providers: [
         XhsNoteService,
         XhsGroupService,
         XhsImageService,
+        XhsProductService,
         XhsPublishService,
         ContentModerationService,
         SecretService, // 添加SecretService
@@ -55,6 +61,7 @@ import { XhsPublishService } from "./services/xhs-publish.service";
         XhsNoteService,
         XhsGroupService,
         XhsImageService,
+        XhsProductService,
         XhsPublishService,
         ContentModerationService,
     ],

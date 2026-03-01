@@ -65,6 +65,19 @@ export default defineBuildingAIConfig({
     },
     compatibilityDate: "2025-10-28",
 
+    nitro: {
+        devProxy: {
+            '/api': {
+                target: process.env.VITE_DEVELOP_APP_BASE_URL || 'http://localhost:4090',
+                changeOrigin: true,
+            },
+            '/consoleapi': {
+                target: process.env.VITE_DEVELOP_APP_BASE_URL || 'http://localhost:4090',
+                changeOrigin: true,
+            },
+        },
+    },
+
     vite: {
         plugins: [tailwindcss() as PluginOption],
         optimizeDeps: {
