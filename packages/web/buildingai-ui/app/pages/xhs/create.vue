@@ -39,6 +39,9 @@ const activeMenu = ref("template");
 const showPreview = ref(false);
 const wordCount = computed(() => noteContent.value.length);
 
+// 如果是从商品列表跳转过来，用于记录主商品标题，发布时传给小红书 MCP
+const primaryProductTitle = ref<string | null>(null);
+
 // 封面图片状态
 const coverImages = ref<string[]>([]);
 
@@ -231,6 +234,8 @@ onMounted(async () => {
                     if (allUrls.length > 0) {
                         coverImages.value = [...new Set(allUrls)].slice(0, 9)
                     }
+                    // 记录第一个商品的标题，作为发布时的商品搜索标题
+                    primaryProductTitle.value = list[0]?.name || null
                     toast.success(`已根据 ${list.length} 个商品填充主题，正在自动生成笔记...`)
                     
                     // 自动生成笔记
@@ -797,6 +802,8 @@ const doPublish = async () => {
                 title: noteTitle.value,
                 content: noteContent.value,
                 images: coverImages.value,
+                // 如果当前笔记是从商品列表生成的，则把主商品标题传给小红书 MCP
+                productSearchTitle: primaryProductTitle.value || undefined,
             },
             {
                 showError: false,

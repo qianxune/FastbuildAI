@@ -55,6 +55,7 @@ export class XhsPublishWebController extends BaseController {
             title: dto.title,
             content: dto.content,
             images: dto.images,
+            productSearchTitle: dto.productSearchTitle,
         });
 
         return result;
@@ -84,6 +85,7 @@ export class XhsPublishWebController extends BaseController {
             title: note.title,
             content: note.content,
             images: note.coverImages,
+            // 通过 ID 发布时暂不自动推断商品标题，保持向后兼容
         });
 
         // 如果发布成功，更新笔记的发布状态

@@ -39,6 +39,10 @@ export interface PublishContentParams {
     title: string;
     content: string;
     images?: string[];
+    /**
+     * 可选：用于在小红书中按标题搜索店内商品并挂载
+     */
+    productSearchTitle?: string;
 }
 
 export interface PublishResult {
@@ -389,7 +393,7 @@ export class XhsPublishService {
      * 发布图文内容到小红书
      */
     async publishContent(params: PublishContentParams): Promise<PublishResult> {
-        const { title, content, images } = params;
+        const { title, content, images, productSearchTitle } = params;
 
         this.logger.log(`📝 收到发布请求: title="${title}", images=${images?.length || 0}`);
 
@@ -428,6 +432,12 @@ export class XhsPublishService {
                 title,
                 content,
             };
+
+            // 如果有商品搜索标题，传递给 MCP，用于在发布前按标题搜索并挂载店内商品
+            if (productSearchTitle?.trim()) {
+                // 注意：MCP 工具参数为下划线命名 product_search_title
+                publishArgs.product_search_title = productSearchTitle.trim();
+            }
 
             // 如果有图片，添加图片参数
             if (images && images.length > 0) {

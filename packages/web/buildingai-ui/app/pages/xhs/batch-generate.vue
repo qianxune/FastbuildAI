@@ -360,6 +360,8 @@ const publishSingle = async (task: GenerationTask) => {
             content: task.content,
             images,
             productId: task.productId,
+            // 将当前商品标题传递给小红书 MCP，用于按标题搜索并挂载商品
+            productSearchTitle: task.product.name,
         });
 
         publishCurrent.value = 1;
@@ -441,6 +443,8 @@ const publishBatch = async () => {
                 content: task.content,
                 images,
                 productId: task.productId,
+                // 批量发布时同样传递商品标题
+                productSearchTitle: task.product.name,
             });
 
             if (result.success) {

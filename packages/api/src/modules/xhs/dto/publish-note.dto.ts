@@ -14,6 +14,13 @@ export class PublishNoteDto {
     @IsArray()
     @IsString({ each: true })
     images?: string[];
+
+    /**
+     * 可选：用于在小红书「添加商品」弹窗中按标题搜索并挂载店内商品
+     */
+    @IsOptional()
+    @IsString()
+    productSearchTitle?: string;
 }
 
 export class PublishNoteByIdDto {

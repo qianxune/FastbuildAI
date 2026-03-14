@@ -84,6 +84,10 @@ export const useXhsPublish = () => {
         content: string;
         images: string[];
         productId?: string;
+        /**
+         * 可选：用于在小红书中按标题搜索店内商品并挂载
+         */
+        productSearchTitle?: string;
     }): Promise<PublishResult> => {
         try {
             console.log("📝 开始发布笔记:", {
@@ -144,6 +148,7 @@ export const useXhsPublish = () => {
                 title: params.title,
                 content: params.content,
                 images: localImages,
+                productSearchTitle: params.productSearchTitle,
             });
 
             console.log("📡 发布API响应:", { data, error });
