@@ -50,3 +50,5 @@ export { XhsImage } from "./xhs-image.entity";
 export { XhsNote } from "./xhs-note.entity";
 export { XhsProduct } from "./xhs-product.entity";
 export { XhsTemplate } from "./xhs-template.entity";
+export { PromptTemplateGroup } from "./prompt-template-group.entity";
+export { PromptTemplate } from "./prompt-template.entity";

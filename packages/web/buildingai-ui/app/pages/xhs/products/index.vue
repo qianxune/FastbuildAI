@@ -46,6 +46,58 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 // AI模型选择
 const selectedModelId = ref<string>("");
 
+// 提示词模板选择
+interface PromptTemplateOption {
+    id: string;
+    name: string;
+    groupId?: string;
+    groupName?: string;
+    isDefault?: boolean;
+}
+
+const promptTemplates = ref<PromptTemplateOption[]>([]);
+const selectedTemplateId = ref<string>("");
+const isLoadingTemplates = ref(false);
+const isBatchGenerating = ref(false);
+
+const loadPromptTemplates = async () => {
+    isLoadingTemplates.value = true;
+    try {
+        const { get } = useAuthFetch();
+        const { data, error } = await get<{
+            items: PromptTemplateOption[];
+            defaultTemplateId: string | null;
+        }>("/api/xhs/prompt-templates?forSelect=true", { showError: false });
+        if (error) {
+            toast.warning("提示词模板加载失败，请检查网络或稍后重试");
+            return;
+        }
+        if (data) {
+            const items = Array.isArray(data.items) ? data.items : [];
+            promptTemplates.value = items;
+            if (items.length) {
+                if (data.defaultTemplateId) {
+                    selectedTemplateId.value = data.defaultTemplateId;
+                } else {
+                    const first = items[0];
+                    if (first) selectedTemplateId.value = first.id;
+                }
+            } else {
+                selectedTemplateId.value = "";
+                toast.warning("暂无提示词模板，请先在「提示词模板管理」中添加");
+            }
+        }
+    } catch {
+        toast.warning("提示词模板加载失败");
+    } finally {
+        isLoadingTemplates.value = false;
+    }
+};
+
+onMounted(() => {
+    loadPromptTemplates();
+});
+
 const allImages = (p: XhsProduct) => {
     const list = [p.imageUrl, ...(p.extraImages || [])].filter(Boolean) as string[];
     return list;
@@ -156,24 +208,29 @@ const goToSingleGenerate = () => {
   })
 }
 
-// 批量生成 - 跳转到批量生成页面
+// 批量生成 - 跳转到批量生成页（在该页调用接口并显示进度）
 const goToBatchGenerate = () => {
-  if (selectedIds.value.length === 0) return
+    if (selectedIds.value.length === 0) return;
 
-  // 检查是否选择了模型
-  if (!selectedModelId.value) {
-    toast.warning('请先选择AI模型')
-    return
-  }
+    if (!selectedModelId.value) {
+        toast.warning("请先选择AI模型");
+        return;
+    }
 
-  router.push({
-    path: '/xhs/batch-generate',
-    query: {
-      productIds: selectedIds.value.join(','),
-      modelId: selectedModelId.value,
-    },
-  })
-}
+    if (!selectedTemplateId.value) {
+        toast.warning("请先选择提示词模板");
+        return;
+    }
+
+    router.push({
+        path: "/xhs/batch-generate",
+        query: {
+            productIds: selectedIds.value.join(","),
+            modelId: selectedModelId.value,
+            templateId: selectedTemplateId.value,
+        },
+    });
+};
 
 const toggleExpand = (productId: string) => {
     if (expandedGroups.value.has(productId)) {
@@ -453,7 +510,8 @@ const openLink = (url: string) => {
                         <UButton
                             v-else
                             color="primary"
-                            :disabled="selectedIds.length === 0"
+                            :disabled="selectedIds.length === 0 || isBatchGenerating"
+                            :loading="isBatchGenerating"
                             @click="goToBatchGenerate"
                         >
                             <UIcon name="i-heroicons-sparkles" class="mr-1" />
@@ -514,6 +572,30 @@ const openLink = (url: string) => {
                         placeholder="选择AI模型"
                         size="sm"
                         @change="handleModelChange"
+                    />
+                </div>
+
+                <!-- 提示词模板选择 -->
+                <div class="flex items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                        >提示词模板:</label
+                    >
+                    <USelectMenu
+                        v-model="selectedTemplateId"
+                        :items="promptTemplates.map(t => ({ label: t.name, value: t.id }))"
+                        value-key="value"
+                        size="sm"
+                        placeholder="选择提示词模板"
+                        :loading="isLoadingTemplates"
+                        class="min-w-[160px]"
+                    />
+                    <UButton
+                        variant="ghost"
+                        color="neutral"
+                        size="sm"
+                        icon="i-heroicons-cog-6-tooth"
+                        :to="'/xhs/prompt-templates'"
+                        title="管理提示词模板"
                     />
                 </div>
 

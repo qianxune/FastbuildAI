@@ -33,6 +33,8 @@ const { publishNote, checkLoginStatus } = useXhsPublish();
 
 const productIds = ref<string[]>([]);
 const modelId = ref<string>("");
+const templateId = ref<string>("");
+const noteIdsMode = ref(false); // true = 从已有笔记直接进入发布模式
 const tasks = ref<GenerationTask[]>([]);
 const isGenerating = ref(false);
 const isPublishing = ref(false);
@@ -50,8 +52,18 @@ const currentTask = ref<GenerationTask | null>(null);
 
 // 加载商品信息
 onMounted(async () => {
+    const noteIdsStr = route.query.noteIds as string;
+
+    // noteIds 模式：从已生成的笔记直接进入发布
+    if (noteIdsStr) {
+        noteIdsMode.value = true;
+        await loadExistingNotes(noteIdsStr.split(",").filter(Boolean));
+        return;
+    }
+
     const idsStr = route.query.productIds as string;
     modelId.value = (route.query.modelId as string) || "";
+    templateId.value = (route.query.templateId as string) || "";
 
     if (!idsStr) {
         toast.error("未选择商品");
@@ -65,14 +77,53 @@ onMounted(async () => {
         return;
     }
 
+    if (!templateId.value) {
+        toast.error("未选择提示词模板");
+        router.push("/xhs/products");
+        return;
+    }
+
     productIds.value = idsStr.split(",").filter(Boolean);
 
     // 加载商品信息
     await loadProducts();
 
-    // 自动开始生成
-    await startBatchGenerate();
+    // 使用提示词模板批量生成（后端一次性生成，带进度条）
+    await startBatchGenerateWithTemplate();
 });
+
+// 从已有笔记加载（noteIds 模式，带封面图用于展示与发布）
+const loadExistingNotes = async (noteIds: string[]) => {
+    const { get } = useAuthFetch();
+
+    for (const noteId of noteIds) {
+        const { data } = await get<{
+            id: string;
+            title: string;
+            content: string;
+            productId?: string;
+            coverImages?: string[];
+        }>(`/api/xhs/notes/${noteId}`);
+        if (data) {
+            const coverImages = data.coverImages ?? [];
+            const productLike = {
+                id: data.productId || data.id,
+                name: data.title,
+                imageUrl: coverImages[0] ?? undefined,
+                extraImages: coverImages.length > 1 ? coverImages.slice(1) : undefined,
+            } as XhsProduct;
+            tasks.value.push({
+                productId: data.productId || data.id,
+                product: productLike,
+                status: "success",
+                progress: 100,
+                title: data.title,
+                content: data.content,
+                noteId: data.id,
+            });
+        }
+    }
+};
 
 // 加载商品信息
 const loadProducts = async () => {
@@ -96,7 +147,94 @@ const loadProducts = async () => {
     }));
 };
 
-// 开始批量生成
+// 使用提示词模板批量生成（后端一次性生成，当前页显示进度）
+const startBatchGenerateWithTemplate = async () => {
+    isGenerating.value = true;
+    for (const task of tasks.value) {
+        task.status = "generating";
+        task.progress = 0;
+    }
+
+    try {
+        const { post } = useAuthFetch();
+        const { data, error } = await post<{
+            items: Array<{
+                product_id: string;
+                title: string;
+                content: string;
+                cover_images?: string[];
+            }>;
+        }>("/api/xhs/batch-generate-notes", {
+            product_ids: productIds.value,
+            ai_model: modelId.value,
+            template_id: templateId.value,
+        });
+
+        if (error || !data) {
+            toast.error("批量生成失败，请重试");
+            for (const task of tasks.value) {
+                task.status = "error";
+                task.error = "请求失败";
+            }
+            isGenerating.value = false;
+            return;
+        }
+
+        const taskMap = new Map(tasks.value.map((t) => [t.productId, t]));
+
+        for (const item of data.items) {
+            const task = taskMap.get(item.product_id);
+            if (!task) continue;
+
+            const title = item.title || "（无标题）";
+            const content = item.content || "（生成失败）";
+            const isFailed = !item.title && item.content?.startsWith("生成失败");
+
+            if (isFailed) {
+                task.status = "error";
+                task.error = item.content || "生成失败";
+                task.title = "";
+                task.content = item.content || "";
+                continue;
+            }
+
+            const { post: postNote } = useAuthFetch();
+            const { data: noteData } = await postNote<{ id: string }>("/api/xhs/notes", {
+                title,
+                content,
+                mode: "ai-generate",
+                productId: item.product_id,
+                coverImages: item.cover_images?.length ? item.cover_images : undefined,
+            });
+
+            if (noteData?.id) {
+                task.noteId = noteData.id;
+                task.title = title;
+                task.content = content;
+                task.status = "success";
+                task.progress = 100;
+            } else {
+                task.status = "error";
+                task.error = "保存笔记失败";
+            }
+        }
+
+        const successCount = tasks.value.filter((t) => t.status === "success").length;
+        toast.success(`批量生成完成，成功 ${successCount} 条`);
+    } catch (err) {
+        toast.error(err instanceof Error ? err.message : "批量生成失败");
+        for (const task of tasks.value) {
+            if (task.status === "generating") {
+                task.status = "error";
+                task.error = "生成异常";
+            }
+        }
+    } finally {
+        isGenerating.value = false;
+    }
+};
+
+// 开始批量生成（旧流程：逐条流式生成，无 templateId 时不再使用）
 const startBatchGenerate = async () => {
     isGenerating.value = true;
 

@@ -10,8 +10,17 @@ import type { ChatCompletionMessageParam } from "openai/resources/index";
 import { SecretService } from "@buildingai/core/modules";
 import { getProviderSecret } from "@buildingai/utils";
 
-import { CreateNoteDto, GenerateNoteDto, QueryNoteDto, SearchNoteDto, UpdateNoteDto } from "../dto";
+import {
+    CreateNoteDto,
+    BatchGenerateNotesDto,
+    GenerateNoteDto,
+    QueryNoteDto,
+    SearchNoteDto,
+    UpdateNoteDto,
+} from "../dto";
 import { ContentModerationService } from "./content-moderation.service";
+import { XhsProductService } from "./xhs-product.service";
+import { XhsPromptTemplateService } from "./xhs-prompt-template.service";
 import { AiModelService } from "@modules/ai/model/services/ai-model.service";
 
 /**
@@ -36,6 +45,8 @@ export class XhsNoteService extends BaseService<XhsNote> {
         private readonly contentModerationService: ContentModerationService,
         public readonly aiModelService: AiModelService,
         private readonly secretService: SecretService,
+        private readonly xhsProductService: XhsProductService,
+        private readonly promptTemplateService: XhsPromptTemplateService,
     ) {
         super(noteRepository);
     }
@@ -273,13 +284,13 @@ export class XhsNoteService extends BaseService<XhsNote> {
      * 根据生成模式构建消息
      */
     private buildMessages(dto: GenerateNoteDto): ChatCompletionMessageParam[] {
-        const { content, mode, style = '活泼', emojiFrequency = '适中' } = dto
+        const { content, mode, style = "活泼", emojiFrequency = "适中" } = dto;
 
-        let systemPrompt = ''
-        let userPrompt = ''
+        let systemPrompt = "";
+        let userPrompt = "";
 
         switch (mode) {
-            case 'ai-generate':
+            case "ai-generate":
                 systemPrompt = `你是一个专业的小红书内容创作助手。请根据用户提供的主题，生成符合小红书风格的笔记内容。
 
 要求：
@@ -292,11 +303,11 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
 请按以下格式输出：
 标题：[生成的标题，不超过20个字符]
-正文：[生成的正文内容]`
-                userPrompt = `请为以下主题生成小红书笔记内容：${content}`
-                break
+正文：[生成的正文内容]`;
+                userPrompt = `请为以下主题生成小红书笔记内容：${content}`;
+                break;
 
-            case 'ai-compose':
+            case "ai-compose":
                 systemPrompt = `你是一个专业的小红书内容创作助手。请根据用户提供的草稿内容，进行扩写和优化，使其更符合小红书风格。
 
 要求：
@@ -310,11 +321,11 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
 请按以下格式输出：
 标题：[生成的标题，不超过20个字符]
-正文：[优化后的正文内容]`
-                userPrompt = `请优化和扩写以下内容：${content}`
-                break
+正文：[优化后的正文内容]`;
+                userPrompt = `请优化和扩写以下内容：${content}`;
+                break;
 
-            case 'add-emoji':
+            case "add-emoji":
                 systemPrompt = `你是一个专业的小红书内容创作助手。请为用户提供的笔记内容添加合适的emoji表情符号。
 
 要求：
@@ -327,18 +338,18 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
 请按以下格式输出：
 标题：[添加emoji后的标题，不超过20个字符]
-正文：[添加emoji后的正文内容]`
-                userPrompt = `请为以下内容添加合适的emoji：${content}`
-                break
+正文：[添加emoji后的正文内容]`;
+                userPrompt = `请为以下内容添加合适的emoji：${content}`;
+                break;
 
             default:
-                throw new Error('不支持的生成模式')
+                throw new Error("不支持的生成模式");
         }
 
         return [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-        ]
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+        ];
     }
 
     /**
@@ -428,6 +439,118 @@ export class XhsNoteService extends BaseService<XhsNote> {
     }
 
     /**
+     * 批量生成笔记（非流式，用于提示词模板批量生成）
+     */
+    async batchGenerateNotes(
+        dto: BatchGenerateNotesDto,
+        userId: string,
+    ): Promise<{
+        items: Array<{
+            product_id: string;
+            title: string;
+            content: string;
+            cover_images?: string[];
+        }>;
+    }> {
+        const templateContent = await this.promptTemplateService.getTemplateContent(
+            dto.template_id,
+        );
+        const products = await this.xhsProductService.findByIds(dto.product_ids, userId);
+
+        if (!products.length) {
+            throw HttpErrorFactory.notFound("未找到指定商品");
+        }
+
+        const { provider, modelName } = await this.getAIProviderAndModel(dto.ai_model);
+        const client = new TextGenerator(provider);
+
+        const items: Array<{
+            product_id: string;
+            title: string;
+            content: string;
+            cover_images?: string[];
+        }> = [];
+
+        for (const product of products) {
+            const prompt = templateContent
+                .replace(/\{product_name\}/g, product.name ?? "")
+                .replace(/\{spec\}/g, product.spec ?? "")
+                .replace(/\{description\}/g, product.description ?? "");
+
+            const messages: ChatCompletionMessageParam[] = [
+                {
+                    role: "system",
+                    content:
+                        "你是一个专业的小红书内容创作助手。请严格按以下格式输出：\n标题：[标题内容，不超过20个字符]\n正文：[正文内容]",
+                },
+                { role: "user", content: prompt },
+            ];
+
+            try {
+                const response = await client.chat.create({
+                    model: modelName,
+                    messages,
+                    temperature: 0.7,
+                    max_tokens: 2000,
+                });
+
+                const fullContent = response.choices[0]?.message?.content ?? "";
+                const { title, content } = this.parseGeneratedContent(fullContent);
+
+                const coverImages: string[] = [];
+                if (product.imageUrl) coverImages.push(product.imageUrl);
+                if (product.extraImages?.length) coverImages.push(...product.extraImages);
+
+                items.push({
+                    product_id: product.id,
+                    title,
+                    content,
+                    cover_images: coverImages.length ? coverImages : undefined,
+                });
+            } catch (err) {
+                this.logger.error(`批量生成失败，商品: ${product.id}`, err);
+                const coverImages: string[] = [];
+                if (product.imageUrl) coverImages.push(product.imageUrl);
+                if (product.extraImages?.length) coverImages.push(...product.extraImages);
+                items.push({
+                    product_id: product.id,
+                    title: "",
+                    content: `生成失败: ${err instanceof Error ? err.message : "未知错误"}`,
+                    cover_images: coverImages.length ? coverImages : undefined,
+                });
+            }
+        }
+
+        return { items };
+    }
+
+    /**
+     * 解析 AI 输出的「标题：xxx 正文：xxx」格式
+     */
+    private parseGeneratedContent(fullContent: string): { title: string; content: string } {
+        const lines = fullContent.split("\n");
+        let title = "";
+        let content = "";
+        let isContentSection = false;
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("标题：") || trimmed.startsWith("标题:")) {
+                title = trimmed.replace(/^标题[：:]/, "").trim();
+            } else if (trimmed.startsWith("正文：") || trimmed.startsWith("正文:")) {
+                content = trimmed.replace(/^正文[：:]/, "").trim();
+                isContentSection = true;
+            } else if (isContentSection && trimmed) {
+                content += (content ? "\n" : "") + trimmed;
+            } else if (!title && !isContentSection && trimmed) {
+                title = trimmed;
+            }
+        }
+
+        return { title, content };
+    }
+
+    /**
      * 创建笔记
      *
      * @param dto 创建笔记DTO
@@ -488,7 +611,10 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
         // 商品ID筛选（支持单个或多个）
         const productIds = query.productIds
-            ? query.productIds.split(",").map((s) => s.trim()).filter(Boolean)
+            ? query.productIds
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
             : productId
               ? [productId]
               : [];

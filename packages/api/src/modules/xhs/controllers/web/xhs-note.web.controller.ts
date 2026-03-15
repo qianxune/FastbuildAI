@@ -7,6 +7,7 @@ import { Body, Post, Res, Get, Put, Delete, Param, Query } from "@nestjs/common"
 import type { Response } from "express";
 
 import {
+    BatchGenerateNotesDto,
     GenerateNoteDto,
     CreateNoteDto,
     UpdateNoteDto,
@@ -36,6 +37,17 @@ export class XhsNoteWebController extends BaseController {
     @Post("generate")
     async generate(@Body() dto: GenerateNoteDto, @Res() res: Response): Promise<void> {
         await this.xhsNoteService.generateStream(dto, res);
+    }
+
+    /**
+     * 批量生成笔记（基于提示词模板，非流式）
+     */
+    @Post("batch-generate-notes")
+    async batchGenerateNotes(
+        @Body() dto: BatchGenerateNotesDto,
+        @Playground() user: UserPlayground,
+    ) {
+        return this.xhsNoteService.batchGenerateNotes(dto, user.id);
     }
 
     /**

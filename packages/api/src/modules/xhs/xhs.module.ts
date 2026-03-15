@@ -6,6 +6,8 @@ import {
     XhsNote,
     XhsProduct,
     XhsTemplate,
+    PromptTemplate,
+    PromptTemplateGroup,
     Secret,
 } from "@buildingai/db/entities";
 import { Module } from "@nestjs/common";
@@ -16,12 +18,14 @@ import { XhsGroupWebController } from "./controllers/web/xhs-group.web.controlle
 import { XhsNoteWebController } from "./controllers/web/xhs-note.web.controller";
 import { XhsImageWebController } from "./controllers/web/xhs-image.web.controller";
 import { XhsProductWebController } from "./controllers/web/xhs-product.web.controller";
+import { XhsPromptTemplateWebController } from "./controllers/web/xhs-prompt-template.web.controller";
 import { XhsPublishWebController } from "./controllers/web/xhs-publish.web.controller";
 import { ContentModerationService } from "./services/content-moderation.service";
 import { XhsGroupService } from "./services/xhs-group.service";
 import { XhsNoteService } from "./services/xhs-note.service";
 import { XhsImageService } from "./services/xhs-image.service";
 import { XhsProductService } from "./services/xhs-product.service";
+import { XhsPromptTemplateService } from "./services/xhs-prompt-template.service";
 import { XhsPublishService } from "./services/xhs-publish.service";
 
 /**
@@ -37,15 +41,18 @@ import { XhsPublishService } from "./services/xhs-publish.service";
             XhsImage,
             XhsProduct,
             XhsTemplate,
-            Secret, // 添加Secret实体
+            PromptTemplate,
+            PromptTemplateGroup,
+            Secret,
         ]),
-        AiModelModule, // 导入AI模型模块
+        AiModelModule,
     ],
     controllers: [
         XhsNoteWebController,
         XhsGroupWebController,
         XhsImageWebController,
         XhsProductWebController,
+        XhsPromptTemplateWebController,
         XhsPublishWebController,
     ],
     providers: [
@@ -53,15 +60,17 @@ import { XhsPublishService } from "./services/xhs-publish.service";
         XhsGroupService,
         XhsImageService,
         XhsProductService,
+        XhsPromptTemplateService,
         XhsPublishService,
         ContentModerationService,
-        SecretService, // 添加SecretService
+        SecretService,
     ],
     exports: [
         XhsNoteService,
         XhsGroupService,
         XhsImageService,
         XhsProductService,
+        XhsPromptTemplateService,
         XhsPublishService,
         ContentModerationService,
     ],
