@@ -146,6 +146,7 @@ export const useAuthFetch = () => {
      */
     const parseResponseData = async <T>(response: Response): Promise<T> => {
         const contentType = response.headers.get('content-type')
+        const contentLength = response.headers.get('content-length')
 
         // 检查是否返回了 HTML 而不是 JSON
         if (contentType?.includes('text/html')) {
@@ -154,9 +155,24 @@ export const useAuthFetch = () => {
           )
         }
 
-        const responseData = await response.json()
+        // 空响应体（如 204 No Content 或 200 无 body）不解析 JSON，避免报错
+        if (contentLength === '0' || (contentType?.includes('application/json') === false && !contentType)) {
+          return null as T
+        }
+        const text = await response.text()
+        if (!text || !text.trim()) {
+          return null as T
+        }
+        let responseData: unknown
+        try {
+          responseData = JSON.parse(text)
+        } catch {
+          throw new Error(`API 返回了无效的 JSON (状态码: ${response.status})`)
+        }
         // API 返回格式: { code, message, data: ... }
-        return (responseData.data !== undefined ? responseData.data : responseData) as T
+        return (responseData && typeof responseData === 'object' && 'data' in responseData && (responseData as { data: unknown }).data !== undefined
+          ? (responseData as { data: T }).data
+          : responseData) as T
     }
 
     /**

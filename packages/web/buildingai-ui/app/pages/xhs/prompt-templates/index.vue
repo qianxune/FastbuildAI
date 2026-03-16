@@ -547,7 +547,7 @@ onMounted(async () => {
         <!-- 模板新建/编辑弹窗 -->
         <UModal v-model:open="showTemplateModal">
             <template #content>
-                <div class="max-w-2xl p-6">
+                <div class="max-w-4xl p-6">
                     <h3 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
                         {{ isEditingTemplate ? "编辑模板" : "新增模板" }}
                     </h3>
@@ -595,9 +595,9 @@ onMounted(async () => {
                             </p>
                             <UTextarea
                                 v-model="templateForm.content"
-                                :rows="8"
+                                :rows="16"
                                 placeholder="请输入提示词内容，例如：请为商品「{product_name}」写一篇小红书笔记..."
-                                class="font-mono text-sm"
+                                class="w-full font-mono text-sm"
                             />
                         </div>
                         <div class="grid grid-cols-2 gap-4">

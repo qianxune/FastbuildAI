@@ -346,4 +346,29 @@ export class XhsProductService extends BaseService<XhsProduct> {
 
         return { items, total, page, limit };
     }
+
+    /**
+     * 删除单个商品（校验归属）
+     */
+    async deleteOne(id: string, userId: string): Promise<void> {
+        const product = await this.productRepository.findOne({
+            where: { id, userId },
+        });
+        if (!product) {
+            throw HttpErrorFactory.notFound("商品不存在或无权操作");
+        }
+        await this.productRepository.delete(id);
+    }
+
+    /**
+     * 批量删除商品（仅删除属于当前用户的）
+     */
+    async deleteManyForUser(ids: string[], userId: string): Promise<number> {
+        if (!ids.length) return 0;
+        const result = await this.productRepository.delete({
+            id: In(ids),
+            userId,
+        });
+        return result.affected ?? 0;
+    }
 }

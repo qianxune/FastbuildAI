@@ -3,9 +3,19 @@ import { type UserPlayground } from "@buildingai/db";
 import { Playground } from "@buildingai/decorators/playground.decorator";
 import { HttpErrorFactory } from "@buildingai/errors";
 import { WebController } from "@common/decorators/controller.decorator";
-import { Get, Param, Post, Query, UploadedFile, UseInterceptors } from "@nestjs/common";
+import {
+    Body,
+    Delete,
+    Get,
+    Param,
+    Post,
+    Query,
+    UploadedFile,
+    UseInterceptors,
+} from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 
+import { BatchDeleteProductsDto } from "../../dto";
 import { QueryProductDto } from "../../dto/query-product.dto";
 import type { ImportProductResult } from "../../services/xhs-product.service";
 import { XhsProductService } from "../../services/xhs-product.service";
@@ -86,11 +96,38 @@ export class XhsProductWebController extends BaseController {
     }
 
     /**
+     * 批量删除商品
+     * POST /api/xhs/products/batch-delete
+     */
+    @Post("products/batch-delete")
+    async batchDelete(
+        @Body() dto: BatchDeleteProductsDto,
+        @Playground() user: UserPlayground,
+    ) {
+        const ids = Array.isArray(dto.ids) ? dto.ids.filter(Boolean) : [];
+        if (!ids.length) {
+            return { deleted: 0, message: "未选择商品" };
+        }
+        const deleted = await this.xhsProductService.deleteManyForUser(ids, user.id);
+        return { deleted, message: `成功删除 ${deleted} 个商品` };
+    }
+
+    /**
      * 商品详情
      * GET /api/xhs/products/:id
      */
     @Get("products/:id")
     async getById(@Param("id") id: string, @Playground() user: UserPlayground) {
         return this.xhsProductService.findOneForUser(id, user.id);
+    }
+
+    /**
+     * 删除单个商品
+     * DELETE /api/xhs/products/:id
+     */
+    @Delete("products/:id")
+    async deleteById(@Param("id") id: string, @Playground() user: UserPlayground) {
+        await this.xhsProductService.deleteOne(id, user.id);
+        return { message: "商品已删除" };
     }
 }

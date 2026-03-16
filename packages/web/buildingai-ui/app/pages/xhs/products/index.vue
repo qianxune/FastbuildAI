@@ -43,6 +43,9 @@ const isImporting = ref(false);
 const importResult = ref<{ success: number; skipped: number; failed: number } | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
+// 顶层获取 HTTP 方法，避免在异步回调中丢失 Nuxt 上下文
+const { get: authGet, post: authPost, del: authDel } = useAuthFetch();
+
 // AI模型选择
 const selectedModelId = ref<string>("");
 
@@ -63,8 +66,7 @@ const isBatchGenerating = ref(false);
 const loadPromptTemplates = async () => {
     isLoadingTemplates.value = true;
     try {
-        const { get } = useAuthFetch();
-        const { data, error } = await get<{
+        const { data, error } = await authGet<{
             items: PromptTemplateOption[];
             defaultTemplateId: string | null;
         }>("/api/xhs/prompt-templates?forSelect=true", { showError: false });
@@ -461,6 +463,78 @@ const onFileChange = async (e: Event) => {
 const openLink = (url: string) => {
     window.open(url, "_blank", "noopener,noreferrer");
 };
+
+// ======================== 删除商品 ========================
+const showDeleteConfirm = ref(false);
+const deleteTargetIds = ref<string[]>([]);
+const deleteConfirmMessage = ref("");
+const isDeleting = ref(false);
+
+const requestDeleteBatch = () => {
+    if (!selectedIds.value.length) return;
+    deleteTargetIds.value = [...selectedIds.value];
+    deleteConfirmMessage.value = `确定删除选中的 ${deleteTargetIds.value.length} 个商品？此操作不可恢复。`;
+    showDeleteConfirm.value = true;
+};
+
+const requestDeleteSingle = (id: string) => {
+    deleteTargetIds.value = [id];
+    deleteConfirmMessage.value = "确定删除该商品？此操作不可恢复。";
+    showDeleteConfirm.value = true;
+};
+
+const requestDeleteGroup = (skuIds: string[]) => {
+    if (!skuIds.length) return;
+    deleteTargetIds.value = [...skuIds];
+    deleteConfirmMessage.value = `确定删除该组 ${skuIds.length} 个商品？此操作不可恢复。`;
+    showDeleteConfirm.value = true;
+};
+
+const cancelDelete = () => {
+    showDeleteConfirm.value = false;
+    deleteTargetIds.value = [];
+};
+
+const doConfirmDelete = async () => {
+    const ids = deleteTargetIds.value;
+    if (!ids.length) {
+        cancelDelete();
+        return;
+    }
+    isDeleting.value = true;
+    try {
+        if (ids.length === 1) {
+            const { error } = await authDel(`/api/xhs/products/${ids[0]}`);
+            if (error) {
+                toast.error(error);
+                return;
+            }
+            toast.success("商品已删除");
+        } else {
+            const { data, error } = await authPost<{ deleted: number; message: string }>(
+                "/api/xhs/products/batch-delete",
+                { ids },
+            );
+            if (error) {
+                toast.error(error);
+                return;
+            }
+            toast.success(data?.message ?? `成功删除 ${ids.length} 个商品`);
+        }
+        selectedIds.value = selectedIds.value.filter((id) => !ids.includes(id));
+        showDeleteConfirm.value = false;
+        deleteTargetIds.value = [];
+        if (viewMode.value === "grouped") {
+            await fetchProductsGrouped({ page: page.value, keyword: searchInput.value.trim() });
+        } else {
+            await fetchProducts({ page: page.value, keyword: searchInput.value.trim() });
+        }
+    } catch (e) {
+        toast.error("删除失败，请重试");
+    } finally {
+        isDeleting.value = false;
+    }
+};
 </script>
 
 <template>
@@ -516,6 +590,16 @@ const openLink = (url: string) => {
                         >
                             <UIcon name="i-heroicons-sparkles" class="mr-1" />
                             Batch Generate ({{ selectedIds.length }} selected)
+                        </UButton>
+                        <UButton
+                            v-if="selectedIds.length > 0"
+                            color="error"
+                            variant="outline"
+                            :disabled="isDeleting"
+                            @click="requestDeleteBatch"
+                        >
+                            <UIcon name="i-heroicons-trash" class="mr-1" />
+                            批量删除 ({{ selectedIds.length }})
                         </UButton>
                         <UButton
                             variant="outline"
@@ -795,6 +879,14 @@ const openLink = (url: string) => {
                                                     />
                                                     商品
                                                 </button>
+                                                <UButton
+                                                    variant="ghost"
+                                                    color="error"
+                                                    size="xs"
+                                                    icon="i-heroicons-trash"
+                                                    title="删除该组商品"
+                                                    @click="requestDeleteGroup(group.skus.map((s) => s.id))"
+                                                />
                                                 <span
                                                     v-if="!group.sourceUrl && !group.productUrl"
                                                     class="text-xs text-gray-400"
@@ -866,6 +958,14 @@ const openLink = (url: string) => {
                                                     >
                                                         Stock: {{ sku.stock ?? "-" }}
                                                     </div>
+                                                    <UButton
+                                                        variant="ghost"
+                                                        color="error"
+                                                        size="xs"
+                                                        icon="i-heroicons-trash"
+                                                        title="删除该商品"
+                                                        @click="requestDeleteSingle(sku.id)"
+                                                    />
                                                 </div>
                                             </div>
                                         </td>
@@ -1003,7 +1103,7 @@ const openLink = (url: string) => {
                                         </UButton>
                                     </td>
                                     <td class="py-2">
-                                        <div class="flex gap-2">
+                                        <div class="flex flex-wrap items-center gap-2">
                                             <button
                                                 v-if="p.sourceUrl"
                                                 type="button"
@@ -1027,6 +1127,14 @@ const openLink = (url: string) => {
                                                 />
                                                 商品
                                             </button>
+                                            <UButton
+                                                variant="ghost"
+                                                color="error"
+                                                size="xs"
+                                                icon="i-heroicons-trash"
+                                                title="删除商品"
+                                                @click="requestDeleteSingle(p.id)"
+                                            />
                                             <span
                                                 v-if="!p.sourceUrl && !p.productUrl"
                                                 class="text-xs text-gray-400"
@@ -1218,6 +1326,56 @@ const openLink = (url: string) => {
                     </button>
                 </div>
             </div>
+
+            <!-- 删除确认弹窗 -->
+            <UModal
+                v-model:open="showDeleteConfirm"
+                :ui="{ content: 'sm:max-w-md' }"
+            >
+                <template #content>
+                    <UCard>
+                        <template #header>
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <div class="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+                                        <UIcon name="i-heroicons-exclamation-triangle" class="h-5 w-5 text-red-600 dark:text-red-400" />
+                                    </div>
+                                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">确认删除</h3>
+                                </div>
+                                <UButton
+                                    variant="ghost"
+                                    color="neutral"
+                                    icon="i-heroicons-x-mark"
+                                    size="sm"
+                                    @click="cancelDelete"
+                                />
+                            </div>
+                        </template>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">
+                            {{ deleteConfirmMessage }}
+                        </p>
+                        <template #footer>
+                            <div class="flex justify-end gap-3">
+                                <UButton
+                                    color="neutral"
+                                    variant="outline"
+                                    :disabled="isDeleting"
+                                    @click="cancelDelete"
+                                >
+                                    取消
+                                </UButton>
+                                <UButton
+                                    color="error"
+                                    :loading="isDeleting"
+                                    @click="doConfirmDelete"
+                                >
+                                    确定删除
+                                </UButton>
+                            </div>
+                        </template>
+                    </UCard>
+                </template>
+            </UModal>
 
             <ProductNotesModal
                 v-model="showNotesModal"
