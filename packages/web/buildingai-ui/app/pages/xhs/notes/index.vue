@@ -338,20 +338,20 @@ const getGroupNoteCount = (groupId: string | undefined) => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <div class="container mx-auto px-4 py-8">
+    <div class="min-h-screen bg-stone-50 dark:bg-gray-900">
+        <div class="container mx-auto px-4 py-8 md:py-10">
             <!-- Page Header -->
-            <div class="mb-8">
-                <div class="flex items-center justify-between">
+            <header class="mb-8 md:mb-10">
+                <div class="flex flex-wrap items-center justify-between gap-4">
                     <div>
-                        <h1 class="mb-2 text-3xl font-bold text-gray-900 dark:text-white">
+                        <h1 class="mb-2 text-2xl font-bold tracking-tight text-stone-900 dark:text-white md:text-3xl">
                             我的笔记
                         </h1>
-                        <p class="text-gray-600 dark:text-gray-400">管理和查看你的小红书笔记内容</p>
+                        <p class="text-base text-stone-600 dark:text-gray-400">管理和查看你的小红书笔记内容</p>
                     </div>
 
                     <!-- Action buttons -->
-                    <div class="flex items-center space-x-3">
+                    <div class="flex flex-wrap items-center gap-3">
                         <UButton
                             variant="outline"
                             color="neutral"
@@ -382,17 +382,17 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                         <UButton color="primary" @click="goToGenerate"> 创建笔记 </UButton>
                     </div>
                 </div>
-            </div>
+            </header>
 
             <!-- Main content with sidebar -->
-            <div class="flex gap-6">
+            <div class="flex gap-6 md:gap-8">
                 <!-- Group Sidebar -->
-                <div class="w-64 flex-shrink-0">
+                <aside class="w-64 flex-shrink-0">
                     <div class="sticky top-4">
-                        <UCard class="p-4">
+                        <UCard class="border-stone-200/80 p-4 dark:border-gray-700">
                             <div class="space-y-2">
                                 <h3
-                                    class="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300"
+                                    class="mb-3 text-sm font-semibold text-stone-700 dark:text-gray-300"
                                 >
                                     笔记分组
                                 </h3>
@@ -452,7 +452,7 @@ const getGroupNoteCount = (groupId: string | undefined) => {
 
                                 <!-- 分组管理按钮 -->
                                 <div
-                                    class="mt-2 border-t border-gray-200 pt-2 dark:border-gray-700"
+                                    class="mt-3 border-t border-stone-200 pt-3 dark:border-gray-700"
                                 >
                                     <button
                                         class="flex w-full items-center justify-center space-x-2 rounded-lg px-3 py-2 text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
@@ -465,13 +465,13 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                             </div>
                         </UCard>
                     </div>
-                </div>
+                </aside>
 
                 <!-- Notes Content -->
                 <div class="min-w-0 flex-1">
                     <!-- Search and filters -->
                     <div class="mb-6">
-                        <div class="flex items-center space-x-4">
+                        <div class="flex flex-wrap items-center gap-4">
                             <!-- Search input -->
                             <div class="max-w-md flex-1">
                                 <UInput
@@ -494,7 +494,7 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                             </div>
 
                             <!-- Current filter info -->
-                            <div class="text-sm text-gray-500">
+                            <div class="text-sm text-stone-500 dark:text-gray-400">
                                 <span v-if="isSearching">找到 {{ total }} 个结果</span>
                                 <span v-else-if="currentGroupId"
                                     >{{ currentGroupName }} ({{ total }})</span

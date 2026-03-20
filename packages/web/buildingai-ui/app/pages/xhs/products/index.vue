@@ -539,20 +539,20 @@ const doConfirmDelete = async () => {
 
 <template>
     <div
-        class="min-h-screen bg-gray-50 dark:bg-gray-900"
+        class="min-h-screen bg-stone-50 dark:bg-gray-900"
         :class="{
             'pb-16': hasSelected && !previewExpanded,
             'pb-[66vh]': hasSelected && previewExpanded,
         }"
     >
-        <div class="container mx-auto px-4 py-8">
-            <div class="mb-8">
+        <div class="container mx-auto px-4 py-8 md:py-10">
+            <header class="mb-8 md:mb-10">
                 <div class="flex flex-wrap items-center justify-between gap-4">
                     <div>
-                        <h1 class="mb-2 text-3xl font-bold text-gray-900 dark:text-white">
+                        <h1 class="mb-2 text-2xl font-bold tracking-tight text-stone-900 dark:text-white md:text-3xl">
                             Product management
                         </h1>
-                        <p class="text-gray-600 dark:text-gray-400">
+                        <p class="text-base text-stone-600 dark:text-gray-400">
                             Import from Miaoshou Excel, select products to generate XHS notes
                         </p>
                     </div>
@@ -627,14 +627,14 @@ const doConfirmDelete = async () => {
                 </div>
                 <div
                     v-if="importResult"
-                    class="bg-primary-50 dark:bg-primary-900/20 mt-3 rounded-lg p-3 text-sm"
+                    class="mt-4 rounded-xl bg-primary-50 p-4 text-sm font-medium dark:bg-primary-900/20"
                 >
                     Import result: success {{ importResult.success }}, skipped
                     {{ importResult.skipped }}, failed {{ importResult.failed }}
                 </div>
-            </div>
+            </header>
 
-            <div class="mb-4 flex items-center gap-3">
+            <div class="mb-6 flex flex-wrap items-center gap-4 md:mb-8">
                 <UInput
                     v-model="searchInput"
                     placeholder="Search product name, SKU, spec..."
@@ -645,7 +645,7 @@ const doConfirmDelete = async () => {
 
                 <!-- AI模型选择 -->
                 <div class="flex items-center gap-2">
-                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                    <label class="text-sm font-semibold text-stone-700 dark:text-gray-300"
                         >AI模型:</label
                     >
                     <ModelSelect
@@ -661,7 +661,7 @@ const doConfirmDelete = async () => {
 
                 <!-- 提示词模板选择 -->
                 <div class="flex items-center gap-2">
-                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                    <label class="text-sm font-semibold text-stone-700 dark:text-gray-300"
                         >提示词模板:</label
                     >
                     <USelectMenu
@@ -713,7 +713,7 @@ const doConfirmDelete = async () => {
                 </div>
             </div>
 
-            <UCard>
+            <UCard class="border-stone-200/80 dark:border-gray-700">
                 <div v-if="isLoading" class="flex justify-center py-12">
                     <UIcon
                         name="i-heroicons-arrow-path"

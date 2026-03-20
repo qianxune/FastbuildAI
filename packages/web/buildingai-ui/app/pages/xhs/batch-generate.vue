@@ -664,20 +664,20 @@ const getStatusColor = (status: string) => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <div class="container mx-auto px-4 py-8">
+    <div class="min-h-screen bg-stone-50 dark:bg-gray-900">
+        <div class="container mx-auto px-4 py-8 md:py-10">
             <!-- Header -->
-            <div class="mb-8 flex items-center justify-between">
+            <header class="mb-8 md:mb-10 flex flex-wrap items-center justify-between gap-4">
                 <div>
-                    <h1 class="mb-2 text-3xl font-bold text-gray-900 dark:text-white">
+                    <h1 class="mb-2 text-2xl font-bold tracking-tight text-stone-900 dark:text-white md:text-3xl">
                         批量生成笔记
                     </h1>
-                    <p class="text-gray-600 dark:text-gray-400">
+                    <p class="text-base text-stone-600 dark:text-gray-400">
                         共 {{ tasks.length }} 个商品，已完成
                         {{ tasks.filter((t) => t.status === "success").length }} 个
                     </p>
                 </div>
-                <div class="flex gap-3">
+                <div class="flex flex-wrap gap-3">
                     <UButton
                         variant="outline"
                         color="neutral"
@@ -692,7 +692,7 @@ const getStatusColor = (status: string) => {
                         返回商品列表
                     </UButton>
                 </div>
-            </div>
+            </header>
 
             <!-- 发布进度条 -->
             <div

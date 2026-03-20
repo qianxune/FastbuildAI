@@ -116,35 +116,35 @@ const goToBatchGenerate = () => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-white dark:bg-gray-900">
+    <div class="min-h-screen bg-stone-50 dark:bg-gray-900">
         <!-- Main Content -->
-        <div class="container mx-auto max-w-5xl px-4 py-8">
+        <div class="container mx-auto max-w-5xl px-4 py-10 md:py-12">
             <!-- Header Section -->
-            <div class="mb-8 text-center">
+            <header class="mb-10 text-center md:mb-12">
                 <!-- Brand Logo -->
                 <div
-                    class="mb-4 inline-flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-white"
+                    class="mb-5 inline-flex items-center gap-2 rounded-xl bg-red-500 px-5 py-2.5 text-white shadow-sm"
                 >
-                    <span class="text-lg font-bold">AI小红书</span>
+                    <span class="text-lg font-bold tracking-tight">AI小红书</span>
                 </div>
 
                 <!-- Main Title -->
-                <h1 class="mb-3 text-3xl font-bold text-gray-900 md:text-4xl dark:text-white">
+                <h1 class="mb-4 text-3xl font-bold tracking-tight text-stone-900 md:text-4xl dark:text-white">
                     一键「<span class="text-red-500">智创</span>」爆款小红书笔记
                 </h1>
 
                 <!-- Subtitle -->
-                <p class="text-base text-gray-500 dark:text-gray-400">
+                <p class="text-lg text-stone-600 dark:text-gray-400">
                     输入你的内容主题，让AI为你服务到底
                 </p>
-            </div>
+            </header>
 
             <!-- Generation Card -->
-            <div
-                class="mb-8 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+            <section
+                class="mb-10 rounded-2xl border border-stone-200/80 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800 md:p-8 md:mb-12"
             >
                 <!-- Top Right Quick Actions -->
-                <div class="mb-4 flex justify-end gap-3">
+                <div class="mb-5 flex justify-end gap-3">
                     <UButton variant="ghost" color="neutral" size="sm" @click="goToTemplates">
                         <UIcon name="i-heroicons-document-duplicate" class="mr-1" />
                         模板笔记
@@ -156,16 +156,16 @@ const goToBatchGenerate = () => {
                 </div>
 
                 <!-- Mode Selection Tabs -->
-                <div class="mb-6 flex gap-2">
+                <div class="mb-6 flex flex-wrap gap-2">
                     <button
                         v-for="m in generationModes"
                         :key="m.key"
                         @click="mode = m.key"
                         :class="[
-                            'rounded-full px-6 py-2 text-sm font-medium transition-all',
+                            'rounded-full px-5 py-2.5 text-sm font-semibold transition-all',
                             mode === m.key
-                                ? 'bg-red-500 text-white'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600',
+                                ? 'bg-red-500 text-white shadow-sm'
+                                : 'bg-stone-100 text-stone-600 hover:bg-stone-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600',
                         ]"
                     >
                         {{ m.label }}
@@ -173,20 +173,20 @@ const goToBatchGenerate = () => {
                 </div>
 
                 <!-- Input Area -->
-                <div class="relative mb-4">
+                <div class="relative mb-5">
                     <div
-                        class="flex items-center overflow-hidden rounded-xl border border-gray-200 dark:border-gray-600"
+                        class="flex items-center overflow-hidden rounded-xl border border-stone-200 dark:border-gray-600"
                     >
                         <input
                             v-model="content"
                             type="text"
                             :placeholder="inputPlaceholder"
-                            class="flex-1 border-none bg-transparent px-4 py-4 text-base text-gray-900 placeholder-gray-400 outline-none dark:text-white"
+                            class="min-w-0 flex-1 border-none bg-transparent px-4 py-4 text-base text-stone-900 placeholder-stone-400 outline-none dark:text-white"
                         />
 
                         <!-- Generate Button -->
                         <div
-                            class="flex items-center gap-3 border-l border-gray-200 px-4 dark:border-gray-600"
+                            class="flex shrink-0 items-center gap-3 border-l border-stone-200 px-4 dark:border-gray-600"
                         >
                             <UButton
                                 color="primary"
@@ -203,9 +203,9 @@ const goToBatchGenerate = () => {
                 </div>
 
                 <!-- Bottom Actions Row -->
-                <div class="flex items-center justify-between">
+                <div class="flex flex-wrap items-center justify-between gap-4">
                     <!-- Left Options -->
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
                         <UButton variant="outline" color="neutral" size="sm" class="rounded-full">
                             Pro(简单问答)
                         </UButton>
@@ -252,75 +252,75 @@ const goToBatchGenerate = () => {
                         </UButton>
                     </div>
                 </div>
-            </div>
+            </section>
 
             <!-- Generated Content Display (when available) -->
-            <div
+            <section
                 v-if="generatedTitle || generatedContent"
-                class="mb-8 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+                class="mb-10 rounded-2xl border border-stone-200/80 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800 md:mb-12 md:p-8"
             >
-                <h3 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">生成结果</h3>
+                <h3 class="mb-5 text-xl font-semibold tracking-tight text-stone-900 dark:text-white">生成结果</h3>
 
                 <!-- Title Section -->
-                <div v-if="generatedTitle" class="mb-4">
-                    <div class="mb-2 flex items-center justify-between">
-                        <span class="text-sm text-gray-500">标题</span>
+                <div v-if="generatedTitle" class="mb-5">
+                    <div class="mb-2 flex items-center justify-between gap-3">
+                        <span class="text-sm font-medium text-stone-500 dark:text-gray-400">标题</span>
                         <UButton variant="ghost" size="xs" @click="copyTitle">复制标题</UButton>
                     </div>
-                    <div class="rounded-lg bg-gray-50 p-4 dark:bg-gray-700">
-                        <p class="text-lg font-semibold text-gray-900 dark:text-white">
+                    <div class="rounded-xl bg-stone-50 p-4 dark:bg-gray-700/50">
+                        <p class="text-lg font-semibold leading-snug text-stone-900 dark:text-white">
                             {{ generatedTitle }}
                         </p>
                     </div>
                 </div>
 
                 <!-- Content Section -->
-                <div v-if="generatedContent" class="mb-4">
-                    <div class="mb-2 flex items-center justify-between">
-                        <span class="text-sm text-gray-500">正文</span>
+                <div v-if="generatedContent" class="mb-5">
+                    <div class="mb-2 flex items-center justify-between gap-3">
+                        <span class="text-sm font-medium text-stone-500 dark:text-gray-400">正文</span>
                         <UButton variant="ghost" size="xs" @click="copyContent">复制正文</UButton>
                     </div>
-                    <div class="rounded-lg bg-gray-50 p-4 dark:bg-gray-700">
-                        <div class="whitespace-pre-wrap text-gray-900 dark:text-gray-100">
+                    <div class="rounded-xl bg-stone-50 p-4 dark:bg-gray-700/50">
+                        <div class="whitespace-pre-wrap text-base leading-relaxed text-stone-800 dark:text-gray-100">
                             {{ generatedContent }}
                         </div>
                     </div>
                 </div>
 
                 <!-- Save Button -->
-                <div class="flex justify-end">
+                <div class="flex justify-end pt-1">
                     <UButton
                         color="primary"
                         @click="handleSave"
                         :disabled="!generatedTitle || !generatedContent"
                     >
                         保存笔记
-                    </UButton>
+                     </UButton>
                 </div>
-            </div>
+            </section>
 
             <!-- Error Message -->
-            <div v-if="generationError" class="mb-8 rounded-xl bg-red-50 p-4 dark:bg-red-900/20">
-                <p class="text-red-600 dark:text-red-400">{{ generationError }}</p>
+            <div v-if="generationError" class="mb-10 rounded-xl bg-red-50 p-4 dark:bg-red-900/20 md:mb-12">
+                <p class="text-sm font-medium text-red-700 dark:text-red-300">{{ generationError }}</p>
             </div>
 
             <!-- Feature Cards -->
-            <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <section class="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6" aria-label="功能入口">
                 <div
                     v-for="(card, index) in featureCards"
                     :key="index"
                     :class="[
-                        'cursor-pointer rounded-2xl border border-gray-100 p-6 text-center transition-shadow hover:shadow-md dark:border-gray-700',
+                        'cursor-pointer rounded-2xl border p-6 text-center transition-shadow hover:shadow-md focus-within:ring-2 focus-within:ring-red-500/20 dark:border-gray-700',
                         card.color,
-                        'dark:bg-gray-800',
+                        'border-stone-200/80 dark:bg-gray-800',
                     ]"
                 >
-                    <div class="mb-3 text-3xl">{{ card.icon }}</div>
-                    <p class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <div class="mb-3 text-3xl" aria-hidden="true">{{ card.icon }}</div>
+                    <p class="text-sm font-semibold text-stone-700 dark:text-gray-300">
                         {{ card.title }}
                     </p>
                 </div>
-            </div>
+            </section>
         </div>
     </div>
 </template>

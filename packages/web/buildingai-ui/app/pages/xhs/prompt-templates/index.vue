@@ -258,15 +258,15 @@ onMounted(async () => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <div class="container mx-auto px-4 py-8">
+    <div class="min-h-screen bg-stone-50 dark:bg-gray-900">
+        <div class="container mx-auto px-4 py-8 md:py-10">
             <!-- 页头 -->
-            <div class="mb-8 flex flex-wrap items-center justify-between gap-4">
+            <header class="mb-8 md:mb-10 flex flex-wrap items-center justify-between gap-4">
                 <div>
-                    <h1 class="mb-2 text-3xl font-bold text-gray-900 dark:text-white">
+                    <h1 class="mb-2 text-2xl font-bold tracking-tight text-stone-900 dark:text-white md:text-3xl">
                         提示词模板管理
                     </h1>
-                    <p class="text-gray-600 dark:text-gray-400">
+                    <p class="text-base text-stone-600 dark:text-gray-400">
                         管理小红书笔记生成的提示词模板与分组
                     </p>
                 </div>
@@ -280,15 +280,15 @@ onMounted(async () => {
                         返回商品管理
                     </UButton>
                 </div>
-            </div>
+            </header>
 
-            <div class="grid grid-cols-1 gap-6 lg:grid-cols-4">
+            <div class="grid grid-cols-1 gap-6 lg:grid-cols-4 md:gap-8">
                 <!-- 左侧分组列表 -->
                 <div class="lg:col-span-1">
-                    <UCard>
+                    <UCard class="border-stone-200/80 dark:border-gray-700">
                         <template #header>
                             <div class="flex items-center justify-between">
-                                <span class="font-semibold text-gray-900 dark:text-white"
+                                <span class="font-semibold text-stone-900 dark:text-white"
                                     >分组管理</span
                                 >
                                 <UButton size="xs" icon="i-heroicons-plus" @click="openAddGroup">
