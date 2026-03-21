@@ -35,7 +35,12 @@ const {
 // 编辑器状态
 const noteTitle = ref("");
 const noteContent = ref("");
-const activeMenu = ref("template");
+// 左侧菜单：null 表示面板收起，点击当前选中项则收起
+const activeMenu = ref<string | null>('template');
+
+const toggleMenu = (key: string) => {
+    activeMenu.value = activeMenu.value === key ? null : key;
+};
 const showPreview = ref(false);
 const wordCount = computed(() => noteContent.value.length);
 
@@ -57,9 +62,19 @@ const isSaving = ref(false);
 // 图片工具栏展开状态
 const showImageToolbar = ref(false);
 
-// 图片预览状态
-const previewImageUrl = ref<string | null>(null);
+// 图片预览状态（支持上一张/下一张切换）
 const showImagePreview = ref(false);
+const imagePreviewIndex = ref(0);
+
+// 笔记预览中的图片轮播索引
+const previewImageIndex = ref(0);
+
+// 已上传配图区：默认展开
+const coverImagesStripExpanded = ref(true);
+
+const toggleCoverImagesStrip = () => {
+    coverImagesStripExpanded.value = !coverImagesStripExpanded.value;
+};
 
 // 图片工具栏配置
 const imageToolbarItems = [
@@ -355,6 +370,7 @@ const handleSave = async () => {
 
 // 预览笔记
 const handlePreview = () => {
+    previewImageIndex.value = 0;
     showPreview.value = true;
 };
 
@@ -396,30 +412,52 @@ const toggleImageToolbar = () => {
     showImageToolbar.value = !showImageToolbar.value;
 };
 
-// 处理图片预览
-const handlePreviewImage = (imageUrl: string) => {
-    console.log("Preview image URL:", imageUrl);
-    previewImageUrl.value = imageUrl;
+// 处理图片预览（支持传入 URL 或索引）
+const handlePreviewImage = (imageUrlOrIndex: string | number) => {
+    if (typeof imageUrlOrIndex === "number") {
+        imagePreviewIndex.value = imageUrlOrIndex;
+    } else {
+        const idx = coverImages.value.indexOf(imageUrlOrIndex);
+        imagePreviewIndex.value = idx >= 0 ? idx : 0;
+    }
     showImagePreview.value = true;
-    console.log("Preview modal opened with URL:", previewImageUrl.value);
 };
 
 // 关闭图片预览
 const closeImagePreview = () => {
     showImagePreview.value = false;
-    previewImageUrl.value = null;
 };
+
+// 上一张
+const prevPreviewImage = () => {
+    const len = coverImages.value.length;
+    if (len <= 1) return;
+    imagePreviewIndex.value = (imagePreviewIndex.value - 1 + len) % len;
+};
+
+// 下一张
+const nextPreviewImage = () => {
+    const len = coverImages.value.length;
+    if (len <= 1) return;
+    imagePreviewIndex.value = (imagePreviewIndex.value + 1) % len;
+};
+
+// 当前预览的图片 URL
+const currentPreviewImageUrl = computed(
+    () => coverImages.value[imagePreviewIndex.value] ?? null,
+);
 
 // 从预览模态框中删除当前图片
 const handleDeletePreviewImage = () => {
-    if (!previewImageUrl.value) return;
-
-    const index = coverImages.value.indexOf(previewImageUrl.value);
-    if (index !== -1) {
-        coverImages.value.splice(index, 1);
-        toast.success("图片已删除");
+    const idx = imagePreviewIndex.value;
+    if (idx < 0 || idx >= coverImages.value.length) return;
+    coverImages.value.splice(idx, 1);
+    toast.success("图片已删除");
+    if (coverImages.value.length === 0) {
+        closeImagePreview();
+    } else {
+        imagePreviewIndex.value = Math.min(idx, coverImages.value.length - 1);
     }
-    closeImagePreview();
 };
 
 // 移除单张图片
@@ -688,11 +726,23 @@ const uploadImage = async (file: File) => {
 // 发布相关状态
 const isPublishing = ref(false);
 
-// 登录二维码相关状态
+// 登录二维码相关状态（仅未登录时以 dialog 形式弹出，不写死在布局）
 const showLoginQrCode = ref(false);
 const loginQrCodeUrl = ref<string | null>(null);
 const isLoadingQrCode = ref(false);
 const isCheckingLoginStatus = ref(false);
+const xhsIsLoggedIn = ref<boolean | null>(null); // null=未检测，true/false=已检测
+
+// 检测小红书登录状态
+const checkXhsLoginStatus = async (): Promise<boolean> => {
+    const { get } = useAuthFetch();
+    const { data } = await get<{ isLoggedIn: boolean }>("/api/xhs/publish/login-status", {
+        showError: false,
+    });
+    const ok = data?.isLoggedIn ?? false;
+    xhsIsLoggedIn.value = ok;
+    return ok;
+};
 
 // 发布笔记到小红书
 const handlePublish = async () => {
@@ -747,7 +797,7 @@ const fetchLoginQrCode = async () => {
     }
 };
 
-// 检查登录状态（用于轮询）
+// 确认扫码登录（只验证登录状态，不触发发布）
 const checkLoginStatusAndPublish = async () => {
     isCheckingLoginStatus.value = true;
     const { get } = useAuthFetch();
@@ -759,12 +809,12 @@ const checkLoginStatusAndPublish = async () => {
         }>("/api/xhs/publish/login-status", { showError: false });
 
         if (data?.isLoggedIn) {
+            xhsIsLoggedIn.value = true;
             showLoginQrCode.value = false;
             loginQrCodeUrl.value = null;
-            toast.success("登录成功！正在发布...");
-            await doPublish();
+            toast.success("小红书登录成功！现在可以发布笔记了");
         } else {
-            toast.info("请使用小红书 App 扫描二维码登录");
+            toast.warning("暂未检测到登录，请先完成扫码");
         }
     } catch (error) {
         console.error("Check login status failed:", error);
@@ -786,6 +836,14 @@ const refreshQrCode = async () => {
 
 // 执行发布
 const doPublish = async () => {
+    // 先检测登录状态，未登录时弹出登录 dialog，不占用布局
+    const loggedIn = await checkXhsLoginStatus();
+    if (!loggedIn) {
+        showLoginQrCode.value = true;
+        await fetchLoginQrCode();
+        return;
+    }
+
     isPublishing.value = true;
 
     const { post } = useAuthFetch();
@@ -841,48 +899,60 @@ const doPublish = async () => {
 </script>
 
 <template>
-    <div class="flex h-screen bg-slate-50 dark:bg-slate-900">
-        <!-- 1. 左侧菜单栏 -->
-        <div
-            class="flex w-20 flex-col items-center border-r border-slate-200 bg-white py-4 dark:border-slate-700 dark:bg-slate-800"
-        >
+    <!-- 外层整页灰底，三栏（左菜单+编辑区+右操作）放在居中容器内，靠近编辑区 -->
+    <div class="flex h-screen items-stretch bg-slate-200 dark:bg-slate-900">
+        <div class="mx-auto flex h-full w-full max-w-[1100px] shadow-lg">
+
+        <!-- 1. 左侧菜单栏（精简版，w-14） -->
+        <div class="flex w-14 flex-shrink-0 flex-col items-center border-r border-slate-200 bg-white py-3 dark:border-slate-700 dark:bg-slate-800">
             <button
                 v-for="item in menuItems"
                 :key="item.key"
-                @click="activeMenu = item.key"
+                @click="toggleMenu(item.key)"
                 :class="[
-                    'mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg transition-all duration-200',
+                    'mb-1 flex h-12 w-12 cursor-pointer flex-col items-center justify-center rounded-lg transition-all duration-200',
                     activeMenu === item.key
                         ? 'bg-blue-50 text-blue-600 shadow-sm dark:bg-blue-900/30 dark:text-blue-400'
                         : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700',
                 ]"
+                :title="item.label"
             >
-                <UIcon :name="item.icon" class="mb-1 text-xl" />
-                <span class="text-xs">{{ item.label }}</span>
+                <UIcon :name="item.icon" class="text-lg" />
+                <span class="mt-0.5 text-[10px] leading-none">{{ item.label }}</span>
             </button>
 
             <div class="flex-1"></div>
 
-            <!-- 底部菜单 -->
             <button
                 @click="goToMyNotes"
-                class="flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+                class="flex h-12 w-12 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+                title="我的笔记"
             >
-                <UIcon name="i-heroicons-document-text" class="mb-1 text-xl" />
-                <span class="text-xs">我的笔记</span>
+                <UIcon name="i-heroicons-document-text" class="text-lg" />
+                <span class="mt-0.5 text-[10px] leading-none">笔记</span>
             </button>
             <button
                 @click="goBack"
-                class="flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+                class="mt-1 flex h-12 w-12 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+                title="返回首页"
             >
-                <UIcon name="i-heroicons-home" class="mb-1 text-xl" />
-                <span class="text-xs">返回首页</span>
+                <UIcon name="i-heroicons-home" class="text-lg" />
+                <span class="mt-0.5 text-[10px] leading-none">首页</span>
             </button>
         </div>
 
-        <!-- 2. 菜单内容区域 -->
+        <!-- 2. 菜单内容区域（参与布局，展开时挤压编辑区） -->
+        <Transition
+            enter-active-class="transition-all duration-200 ease-out"
+            enter-from-class="-translate-x-4 opacity-0"
+            enter-to-class="translate-x-0 opacity-100"
+            leave-active-class="transition-all duration-150 ease-in"
+            leave-from-class="translate-x-0 opacity-100"
+            leave-to-class="-translate-x-4 opacity-0"
+        >
         <div
-            class="w-72 overflow-y-auto border-r border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800"
+            v-if="activeMenu !== null"
+            class="h-full w-72 flex-shrink-0 overflow-y-auto border-r border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800"
         >
             <!-- 模版内容 -->
             <div v-if="activeMenu === 'template'" class="p-4">
@@ -993,536 +1063,478 @@ const doPublish = async () => {
                 </div>
             </div>
         </div>
+        </Transition>
 
-        <!-- 3. 笔记编辑区域 -->
-        <div class="flex flex-1 flex-col bg-white dark:bg-slate-800">
+        <!-- 3. 笔记编辑区域：灰底 + 内部卡片布局 -->
+        <div class="min-h-0 flex-1 flex flex-col overflow-y-auto bg-[#F1F5F9] p-5 dark:bg-slate-900" @click.self="activeMenu = null">
+
             <!-- 加载状态 -->
-            <div v-if="isLoadingNote" class="flex flex-1 items-center justify-center">
+            <div v-if="isLoadingNote" class="flex h-full items-center justify-center">
                 <div class="text-center">
-                    <div
-                        class="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-500"
-                    ></div>
+                    <div class="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-500"></div>
                     <p class="text-sm text-slate-500 dark:text-slate-400">正在加载笔记...</p>
                 </div>
             </div>
 
             <template v-else>
-                <!-- 图片工具栏 -->
-                <div
-                    class="border-b border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900"
-                >
-                    <!-- 工具栏切换按钮 -->
+                <div class="flex flex-1 flex-col gap-4">
+
+                <!-- 卡片1：图片工具栏 -->
+                <div class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
                     <button
                         @click="toggleImageToolbar"
-                        class="flex w-full items-center justify-between px-4 py-3 text-left transition-colors duration-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        class="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
                     >
-                        <div class="flex items-center gap-2">
-                            <UIcon
-                                name="i-heroicons-photo"
-                                class="text-lg text-blue-600 dark:text-blue-400"
-                            />
-                            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">
-                                点击下方按钮可制作配图
-                            </span>
+                        <div class="flex items-center gap-2 text-sm font-semibold text-blue-600 dark:text-blue-400">
+                            <UIcon name="i-heroicons-photo" class="text-lg" />
+                            点击下方按钮可制作配图
                         </div>
                         <UIcon
-                            :name="
-                                showImageToolbar
-                                    ? 'i-heroicons-chevron-up'
-                                    : 'i-heroicons-chevron-down'
-                            "
-                            class="text-slate-400 transition-transform duration-200"
+                            :name="showImageToolbar ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'"
+                            class="text-slate-400"
                         />
                     </button>
-
-                    <!-- 工具栏内容 -->
-                    <Transition
-                        enter-active-class="transition-all duration-200 ease-out"
-                        enter-from-class="max-h-0 opacity-0"
-                        enter-to-class="max-h-40 opacity-100"
-                        leave-active-class="transition-all duration-200 ease-in"
-                        leave-from-class="max-h-40 opacity-100"
-                        leave-to-class="max-h-0 opacity-0"
-                    >
-                        <div v-if="showImageToolbar" class="overflow-hidden">
-                            <div class="grid grid-cols-4 gap-3 px-4 pb-4">
-                                <button
-                                    v-for="item in imageToolbarItems"
-                                    :key="item.key"
-                                    @click="handleImageToolSelect(item.key)"
-                                    :class="[
-                                        'group relative flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all duration-200',
-                                        activeImageTab === item.key
-                                            ? 'border-blue-500 bg-blue-50 shadow-sm dark:border-blue-400 dark:bg-blue-900/30'
-                                            : 'border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:hover:border-blue-600',
-                                    ]"
-                                >
-                                    <!-- 推荐标签 -->
-                                    <div
-                                        v-if="item.badge"
-                                        class="absolute -top-1 -right-1 rounded-full bg-gradient-to-r from-red-500 to-orange-500 px-2 py-0.5 text-xs font-medium text-white shadow-sm"
-                                    >
-                                        {{ item.badge }}
-                                    </div>
-
-                                    <!-- 图标 -->
-                                    <div
-                                        :class="[
-                                            'flex h-12 w-12 items-center justify-center rounded-lg transition-colors duration-200',
-                                            activeImageTab === item.key
-                                                ? 'bg-blue-100 text-blue-600 dark:bg-blue-800 dark:text-blue-300'
-                                                : 'bg-slate-100 text-slate-600 group-hover:bg-blue-50 group-hover:text-blue-600 dark:bg-slate-700 dark:text-slate-400 dark:group-hover:bg-blue-900/50',
-                                        ]"
-                                    >
-                                        <UIcon :name="item.icon" class="text-2xl" />
-                                    </div>
-
-                                    <!-- 文本 -->
-                                    <div class="text-center">
-                                        <div
-                                            :class="[
-                                                'text-sm font-medium',
-                                                activeImageTab === item.key
-                                                    ? 'text-blue-600 dark:text-blue-400'
-                                                    : 'text-slate-700 dark:text-slate-300',
-                                            ]"
-                                        >
-                                            {{ item.label }}
-                                        </div>
-                                        <div
-                                            class="mt-0.5 text-xs text-slate-500 dark:text-slate-400"
-                                        >
-                                            {{ item.description }}
-                                        </div>
-                                    </div>
-                                </button>
+                    <div v-if="showImageToolbar" class="grid grid-cols-4 gap-4 px-5 pb-5">
+                        <button
+                            v-for="item in imageToolbarItems"
+                            :key="item.key"
+                            @click="handleImageToolSelect(item.key)"
+                            :class="[
+                                'group relative flex cursor-pointer flex-col items-center gap-2 rounded-xl border p-4 transition-all duration-200',
+                                activeImageTab === item.key
+                                    ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/30'
+                                    : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800',
+                            ]"
+                        >
+                            <div
+                                v-if="item.badge"
+                                class="absolute -top-2 right-2 rounded-md bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white"
+                            >
+                                {{ item.badge }}
                             </div>
-                        </div>
-                    </Transition>
+                            <div
+                                :class="[
+                                    'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
+                                    activeImageTab === item.key
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-slate-100 text-slate-500 group-hover:bg-blue-100 group-hover:text-blue-600 dark:bg-slate-700 dark:text-slate-400',
+                                ]"
+                            >
+                                <UIcon :name="item.icon" class="text-xl" />
+                            </div>
+                            <div class="text-center">
+                                <div :class="['text-[13px] font-bold', activeImageTab === item.key ? 'text-blue-600' : 'text-slate-700 dark:text-slate-300']">{{ item.label }}</div>
+                                <div class="mt-0.5 text-[10px] text-slate-400 dark:text-slate-500">{{ item.description }}</div>
+                            </div>
+                        </button>
+                    </div>
                 </div>
 
-                <!-- 已上传图片预览区域 -->
+                <!-- 卡片2：已上传图片（grid布局） -->
                 <div
                     v-if="coverImages.length > 0"
-                    class="border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-800"
+                    class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
                 >
-                    <div class="mb-3 flex items-center justify-between">
+                    <button
+                        type="button"
+                        class="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                        @click="toggleCoverImagesStrip"
+                    >
                         <div class="flex items-center gap-2">
-                            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">
-                                已上传图片
-                            </span>
-                            <span
-                                class="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
-                            >
+                            <UIcon name="i-heroicons-photo" class="text-lg text-blue-500" />
+                            <span class="text-sm font-bold text-slate-700 dark:text-slate-300">已上传图片</span>
+                            <span class="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
                                 {{ coverImages.length }}/9
                             </span>
                         </div>
-                        <button
-                            @click="handleClearAllImages"
-                            class="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-red-600 transition-colors duration-150 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                        >
-                            <UIcon name="i-heroicons-trash" class="text-sm" />
-                            一键清空
-                        </button>
-                    </div>
-
-                    <!-- 图片网格 -->
-                    <div class="grid grid-cols-6 gap-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs font-bold text-red-500 hover:text-red-600" @click.stop="handleClearAllImages">清空</span>
+                            <UIcon :name="coverImagesStripExpanded ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'" class="h-4 w-4 text-slate-400" />
+                        </div>
+                    </button>
+                    <div v-show="coverImagesStripExpanded" class="flex flex-wrap gap-3 px-5 pb-5">
                         <div
                             v-for="(image, index) in coverImages"
                             :key="index"
-                            class="group relative aspect-square overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-700"
+                            class="group relative h-[88px] w-[88px] flex-shrink-0 overflow-hidden rounded-lg border border-slate-100 dark:border-slate-700"
                         >
-                            <!-- 图片 -->
-                            <img
-                                :src="image"
-                                :alt="`图片 ${index + 1}`"
-                                class="h-full w-full cursor-pointer object-cover"
-                                @click="handlePreviewImage(image)"
-                            />
-
-                            <!-- 悬停遮罩 -->
-                            <div
-                                class="absolute inset-0 flex items-center justify-center bg-black/0 transition-all duration-200 group-hover:bg-black/50"
-                            >
-                                <div
-                                    class="flex gap-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                            <img :src="image" :alt="`图片 ${index + 1}`" class="h-full w-full cursor-pointer object-cover" @click="handlePreviewImage(index)" />
+                            <div class="absolute top-1 left-1 flex h-4 w-4 items-center justify-center rounded bg-black/60 text-[10px] text-white">{{ index + 1 }}</div>
+                            <!-- 悬停遮罩：预览 + 删除 -->
+                            <div class="absolute inset-0 flex items-center justify-center gap-1.5 bg-black/0 transition-all group-hover:bg-black/40">
+                                <button
+                                    type="button"
+                                    @click.stop="handlePreviewImage(index)"
+                                    class="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-700 opacity-0 transition-opacity group-hover:opacity-100"
+                                    aria-label="预览图片"
                                 >
-                                    <!-- 预览按钮 -->
-                                    <button
-                                        @click.stop="handlePreviewImage(image)"
-                                        class="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-slate-700 transition-transform duration-150 hover:scale-110 dark:bg-slate-800/90 dark:text-slate-300"
-                                        aria-label="预览图片"
-                                    >
-                                        <UIcon name="i-heroicons-eye" class="text-lg" />
-                                    </button>
-
-                                    <!-- 删除按钮 -->
-                                    <button
-                                        @click.stop="handleRemoveImage(index)"
-                                        class="flex h-8 w-8 items-center justify-center rounded-full bg-red-500/90 text-white transition-transform duration-150 hover:scale-110"
-                                        aria-label="删除图片"
-                                    >
-                                        <UIcon name="i-heroicons-trash" class="text-lg" />
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- 图片序号 -->
-                            <div
-                                class="absolute top-1 left-1 rounded bg-black/50 px-1.5 py-0.5 text-xs font-medium text-white"
-                            >
-                                {{ index + 1 }}
+                                    <UIcon name="i-heroicons-eye" class="text-sm" />
+                                </button>
+                                <button
+                                    type="button"
+                                    @click.stop="handleRemoveImage(index)"
+                                    class="flex h-7 w-7 items-center justify-center rounded-full bg-red-500/90 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                                    aria-label="删除图片"
+                                >
+                                    <UIcon name="i-heroicons-trash" class="text-sm" />
+                                </button>
                             </div>
                         </div>
-
-                        <!-- 添加更多按钮 -->
+                        <!-- 添加按钮 -->
                         <button
                             v-if="coverImages.length < 9"
+                            type="button"
                             @click="fileInput?.click()"
-                            class="flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 transition-all duration-200 hover:border-blue-400 hover:bg-blue-50 dark:border-slate-600 dark:bg-slate-700 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
+                            class="flex h-[88px] w-[88px] flex-shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-500 transition-colors dark:border-slate-600"
                         >
-                            <UIcon
-                                name="i-heroicons-plus"
-                                class="text-2xl text-slate-400 dark:text-slate-500"
-                            />
-                            <span class="text-xs text-slate-500 dark:text-slate-400">添加</span>
+                            <UIcon name="i-heroicons-plus" class="text-2xl" />
                         </button>
                     </div>
                 </div>
 
-                <!-- 标题栏 -->
-                <div class="border-b border-slate-200 p-4 dark:border-slate-700">
-                    <div class="flex items-center justify-between">
-                        <input
-                            v-model="noteTitle"
-                            type="text"
-                            placeholder="请输入笔记标题"
-                            class="flex-1 border-none bg-transparent text-xl font-medium text-slate-900 placeholder-slate-400 outline-none dark:text-white dark:placeholder-slate-500"
-                        />
-                        <UBadge v-if="isEditMode" color="primary" variant="soft" size="sm">
-                            编辑模式
-                        </UBadge>
-                    </div>
-                </div>
-
-                <!-- 内容编辑区 -->
-                <div class="flex-1 overflow-y-auto p-4">
-                    <!-- 生成中状态 -->
-                    <div v-if="isGenerating" class="flex h-full items-center justify-center">
-                        <div class="text-center">
-                            <div
-                                class="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-500"
-                            ></div>
-                            <p class="text-sm text-slate-500 dark:text-slate-400">
-                                正在生成内容...
-                            </p>
+                <!-- 卡片3：笔记编辑器，flex-1 撑满剩余高度 -->
+                <div class="flex flex-1 flex-col rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                    <!-- 标题栏 -->
+                    <div class="border-b border-slate-100 px-6 pb-3 pt-5 dark:border-slate-700">
+                        <div class="flex items-center justify-between gap-3">
+                            <input
+                                v-model="noteTitle"
+                                type="text"
+                                placeholder="请输入笔记标题"
+                                class="flex-1 border-none bg-transparent text-2xl font-bold text-slate-900 placeholder-slate-300 outline-none focus:ring-0 dark:text-white dark:placeholder-slate-600"
+                            />
+                            <UBadge v-if="isEditMode" color="primary" variant="soft" size="sm">编辑模式</UBadge>
                         </div>
                     </div>
 
-                    <!-- 错误状态 -->
-                    <div
-                        v-else-if="generationError"
-                        class="rounded-lg bg-red-50 p-4 dark:bg-red-900/20"
-                    >
-                        <div class="flex items-start gap-3">
-                            <UIcon
-                                name="i-heroicons-exclamation-circle"
-                                class="mt-0.5 text-xl text-red-600 dark:text-red-400"
-                            />
-                            <div class="flex-1">
-                                <h4 class="mb-1 text-sm font-medium text-red-800 dark:text-red-300">
-                                    生成失败
-                                </h4>
-                                <p class="text-sm text-red-600 dark:text-red-400">
-                                    {{ generationError }}
-                                </p>
+                    <!-- 内容区 -->
+                    <div class="min-h-0 flex-1 p-6">
+                        <!-- 生成中状态 -->
+                        <div v-if="isGenerating" class="flex h-40 items-center justify-center">
+                            <div class="text-center">
+                                <div class="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-b-2 border-blue-500"></div>
+                                <p class="text-sm text-slate-500 dark:text-slate-400">正在生成内容...</p>
                             </div>
                         </div>
+                        <!-- 错误状态 -->
+                        <div v-else-if="generationError" class="rounded-lg bg-red-50 p-4 dark:bg-red-900/20">
+                            <div class="flex items-start gap-3">
+                                <UIcon name="i-heroicons-exclamation-circle" class="mt-0.5 text-xl text-red-600 dark:text-red-400" />
+                                <div class="flex-1">
+                                    <h4 class="mb-1 text-sm font-medium text-red-800 dark:text-red-300">生成失败</h4>
+                                    <p class="text-sm text-red-600 dark:text-red-400">{{ generationError }}</p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 内容输入框 -->
+                        <textarea
+                            v-else
+                            v-model="noteContent"
+                            placeholder="开始输入内容..."
+                            class="h-full w-full resize-none border-none bg-transparent text-base leading-relaxed text-slate-900 placeholder-slate-300 outline-none focus:ring-0 dark:text-white dark:placeholder-slate-600"
+                        ></textarea>
                     </div>
 
-                    <!-- 内容输入框 -->
-                    <textarea
-                        v-else
-                        v-model="noteContent"
-                        placeholder="请输入笔记内容"
-                        class="h-full w-full resize-none border-none bg-transparent text-base leading-relaxed text-slate-900 placeholder-slate-400 outline-none dark:text-white dark:placeholder-slate-500"
-                    ></textarea>
+                    <!-- 状态栏 -->
+                    <div class="flex items-center justify-between rounded-b-xl border-t border-slate-100 bg-slate-50/50 px-6 py-3 text-[11px] font-medium text-slate-400 dark:border-slate-700 dark:bg-slate-800/50">
+                        <span>{{ isSaving ? '保存中...' : '已自动保存' }}</span>
+                        <span class="font-mono">{{ wordCount }} / 1000</span>
+                    </div>
                 </div>
 
-                <!-- 字数统计 -->
-                <div class="border-t border-slate-200 px-4 py-2 text-right dark:border-slate-700">
-                    <span class="text-sm text-slate-500 dark:text-slate-400"
-                        >{{ wordCount }} / 1000</span
-                    >
-                </div>
+                </div><!-- /flex flex-col gap-4 -->
             </template>
         </div>
 
-        <!-- 4. 右侧操作菜单 -->
-        <div
-            class="flex w-20 flex-col items-center border-l border-slate-200 bg-white py-4 dark:border-slate-700 dark:bg-slate-800"
-        >
-            <button
-                @click="handleCopyTitle"
-                aria-label="复制标题"
-                class="mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
-            >
-                <UIcon name="i-heroicons-clipboard-document" class="mb-1 text-xl" />
-                <span class="text-xs">复制标题</span>
-            </button>
+        <!-- 4. 右侧操作栏 -->
+        <div class="flex w-20 flex-shrink-0 flex-col items-center border-l border-slate-200 bg-white py-6 dark:border-slate-700 dark:bg-slate-800">
+            <!-- 顶部功能按钮 -->
+            <div class="flex flex-1 flex-col items-center gap-5">
+                <button
+                    @click="handleCopyTitle"
+                    class="group flex flex-col items-center gap-1 text-slate-500 dark:text-slate-400"
+                    title="复制标题"
+                >
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700">
+                        <UIcon name="i-heroicons-clipboard-document" class="text-[22px] group-hover:text-slate-800 dark:group-hover:text-slate-200" />
+                    </div>
+                    <span class="text-[10px] font-medium leading-none">复制标题</span>
+                </button>
 
-            <button
-                @click="handleCopyContent"
-                aria-label="复制正文"
-                class="mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
-            >
-                <UIcon name="i-heroicons-document-duplicate" class="mb-1 text-xl" />
-                <span class="text-xs">复制正文</span>
-            </button>
+                <button
+                    @click="handleCopyContent"
+                    class="group flex flex-col items-center gap-1 text-slate-500 dark:text-slate-400"
+                    title="复制正文"
+                >
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700">
+                        <UIcon name="i-heroicons-document-text" class="text-[22px] group-hover:text-slate-800 dark:group-hover:text-slate-200" />
+                    </div>
+                    <span class="text-[10px] font-medium leading-none">复制正文</span>
+                </button>
 
-            <button
-                @click="handleSave"
-                :disabled="isSaving"
-                aria-label="保存笔记"
-                class="mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-700"
-            >
-                <UIcon
-                    v-if="isSaving"
-                    name="i-heroicons-arrow-path"
-                    class="mb-1 animate-spin text-xl"
-                />
-                <UIcon v-else name="i-heroicons-bookmark" class="mb-1 text-xl" />
-                <span class="text-xs">{{ isEditMode ? "更新笔记" : "保存笔记" }}</span>
-            </button>
-
-            <button
-                @click="handlePreview"
-                aria-label="预览笔记"
-                class="mb-2 flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
-            >
-                <UIcon name="i-heroicons-eye" class="mb-1 text-xl" />
-                <span class="text-xs">预览笔记</span>
-            </button>
-
-            <div class="flex-1"></div>
-
-            <!-- 发布按钮 (主要CTA) -->
-            <button
-                @click="handlePublish"
-                :disabled="isPublishing"
-                aria-label="发布笔记"
-                :class="[
-                    'mb-4 flex h-14 w-14 cursor-pointer flex-col items-center justify-center rounded-xl shadow-lg transition-all duration-200',
-                    isPublishing
-                        ? 'cursor-not-allowed bg-blue-400'
-                        : 'bg-blue-600 hover:bg-blue-700 hover:shadow-xl',
-                    'text-white',
-                ]"
-            >
-                <UIcon
-                    :name="isPublishing ? 'i-heroicons-arrow-path' : 'i-heroicons-paper-airplane'"
-                    :class="['text-xl', isPublishing ? 'animate-spin' : '']"
-                />
-                <span class="mt-1 text-xs">{{ isPublishing ? "发布中" : "发布" }}</span>
-            </button>
-
-            <!-- 清空按钮 -->
-            <button
-                @click="handleClear"
-                aria-label="清空笔记"
-                class="flex h-16 w-16 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
-            >
-                <UIcon name="i-heroicons-trash" class="mb-1 text-xl" />
-                <span class="text-xs">清空</span>
-            </button>
-        </div>
-
-        <!-- 预览弹窗 -->
-        <UModal v-model="showPreview">
-            <UCard class="max-w-md">
-                <template #header>
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">
-                            笔记预览
-                        </h3>
-                        <UButton
-                            variant="ghost"
-                            icon="i-heroicons-x-mark"
-                            size="sm"
-                            @click="showPreview = false"
+                <button
+                    @click="handleSave"
+                    :disabled="isSaving"
+                    class="group flex flex-col items-center gap-1 text-slate-500 disabled:opacity-50 dark:text-slate-400"
+                    :title="isEditMode ? '更新笔记' : '保存笔记'"
+                >
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700">
+                        <UIcon
+                            :name="isSaving ? 'i-heroicons-arrow-path' : 'i-heroicons-arrow-path-rounded-square'"
+                            :class="['text-[22px] group-hover:text-slate-800 dark:group-hover:text-slate-200', isSaving ? 'animate-spin' : '']"
                         />
                     </div>
-                </template>
+                    <span class="text-[10px] font-medium leading-none">{{ isEditMode ? '更新' : '保存' }}</span>
+                </button>
 
-                <div class="space-y-4">
-                    <div>
-                        <h4
-                            class="mb-2 text-xs font-medium text-slate-500 uppercase dark:text-slate-400"
-                        >
-                            标题
-                        </h4>
-                        <p class="text-lg font-bold text-slate-900 dark:text-white">
-                            {{ noteTitle || "未填写标题" }}
-                        </p>
+                <button
+                    @click="handlePreview"
+                    class="group flex flex-col items-center gap-1 text-slate-500 dark:text-slate-400"
+                    title="预览笔记"
+                >
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700">
+                        <UIcon name="i-heroicons-eye" class="text-[22px] group-hover:text-slate-800 dark:group-hover:text-slate-200" />
                     </div>
+                    <span class="text-[10px] font-medium leading-none">预览笔记</span>
+                </button>
+            </div>
 
-                    <div>
-                        <h4
-                            class="mb-2 text-xs font-medium text-slate-500 uppercase dark:text-slate-400"
-                        >
-                            正文
-                        </h4>
-                        <div
-                            class="text-sm leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-300"
-                        >
-                            {{ noteContent || "未填写内容" }}
-                        </div>
-                    </div>
-
-                    <div v-if="coverImages.length > 0">
-                        <h4
-                            class="mb-2 text-xs font-medium text-slate-500 uppercase dark:text-slate-400"
-                        >
-                            封面图片
-                        </h4>
-                        <div class="grid grid-cols-3 gap-2">
-                            <img
-                                v-for="(image, index) in coverImages"
-                                :key="index"
-                                :src="image"
-                                :alt="`封面图 ${index + 1}`"
-                                class="aspect-square rounded-lg object-cover"
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                <template #footer>
-                    <div class="flex justify-end gap-2">
-                        <UButton variant="outline" @click="showPreview = false">关闭</UButton>
-                        <UButton
-                            color="primary"
-                            @click="
-                                showPreview = false;
-                                handlePublish();
-                            "
-                            :loading="isPublishing"
-                        >
-                            发布笔记
-                        </UButton>
-                    </div>
-                </template>
-            </UCard>
-        </UModal>
-
-
-
-        <!-- 小红书登录二维码弹窗 -->
-        <UModal v-model="showLoginQrCode">
-            <UCard class="max-w-md">
-                <template #header>
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                            <div
-                                class="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30"
-                            >
-                                <UIcon
-                                    name="i-heroicons-qr-code"
-                                    class="text-xl text-red-600 dark:text-red-400"
-                                />
-                            </div>
-                            <div>
-                                <h3 class="text-lg font-semibold text-slate-900 dark:text-white">
-                                    小红书登录
-                                </h3>
-                                <p class="text-xs text-slate-500 dark:text-slate-400">
-                                    请使用小红书 App 扫码登录
-                                </p>
-                            </div>
-                        </div>
-                        <button
-                            class="cursor-pointer rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
-                            @click="closeLoginQrCode"
-                        >
-                            <UIcon name="i-heroicons-x-mark" class="text-xl" />
-                        </button>
-                    </div>
-                </template>
-
-                <div class="flex flex-col items-center py-4">
-                    <!-- 加载状态 -->
-                    <div
-                        v-if="isLoadingQrCode"
-                        class="flex h-64 w-64 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-700"
-                    >
-                        <div class="text-center">
-                            <div
-                                class="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-red-200 border-t-red-500"
-                            ></div>
-                            <p class="text-sm text-slate-500 dark:text-slate-400">
-                                正在获取二维码...
-                            </p>
-                        </div>
-                    </div>
-
-                    <!-- 二维码图片 -->
-                    <div
-                        v-else-if="loginQrCodeUrl"
-                        class="rounded-xl border-2 border-slate-200 bg-white p-4 dark:border-slate-600 dark:bg-slate-800"
-                    >
-                        <img
-                            :src="loginQrCodeUrl"
-                            alt="小红书登录二维码"
-                            class="h-56 w-56 object-contain"
-                        />
-                    </div>
-
-                    <!-- 获取失败 -->
-                    <div
-                        v-else
-                        class="flex h-64 w-64 flex-col items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-700"
+            <!-- 底部：发布 + 清空 -->
+            <div class="mt-auto flex flex-col items-center gap-5">
+                <!-- 圆形发布按钮 -->
+                <div class="flex flex-col items-center gap-1">
+                    <button
+                        @click="handlePublish"
+                        :disabled="isPublishing"
+                        :class="[
+                            'flex h-12 w-12 items-center justify-center rounded-2xl text-white shadow-lg transition-all active:scale-95',
+                            isPublishing ? 'cursor-not-allowed bg-blue-400 shadow-blue-200' : 'bg-blue-600 shadow-blue-200 hover:bg-blue-700'
+                        ]"
+                        aria-label="发布笔记"
                     >
                         <UIcon
-                            name="i-heroicons-exclamation-circle"
-                            class="mb-2 text-4xl text-slate-400"
+                            :name="isPublishing ? 'i-heroicons-arrow-path' : 'i-heroicons-paper-airplane'"
+                            :class="['text-[22px]', isPublishing ? 'animate-spin' : '']"
                         />
-                        <p class="text-sm text-slate-500 dark:text-slate-400">获取二维码失败</p>
-                    </div>
-
-                    <!-- 提示文字 -->
-                    <div class="mt-4 text-center">
-                        <p class="text-sm text-slate-600 dark:text-slate-400">
-                            打开小红书 App，扫描上方二维码
-                        </p>
-                        <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
-                            扫码成功后点击下方按钮继续发布
-                        </p>
-                    </div>
+                    </button>
+                    <span class="text-[10px] font-bold text-blue-600 dark:text-blue-400">{{ isPublishing ? '发布中' : '发布笔记' }}</span>
                 </div>
 
-                <template #footer>
-                    <div class="flex justify-between gap-3">
-                        <UButton
-                            variant="outline"
-                            :loading="isLoadingQrCode"
-                            @click="refreshQrCode"
-                        >
-                            <UIcon name="i-heroicons-arrow-path" class="mr-1" />
-                            刷新二维码
-                        </UButton>
-                        <UButton
-                            color="primary"
-                            :loading="isCheckingLoginStatus"
-                            @click="checkLoginStatusAndPublish"
-                        >
-                            <UIcon name="i-heroicons-check" class="mr-1" />
-                            我已扫码登录
-                        </UButton>
+                <button
+                    @click="handleClear"
+                    class="group flex flex-col items-center gap-1 text-slate-500 dark:text-slate-400"
+                    aria-label="清空笔记"
+                >
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-red-50 group-hover:text-red-500 dark:hover:bg-red-900/20">
+                        <UIcon name="i-heroicons-trash" class="text-[22px]" />
                     </div>
-                </template>
-            </UCard>
-        </UModal>
+                    <span class="text-[10px] font-medium leading-none group-hover:text-red-500">清空笔记</span>
+                </button>
+            </div>
+        </div>
+
+        </div><!-- /居中容器 max-w-[1100px] -->
+
+        <!-- 笔记预览弹窗 (手机样式) -->
+        <Teleport to="body">
+            <div
+                v-if="showPreview"
+                class="fixed inset-0 z-[100] flex items-center justify-center p-4"
+                @click.self="showPreview = false"
+            >
+                <div class="fixed inset-0 bg-black/50" @click="showPreview = false"></div>
+
+                <div class="relative mx-auto w-full max-w-md">
+                    <div class="overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-gray-900">
+                        <!-- 手机顶部状态栏 -->
+                        <div class="flex items-center justify-between bg-white px-4 py-2 dark:bg-gray-900">
+                            <div class="flex items-center gap-1 text-xs text-gray-900 dark:text-white">
+                                <span>9:41</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <UIcon name="i-heroicons-signal" class="h-4 w-4 text-gray-900 dark:text-white" />
+                                <UIcon name="i-heroicons-wifi" class="h-4 w-4 text-gray-900 dark:text-white" />
+                                <UIcon name="i-heroicons-battery-100" class="h-4 w-4 text-gray-900 dark:text-white" />
+                            </div>
+                        </div>
+
+                        <!-- 导航栏 -->
+                        <div class="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900">
+                            <UButton variant="ghost" color="neutral" icon="i-heroicons-arrow-left" size="sm" @click="showPreview = false" />
+                            <span class="text-sm font-medium text-gray-900 dark:text-white">笔记预览</span>
+                            <UButton variant="ghost" color="neutral" icon="i-heroicons-ellipsis-horizontal" size="sm" />
+                        </div>
+
+                        <!-- 内容区域 -->
+                        <div class="max-h-[600px] overflow-y-auto bg-white dark:bg-gray-900">
+                            <!-- 图片轮播 -->
+                            <div v-if="coverImages.length > 0" class="relative aspect-square w-full bg-gray-100 dark:bg-gray-800">
+                                <img
+                                    :src="coverImages[previewImageIndex]"
+                                    :alt="`图片 ${previewImageIndex + 1}`"
+                                    class="h-full w-full object-cover"
+                                />
+
+                                <button
+                                    v-if="coverImages.length > 1"
+                                    @click.stop="previewImageIndex = previewImageIndex > 0 ? previewImageIndex - 1 : coverImages.length - 1"
+                                    class="absolute top-1/2 left-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition-all hover:bg-black/70"
+                                >
+                                    <UIcon name="i-heroicons-chevron-left" class="h-5 w-5" />
+                                </button>
+                                <button
+                                    v-if="coverImages.length > 1"
+                                    @click.stop="previewImageIndex = previewImageIndex < coverImages.length - 1 ? previewImageIndex + 1 : 0"
+                                    class="absolute top-1/2 right-2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition-all hover:bg-black/70"
+                                >
+                                    <UIcon name="i-heroicons-chevron-right" class="h-5 w-5" />
+                                </button>
+
+                                <div v-if="coverImages.length > 1" class="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-1">
+                                    <div
+                                        v-for="(_, idx) in coverImages"
+                                        :key="idx"
+                                        :class="[
+                                            'h-1.5 rounded-full transition-all',
+                                            idx === previewImageIndex ? 'w-6 bg-white' : 'w-1.5 bg-white/50',
+                                        ]"
+                                    />
+                                </div>
+
+                                <div class="absolute top-3 right-3 rounded-full bg-black/50 px-2 py-1 text-xs text-white">
+                                    {{ previewImageIndex + 1 }}/{{ coverImages.length }}
+                                </div>
+                            </div>
+
+                            <!-- 无图片占位 -->
+                            <div v-else class="flex aspect-square w-full items-center justify-center bg-gray-100 dark:bg-gray-800">
+                                <div class="text-center">
+                                    <UIcon name="i-heroicons-photo" class="mx-auto h-16 w-16 text-gray-400" />
+                                    <p class="mt-2 text-sm text-gray-500">暂无图片</p>
+                                </div>
+                            </div>
+
+                            <!-- 笔记内容 -->
+                            <div class="p-4">
+                                <div class="mb-3 text-lg font-semibold text-gray-900 dark:text-white">
+                                    {{ noteTitle || '未填写标题' }}
+                                </div>
+                                <div class="mb-4 text-sm leading-relaxed whitespace-pre-wrap text-gray-700 dark:text-gray-300">
+                                    {{ noteContent || '未填写内容' }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 底部操作栏 -->
+                        <div class="border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900">
+                            <div class="flex gap-2">
+                                <UButton variant="outline" color="neutral" class="flex-1" @click="showPreview = false">
+                                    关闭
+                                </UButton>
+                                <UButton
+                                    color="primary"
+                                    class="flex-1"
+                                    :loading="isPublishing"
+                                    @click="showPreview = false; handlePublish()"
+                                >
+                                    <UIcon name="i-heroicons-paper-airplane" class="mr-1" />
+                                    发布笔记
+                                </UButton>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
+
+        <!-- 小红书登录二维码弹窗（Teleport 确保不影响主布局） -->
+        <Teleport to="body">
+            <Transition name="fade">
+                <div
+                    v-if="showLoginQrCode"
+                    class="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4"
+                    @click.self="closeLoginQrCode"
+                >
+                    <div class="w-full max-w-sm rounded-2xl bg-white shadow-2xl dark:bg-slate-800">
+                        <!-- 标题 -->
+                        <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
+                            <div class="flex items-center gap-3">
+                                <div class="flex h-9 w-9 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+                                    <UIcon name="i-heroicons-qr-code" class="text-lg text-red-600 dark:text-red-400" />
+                                </div>
+                                <div>
+                                    <h3 class="text-base font-semibold text-slate-900 dark:text-white">小红书登录</h3>
+                                    <p class="text-xs text-slate-500 dark:text-slate-400">请使用小红书 App 扫码登录</p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
+                                @click="closeLoginQrCode"
+                            >
+                                <UIcon name="i-heroicons-x-mark" class="text-xl" />
+                            </button>
+                        </div>
+
+                        <!-- 二维码区域 -->
+                        <div class="flex flex-col items-center px-5 py-6">
+                            <!-- 加载状态 -->
+                            <div
+                                v-if="isLoadingQrCode"
+                                class="flex h-56 w-56 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-700"
+                            >
+                                <div class="text-center">
+                                    <div class="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-red-200 border-t-red-500"></div>
+                                    <p class="text-sm text-slate-500 dark:text-slate-400">正在获取二维码...</p>
+                                </div>
+                            </div>
+
+                            <!-- 二维码图片 -->
+                            <div
+                                v-else-if="loginQrCodeUrl"
+                                class="rounded-xl border-2 border-slate-200 bg-white p-3 dark:border-slate-600 dark:bg-slate-800"
+                            >
+                                <img :src="loginQrCodeUrl" alt="小红书登录二维码" class="h-52 w-52 object-contain" />
+                            </div>
+
+                            <!-- 获取失败 -->
+                            <div
+                                v-else
+                                class="flex h-56 w-56 flex-col items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-700"
+                            >
+                                <UIcon name="i-heroicons-exclamation-circle" class="mb-2 text-4xl text-slate-400" />
+                                <p class="text-sm text-slate-500 dark:text-slate-400">获取二维码失败</p>
+                            </div>
+
+                            <p class="mt-4 text-sm text-slate-600 dark:text-slate-400">打开小红书 App，扫描上方二维码</p>
+                            <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">扫码后点击「确认已登录」，再点发布按钮发布笔记</p>
+                        </div>
+
+                        <!-- 操作按钮 -->
+                        <div class="flex gap-3 border-t border-slate-200 px-5 py-4 dark:border-slate-700">
+                            <button
+                                type="button"
+                                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+                                :disabled="isLoadingQrCode"
+                                @click="refreshQrCode"
+                            >
+                                <UIcon name="i-heroicons-arrow-path" class="text-base" :class="{ 'animate-spin': isLoadingQrCode }" />
+                                刷新二维码
+                            </button>
+                            <button
+                                type="button"
+                                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                                :disabled="isCheckingLoginStatus"
+                                @click="checkLoginStatusAndPublish"
+                            >
+                                <UIcon name="i-heroicons-check" class="text-base" :class="{ 'animate-spin': isCheckingLoginStatus }" />
+                                确认已登录
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </Transition>
+        </Teleport>
 
         <!-- 隐藏的文件输入框 -->
         <input
@@ -1534,7 +1546,7 @@ const doPublish = async () => {
             @change="handleFileChange"
         />
 
-        <!-- 图片预览对话框 -->
+        <!-- 图片预览对话框（支持上一张/下一张） -->
         <Teleport to="body">
             <Transition name="fade">
                 <div
@@ -1542,28 +1554,57 @@ const doPublish = async () => {
                     role="dialog"
                     aria-modal="true"
                     aria-label="图片预览"
-                    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+                    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
                     @click.self="closeImagePreview"
-                    @keydown.escape="closeImagePreview"
+                    @keydown.esc="closeImagePreview"
+                    @keydown.left="prevPreviewImage"
+                    @keydown.right="nextPreviewImage"
                 >
-                    <div
-                        class="relative max-h-[90vh] max-w-[90vw] rounded-xl bg-white p-4 shadow-2xl dark:bg-slate-800"
-                    >
-                        <!-- 关闭按钮 -->
+                    <div class="relative flex max-h-[90vh] max-w-[90vw] items-center gap-2">
+                        <!-- 上一张 -->
                         <button
-                            class="absolute -top-3 -right-3 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white text-slate-500 shadow-lg transition-colors hover:bg-slate-100 hover:text-slate-700 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
-                            aria-label="关闭预览"
-                            @click="closeImagePreview"
+                            v-if="coverImages.length > 1"
+                            type="button"
+                            class="flex h-12 w-12 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/90 text-slate-700 shadow-lg transition-colors hover:bg-white dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                            aria-label="上一张"
+                            @click.stop="prevPreviewImage"
                         >
-                            <UIcon name="i-heroicons-x-mark" class="h-5 w-5" />
+                            <UIcon name="i-heroicons-chevron-left" class="h-6 w-6" />
                         </button>
-                        <!-- 预览图片 -->
-                        <img
-                            v-if="previewImageUrl"
-                            :src="previewImageUrl"
-                            alt="预览图片"
-                            class="max-h-[80vh] max-w-[85vw] rounded-lg object-contain"
-                        />
+
+                        <!-- 图片 + 关闭 -->
+                        <div class="relative">
+                            <button
+                                class="absolute -top-2 -right-2 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-lg transition-colors hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-300"
+                                aria-label="关闭预览"
+                                @click="closeImagePreview"
+                            >
+                                <UIcon name="i-heroicons-x-mark" class="h-5 w-5" />
+                            </button>
+                            <img
+                                v-if="currentPreviewImageUrl"
+                                :src="currentPreviewImageUrl"
+                                :alt="`图片 ${imagePreviewIndex + 1}`"
+                                class="max-h-[85vh] max-w-[85vw] rounded-lg object-contain"
+                            />
+                            <div
+                                v-if="coverImages.length > 1"
+                                class="mt-2 text-center text-sm text-white/90"
+                            >
+                                {{ imagePreviewIndex + 1 }} / {{ coverImages.length }}
+                            </div>
+                        </div>
+
+                        <!-- 下一张 -->
+                        <button
+                            v-if="coverImages.length > 1"
+                            type="button"
+                            class="flex h-12 w-12 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/90 text-slate-700 shadow-lg transition-colors hover:bg-white dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                            aria-label="下一张"
+                            @click.stop="nextPreviewImage"
+                        >
+                            <UIcon name="i-heroicons-chevron-right" class="h-6 w-6" />
+                        </button>
                     </div>
                 </div>
             </Transition>
