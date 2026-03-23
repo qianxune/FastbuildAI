@@ -71,6 +71,62 @@ export class XhsPublishService {
     private sessionId: string | null = null;
 
     /**
+     * MCP（如 xiaohongshu-mcp）在独立容器内运行，抓取图片时若 URL 为 localhost，
+     * 会连到 MCP 自己而非 API，导致 connection refused。
+     * 优先使用 XHS_PUBLIC_SERVER_URL；若 SERVER_URL 为公网/内网非回环地址则沿用；否则默认 Docker 宿主机网关。
+     */
+    private getMcpAccessibleServerOrigin(): string {
+        const explicit = process.env.XHS_PUBLIC_SERVER_URL?.trim();
+        if (explicit) {
+            try {
+                const normalized = explicit.endsWith("/") ? explicit.slice(0, -1) : explicit;
+                return new URL(normalized).origin;
+            } catch {
+                this.logger.warn(`Invalid XHS_PUBLIC_SERVER_URL: ${explicit}`);
+            }
+        }
+        const serverUrl = process.env.SERVER_URL?.trim();
+        if (serverUrl) {
+            try {
+                const u = new URL(serverUrl);
+                if (!this.isLoopbackHost(u.hostname)) {
+                    return u.origin;
+                }
+            } catch {
+                this.logger.warn(`Invalid SERVER_URL: ${serverUrl}`);
+            }
+        }
+        const port = process.env.SERVER_PORT || "4090";
+        return `http://172.17.0.1:${port}`;
+    }
+
+    private isLoopbackHost(hostname: string): boolean {
+        const h = hostname.toLowerCase();
+        return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
+    }
+
+    /** 将相对路径或 localhost 绝对 URL 转为 MCP 容器可访问的地址 */
+    private resolveImageUrlForMcp(img: string): string {
+        const origin = this.getMcpAccessibleServerOrigin();
+        if (img.startsWith("/")) {
+            const full = `${origin}${img}`;
+            this.logger.debug(`📸 图片路径转换: ${img} -> ${full}`);
+            return full;
+        }
+        try {
+            const u = new URL(img);
+            if (this.isLoopbackHost(u.hostname)) {
+                const full = `${origin}${u.pathname}${u.search}${u.hash}`;
+                this.logger.debug(`📸 图片 localhost 重写: ${img} -> ${full}`);
+                return full;
+            }
+        } catch {
+            // 非 URL，原样返回
+        }
+        return img;
+    }
+
+    /**
      * 初始化 MCP 会话
      */
     private async initializeSession(): Promise<string | null> {
@@ -162,11 +218,16 @@ export class XhsPublishService {
     }
 
     /**
-     * 确保会话已初始化
+     * 确保会话已初始化，失败时抛出异常
      */
     private async ensureSession(): Promise<void> {
         if (!this.sessionId) {
-            await this.initializeSession();
+            const sessionId = await this.initializeSession();
+            if (!sessionId) {
+                throw new Error(
+                    `MCP session initialization failed (url: ${this.mcpServerUrl})`,
+                );
+            }
         }
     }
 
@@ -203,11 +264,11 @@ export class XhsPublishService {
             });
 
             if (!response.ok) {
-                // 如果是会话错误，尝试重新初始化
-                if (response.status === 400 || response.status === 401) {
+                // 400/401/404 均属于会话失效，按 MCP 协议 404 表示 session 不存在
+                if (response.status === 400 || response.status === 401 || response.status === 404) {
+                    this.logger.warn(`MCP session invalid (HTTP ${response.status}), re-initializing...`);
                     this.sessionId = null;
                     await this.ensureSession();
-                    // 重试一次
                     return this.callMcpToolInternal(toolName, args);
                 }
                 throw new Error(`MCP server returned ${response.status}: ${response.statusText}`);
@@ -294,8 +355,12 @@ export class XhsPublishService {
 
             const content = response.result?.content?.[0]?.text || "";
 
-            // 解析返回内容判断登录状态
-            const isLoggedIn = content.includes("已登录") || content.includes("logged in");
+            const isLoggedIn =
+                content.includes("已登录") ||
+                content.includes("已经登录") ||
+                content.includes("登录状态") ||
+                content.includes("logged in") ||
+                content.includes("is_logged_in");
 
             return {
                 isLoggedIn,
@@ -315,13 +380,13 @@ export class XhsPublishService {
      */
     async getLoginQrCode(): Promise<LoginQrCodeResult> {
         try {
-            // 确保会话已初始化
-            await this.ensureSession()
-
-            if (!this.sessionId) {
+            // 先检查是否已登录，避免已登录时还去获取二维码
+            const loginStatus = await this.checkLoginStatus()
+            if (loginStatus.isLoggedIn) {
+                this.logger.log('Already logged in, skip QR code fetch')
                 return {
                     success: false,
-                    message: '小红书 MCP 服务未初始化，请检查服务配置',
+                    message: '您已登录小红书，无需扫码，请直接发布',
                 }
             }
 
@@ -367,6 +432,20 @@ export class XhsPublishService {
 
             if (!qrCodeUrl && !qrCodeBase64) {
                 this.logger.warn('No QR code found in response:', JSON.stringify(content))
+
+                const alreadyLoggedIn =
+                    message.includes('已登录') ||
+                    message.includes('已经登录') ||
+                    message.includes('登录状态') ||
+                    message.includes('无需') ||
+                    message.includes('logged in')
+                if (alreadyLoggedIn) {
+                    return {
+                        success: false,
+                        message: '您已登录小红书，无需扫码，请直接发布',
+                    }
+                }
+
                 return {
                     success: false,
                     message: message || '获取二维码失败，请稍后重试',
@@ -439,20 +518,9 @@ export class XhsPublishService {
                 publishArgs.product_search_title = productSearchTitle.trim();
             }
 
-            // 如果有图片，添加图片参数
+            // 如果有图片，添加图片参数（URL 必须对 MCP 容器可达，不能是 localhost）
             if (images && images.length > 0) {
-                // 将相对路径转换为绝对路径（如果需要）
-                const imageUrls = images.map((img) => {
-                    if (img.startsWith("/")) {
-                        // 如果是相对路径，转换为完整的服务器URL
-                        // 注意：MCP服务器在Docker中运行，需要使用Docker宿主机IP而不是localhost
-                        const serverUrl = process.env.SERVER_URL || "http://172.17.0.1:4090";
-                        const fullUrl = `${serverUrl}${img}`;
-                        this.logger.debug(`📸 图片路径转换: ${img} -> ${fullUrl}`);
-                        return fullUrl;
-                    }
-                    return img;
-                });
+                const imageUrls = images.map((img) => this.resolveImageUrlForMcp(img));
                 publishArgs.images = imageUrls;
                 this.logger.log(`📸 准备发布 ${imageUrls.length} 张图片`);
             }

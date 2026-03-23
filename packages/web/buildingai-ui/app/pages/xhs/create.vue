@@ -779,7 +779,13 @@ const fetchLoginQrCode = async () => {
         }>("/api/xhs/publish/login-qrcode", { showError: false });
 
         if (apiError || !data?.success) {
-            toast.error(data?.message || apiError || "获取登录二维码失败");
+            const msg = data?.message || apiError || "获取登录二维码失败";
+            if (msg.includes("已登录")) {
+                showLoginQrCode.value = false;
+                toast.success("小红书已登录，请直接发布");
+            } else {
+                toast.error(msg);
+            }
             return;
         }
 

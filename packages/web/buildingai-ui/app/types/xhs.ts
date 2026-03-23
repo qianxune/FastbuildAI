@@ -533,3 +533,75 @@ export interface ProductGroupListResponse {
   page: number
   limit: number
 }
+
+/**
+ * 发布计划状态
+ */
+export type PublishScheduleStatus = 'pending' | 'running' | 'completed' | 'paused' | 'cancelled'
+
+/**
+ * 发布计划项状态
+ */
+export type PublishScheduleItemStatus = 'pending' | 'publishing' | 'published' | 'failed'
+
+/**
+ * 发布计划
+ */
+export interface PublishSchedule {
+  id: string
+  userId: string
+  status: PublishScheduleStatus
+  startTime: string
+  interval: number
+  totalCount: number
+  publishedCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 发布计划项
+ */
+export interface PublishScheduleItem {
+  id: string
+  scheduleId: string
+  noteId: string
+  scheduledTime: string
+  publishedTime: string | null
+  status: PublishScheduleItemStatus
+  error: string | null
+  retryCount: number
+  order: number
+  note?: XhsNote
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 创建发布计划 DTO
+ */
+export interface CreatePublishScheduleDto {
+  noteIds: string[]
+  startTime: string
+  interval: number
+}
+
+/**
+ * 发布计划列表响应
+ */
+export interface PublishScheduleListResponse {
+  items: PublishSchedule[]
+  total: number
+  page: number
+  limit: number
+  totalPages: number
+}
+
+/**
+ * 发布计划详情响应
+ */
+export interface PublishScheduleDetailResponse {
+  schedule: PublishSchedule
+  items: PublishScheduleItem[]
+}
+

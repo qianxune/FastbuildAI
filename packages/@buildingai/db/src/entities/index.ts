@@ -52,3 +52,5 @@ export { XhsProduct } from "./xhs-product.entity";
 export { XhsTemplate } from "./xhs-template.entity";
 export { PromptTemplateGroup } from "./prompt-template-group.entity";
 export { PromptTemplate } from "./prompt-template.entity";
+export { XhsPublishSchedule, PublishScheduleStatus } from "./xhs-publish-schedule.entity";
+export { XhsPublishScheduleItem, PublishScheduleItemStatus } from "./xhs-publish-schedule-item.entity";
