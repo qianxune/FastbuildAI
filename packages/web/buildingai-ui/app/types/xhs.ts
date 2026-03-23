@@ -167,6 +167,26 @@ export interface XhsNote {
     productId?: string;
 
     /**
+     * 是否已发布到小红书
+     */
+    isPublished?: boolean;
+
+    /**
+     * 小红书笔记ID
+     */
+    xhsNoteId?: string;
+
+    /**
+     * 小红书笔记链接
+     */
+    xhsNoteUrl?: string;
+
+    /**
+     * 发布时间
+     */
+    publishedAt?: string;
+
+    /**
      * 创建时间
      */
     createdAt: string;

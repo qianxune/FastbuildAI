@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import type { PublishSchedule, PublishScheduleStatus } from "@/types/xhs";
+import type {
+    PublishSchedule,
+    PublishScheduleStatus,
+    PublishScheduleItem,
+} from "@/types/xhs";
 import { usePublishSchedule } from "@/composables/usePublishSchedule";
 
 definePageMeta({
@@ -20,6 +24,7 @@ const {
     total,
     isLoading,
     fetchSchedules,
+    fetchScheduleDetail,
     pauseSchedule,
     resumeSchedule,
     cancelSchedule,
@@ -33,6 +38,8 @@ const pageSize = ref(10);
 // 详情弹窗
 const showDetailModal = ref(false);
 const selectedSchedule = ref<PublishSchedule | null>(null);
+const scheduleItems = ref<PublishScheduleItem[]>([]);
+const isLoadingDetail = ref(false);
 
 // 取消确认弹窗
 const showCancelModal = ref(false);
@@ -64,15 +71,48 @@ watch(currentPage, () => {
 });
 
 // 查看详情
-const viewDetail = (schedule: PublishSchedule) => {
+const viewDetail = async (schedule: PublishSchedule) => {
     selectedSchedule.value = schedule;
+    scheduleItems.value = [];
     showDetailModal.value = true;
+    isLoadingDetail.value = true;
+    try {
+        const detail = await fetchScheduleDetail(schedule.id);
+        if (detail) {
+            scheduleItems.value = detail.items;
+        }
+    } finally {
+        isLoadingDetail.value = false;
+    }
 };
 
 // 关闭详情弹窗
 const closeDetailModal = () => {
     showDetailModal.value = false;
     selectedSchedule.value = null;
+    scheduleItems.value = [];
+};
+
+// 获取计划项状态标签
+const getItemStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+        pending: "待发布",
+        publishing: "发布中",
+        published: "已发布",
+        failed: "失败",
+    };
+    return labels[status] || status;
+};
+
+// 获取计划项状态颜色
+const getItemStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+        pending: "text-gray-600 bg-gray-100 dark:text-gray-400 dark:bg-gray-800",
+        publishing: "text-blue-600 bg-blue-100 dark:text-blue-400 dark:bg-blue-900",
+        published: "text-green-600 bg-green-100 dark:text-green-400 dark:bg-green-900",
+        failed: "text-red-600 bg-red-100 dark:text-red-400 dark:bg-red-900",
+    };
+    return colors[status] || "text-gray-600 bg-gray-100";
 };
 
 // 暂停计划
@@ -466,12 +506,64 @@ const goBack = () => {
                             </div>
                         </div>
 
+                        <!-- 笔记列表 -->
                         <div class="border-t border-gray-200 pt-4 dark:border-gray-700">
-                            <p class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                            <p class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
                                 笔记列表 ({{ selectedSchedule.totalCount }})
                             </p>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">
-                                详细的笔记发布状态请在后续版本中查看
+
+                            <!-- 加载中 -->
+                            <div v-if="isLoadingDetail" class="space-y-2">
+                                <div
+                                    v-for="i in 3"
+                                    :key="i"
+                                    class="h-16 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-800"
+                                />
+                            </div>
+
+                            <!-- 笔记条目 -->
+                            <div v-else-if="scheduleItems.length > 0" class="space-y-2 max-h-72 overflow-y-auto pr-1">
+                                <div
+                                    v-for="item in scheduleItems"
+                                    :key="item.id"
+                                    class="rounded-lg border border-gray-200 p-3 dark:border-gray-700"
+                                >
+                                    <div class="flex items-start justify-between gap-3">
+                                        <!-- 序号 -->
+                                        <span
+                                            class="bg-primary-100 text-primary-700 dark:bg-primary-900 dark:text-primary-300 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium"
+                                        >
+                                            {{ item.order }}
+                                        </span>
+
+                                        <!-- 笔记信息 -->
+                                        <div class="min-w-0 flex-1">
+                                            <p class="truncate text-sm font-medium text-gray-900 dark:text-white">
+                                                {{ item.note?.title || "（无标题）" }}
+                                            </p>
+                                            <p class="mt-0.5 line-clamp-1 text-xs text-gray-500 dark:text-gray-400">
+                                                {{ item.note?.content || "" }}
+                                            </p>
+                                            <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                                                <span>预计：{{ formatDateTime(item.scheduledTime) }}</span>
+                                                <span v-if="item.publishedTime">· 已发布：{{ formatDateTime(item.publishedTime) }}</span>
+                                                <span v-if="item.error" class="text-red-500">· {{ item.error }}</span>
+                                            </div>
+                                        </div>
+
+                                        <!-- 状态标签 -->
+                                        <span
+                                            class="flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
+                                            :class="getItemStatusColor(item.status)"
+                                        >
+                                            {{ getItemStatusLabel(item.status) }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <p v-else class="text-xs text-gray-500 dark:text-gray-400">
+                                暂无笔记数据
                             </p>
                         </div>
                     </div>

@@ -9,6 +9,7 @@ import { getProviderSecret } from "@buildingai/utils";
 import { AiModelService } from "@modules/ai/model/services/ai-model.service";
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 
 /**
@@ -258,26 +259,50 @@ export class XhsImageService extends BaseService<XhsImage> {
      * 下载远程图片并保存到本地存储
      */
     /**
-     * 下载外部图片到本地
+     * 下载外部图片到本地，相同 URL 复用已缓存的文件，避免重复下载
      * @param imageUrl 外部图片URL
      * @param userId 用户ID
      * @returns 本地图片路径
      */
     async downloadExternalImage(imageUrl: string, userId: string): Promise<string> {
+        // 验证URL格式
+        let url: URL
+        try {
+            url = new URL(imageUrl)
+        } catch {
+            throw new Error(`无效的图片URL: ${imageUrl}`)
+        }
+
+        const projectRoot = process.cwd()
+        const uploadDir = path.join(projectRoot, 'storage', 'uploads', 'xhs-images')
+        await fs.mkdir(uploadDir, { recursive: true })
+
+        // 用 URL 的 hash 生成确定性文件名（去掉查询参数以提高命中率）
+        const urlForHash = `${url.origin}${url.pathname}`
+        const urlHash = crypto.createHash('md5').update(urlForHash).digest('hex')
+        const extFromPath = path.extname(url.pathname)
+        // 先用 URL 中的扩展名（不含查询参数）来查找缓存文件
+        const candidateExts = extFromPath ? [extFromPath] : ['.jpg', '.png', '.webp', '.gif']
+
+        for (const candidateExt of candidateExts) {
+            const cachedFilename = `product-${urlHash}${candidateExt}`
+            const cachedFilePath = path.join(uploadDir, cachedFilename)
+            const cachedLocalUrl = `/uploads/xhs-images/${cachedFilename}`
+            try {
+                await fs.access(cachedFilePath)
+                this.logger.log(`♻️ 图片已缓存，跳过下载: ${cachedLocalUrl}`)
+                return cachedLocalUrl
+            } catch {
+                // 文件不存在，继续尝试其他扩展名或下载
+            }
+        }
+
         const maxRetries = 3
         let lastError: Error | null = null
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 this.logger.log(`⬇️ 开始下载外部图片 (尝试 ${attempt}/${maxRetries}): ${imageUrl}`)
-
-                // 验证URL格式
-                let url: URL
-                try {
-                    url = new URL(imageUrl)
-                } catch (urlError) {
-                    throw new Error(`无效的图片URL: ${imageUrl}`)
-                }
 
                 // 下载图片，添加超时和重试
                 const controller = new AbortController()
@@ -314,15 +339,11 @@ export class XhsImageService extends BaseService<XhsImage> {
                 }
 
                 if (buffer.length > 10 * 1024 * 1024) {
-                    // 10MB限制
                     throw new Error('图片文件过大（超过10MB）')
                 }
 
-                // 从URL中提取文件扩展名，如果没有则默认使用 .jpg
-                const urlPath = url.pathname
-                let ext = path.extname(urlPath)
-
-                // 如果没有扩展名，尝试从Content-Type获取
+                // 从URL路径或 Content-Type 确定扩展名
+                let ext = extFromPath
                 if (!ext) {
                     const contentType = response.headers.get('content-type')
                     if (contentType?.includes('jpeg') || contentType?.includes('jpg')) {
@@ -334,51 +355,41 @@ export class XhsImageService extends BaseService<XhsImage> {
                     } else if (contentType?.includes('gif')) {
                         ext = '.gif'
                     } else {
-                        ext = '.jpg' // 默认
+                        ext = '.jpg'
                     }
                 }
 
-                const filename = `product-${uuidv4()}${ext}`
-
-                // 确定存储路径
-                const projectRoot = process.cwd()
-                const uploadDir = path.join(projectRoot, 'storage', 'uploads', 'xhs-images')
-                await fs.mkdir(uploadDir, { recursive: true })
-
+                // 使用确定性文件名保存，相同 URL 写到同一文件
+                const filename = `product-${urlHash}${ext}`
                 const filePath = path.join(uploadDir, filename)
+                const localUrl = `/uploads/xhs-images/${filename}`
 
-                // 保存文件
                 await fs.writeFile(filePath, buffer)
                 this.logger.log(`✅ 图片已保存: ${filePath} (${buffer.length} bytes)`)
 
-                // 保存到数据库
+                // 保存到数据库（同一文件可能已有记录，写入不影响功能）
                 const image = this.xhsImageRepository.create({
-                    url: `/uploads/xhs-images/${filename}`,
+                    url: localUrl,
                     type: 'upload',
                     userId,
                 })
                 await this.xhsImageRepository.save(image)
 
-                // 返回本地访问URL
-                return `/uploads/xhs-images/${filename}`
+                return localUrl
             } catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error))
-                const errorMessage = lastError.message
-
                 this.logger.warn(
-                    `下载外部图片失败 (尝试 ${attempt}/${maxRetries}) [${imageUrl}]: ${errorMessage}`,
+                    `下载外部图片失败 (尝试 ${attempt}/${maxRetries}) [${imageUrl}]: ${lastError.message}`,
                 )
 
-                // 如果不是最后一次尝试，等待后重试
                 if (attempt < maxRetries) {
-                    const waitTime = attempt * 1000 // 递增等待时间
+                    const waitTime = attempt * 1000
                     this.logger.log(`等待 ${waitTime}ms 后重试...`)
                     await new Promise((resolve) => setTimeout(resolve, waitTime))
                 }
             }
         }
 
-        // 所有重试都失败
         const errorMessage = lastError?.message || '未知错误'
         this.logger.error(`下载外部图片失败，已重试 ${maxRetries} 次 [${imageUrl}]: ${errorMessage}`)
         throw new Error(`图片下载失败 (已重试${maxRetries}次): ${errorMessage}`)

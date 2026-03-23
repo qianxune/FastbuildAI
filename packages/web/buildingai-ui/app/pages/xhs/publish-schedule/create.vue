@@ -137,7 +137,6 @@ const handleSubmit = async () => {
 
         if (result) {
             toast.success("定时发布计划创建成功！");
-            router.push("/xhs/publish-schedule");
         } else {
             toast.error("创建失败，请重试");
         }

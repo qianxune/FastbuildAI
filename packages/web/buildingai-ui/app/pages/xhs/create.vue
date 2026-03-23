@@ -44,8 +44,12 @@ const toggleMenu = (key: string) => {
 const showPreview = ref(false);
 const wordCount = computed(() => noteContent.value.length);
 
-// 如果是从商品列表跳转过来，用于记录主商品标题，发布时传给小红书 MCP
+// 如果是从商品列表跳转过来，用于记录主商品标题和ID
 const primaryProductTitle = ref<string | null>(null);
+const primaryProductId = ref<string | null>(null);
+// 记录来源页面，决定保存/发布后跳转目标
+// 'products' = 商品管理页，'notes' = 笔记管理页（默认）
+const fromPage = ref<'products' | 'notes'>('notes');
 
 // 封面图片状态
 const coverImages = ref<string[]>([]);
@@ -228,6 +232,11 @@ onMounted(async () => {
         }
     }
 
+    // 如果从商品管理页进入，记录来源
+    if (productIdsStr) {
+        fromPage.value = 'products';
+    }
+
     // 如果从商品管理选择了商品，拉取商品信息并填充主题与可选配图
     if (productIdsStr) {
         const ids = productIdsStr.split(',').map((s) => s.trim()).filter(Boolean)
@@ -249,8 +258,9 @@ onMounted(async () => {
                     if (allUrls.length > 0) {
                         coverImages.value = [...new Set(allUrls)].slice(0, 9)
                     }
-                    // 记录第一个商品的标题，作为发布时的商品搜索标题
+                    // 记录第一个商品的标题和ID，作为发布时的商品搜索标题和关联商品
                     primaryProductTitle.value = list[0]?.name || null
+                    primaryProductId.value = list[0]?.id || null
                     toast.success(`已根据 ${list.length} 个商品填充主题，正在自动生成笔记...`)
                     
                     // 自动生成笔记
@@ -341,28 +351,50 @@ const handleSave = async () => {
     const { put, post } = useAuthFetch();
 
     try {
+        // 下载外部图片为本地路径，确保保存后能在笔记列表中正常显示
+        const localImages: string[] = [];
+        for (const img of coverImages.value) {
+            if (img.startsWith("/uploads/")) {
+                localImages.push(img);
+            } else {
+                const localPath = await downloadExternalImage(img);
+                localImages.push(localPath ?? img);
+            }
+        }
+        // 更新 coverImages 为本地路径
+        coverImages.value = localImages;
+
         if (isEditMode.value && editingNoteId.value) {
-            // 更新已有笔记
             await put(
                 `/api/xhs/notes/${editingNoteId.value}`,
                 {
                     title: noteTitle.value,
                     content: noteContent.value,
-                    coverImages: coverImages.value,
+                    coverImages: localImages,
                 },
-                {
-                    errorMessage: "更新笔记失败",
-                },
+                { errorMessage: "更新笔记失败" },
             );
-
             toast.success("笔记已更新");
         } else {
-            // 创建新笔记
-            generatedTitle.value = noteTitle.value;
-            generatedContent.value = noteContent.value;
+            const { data, error: apiError } = await post(
+                "/api/xhs/notes",
+                {
+                    title: noteTitle.value,
+                    content: noteContent.value,
+                    coverImages: localImages,
+                    mode: mode.value || "ai-generate",
+                    productId: primaryProductId.value || undefined,
+                },
+                { errorMessage: "保存笔记失败" },
+            );
 
-            await save();
+            if (apiError) return;
+            toast.success("笔记已保存");
         }
+
+        // 保存成功后跳转
+        const target = fromPage.value === 'products' ? '/xhs/products' : '/xhs/notes';
+        router.push(target);
     } finally {
         isSaving.value = false;
     }
@@ -840,6 +872,17 @@ const refreshQrCode = async () => {
     await fetchLoginQrCode();
 };
 
+// 下载外部图片到本地（复用 API）
+const downloadExternalImage = async (imageUrl: string): Promise<string | null> => {
+    const { post } = useAuthFetch();
+    const { data } = await post<{ success: boolean; localPath?: string }>(
+        "/api/xhs/images/download",
+        { imageUrl },
+        { showError: false },
+    );
+    return data?.success && data.localPath ? data.localPath : null;
+};
+
 // 执行发布
 const doPublish = async () => {
     // 先检测登录状态，未登录时弹出登录 dialog，不占用布局
@@ -855,6 +898,22 @@ const doPublish = async () => {
     const { post } = useAuthFetch();
 
     try {
+        // 1. 将封面图中外部 URL 下载为本地路径
+        const localImages: string[] = [];
+        for (const img of coverImages.value) {
+            if (img.startsWith("/uploads/")) {
+                localImages.push(img);
+            } else {
+                const localPath = await downloadExternalImage(img);
+                if (localPath) {
+                    localImages.push(localPath);
+                } else {
+                    console.warn("图片下载失败，跳过:", img);
+                }
+            }
+        }
+
+        // 2. 发布到小红书
         const { data, error: apiError } = await post<{
             success: boolean;
             message: string;
@@ -865,19 +924,15 @@ const doPublish = async () => {
             {
                 title: noteTitle.value,
                 content: noteContent.value,
-                images: coverImages.value,
-                // 如果当前笔记是从商品列表生成的，则把主商品标题传给小红书 MCP
+                images: localImages,
                 productSearchTitle: primaryProductTitle.value || undefined,
             },
-            {
-                showError: false,
-            },
+            { showError: false },
         );
 
         if (apiError || !data?.success) {
             const errorMsg = data?.message || apiError || "发布失败，请稍后重试";
 
-            // 检查是否是登录过期的错误
             if (errorMsg.includes("登录") || errorMsg.includes("过期")) {
                 toast.warning("小红书登录已过期，请扫码登录");
                 showLoginQrCode.value = true;
@@ -891,10 +946,38 @@ const doPublish = async () => {
 
         toast.success(data.message || "笔记已成功发布到小红书！");
 
-        // 如果返回了笔记链接，可以提示用户
-        if (data.noteUrl) {
-            console.log("Published note URL:", data.noteUrl);
+        // 3. 发布成功后保存笔记到数据库，并跳转
+        try {
+            if (isEditMode.value && editingNoteId.value) {
+                // 编辑模式：更新已有笔记的发布状态
+                const { put } = useAuthFetch();
+                await put(`/api/xhs/notes/${editingNoteId.value}`, {
+                    title: noteTitle.value,
+                    content: noteContent.value,
+                    coverImages: localImages,
+                    isPublished: true,
+                    xhsNoteId: data.noteId,
+                    xhsNoteUrl: data.noteUrl,
+                }, { showError: false });
+            } else {
+                // 新建模式：创建笔记记录
+                await post("/api/xhs/notes", {
+                    title: noteTitle.value,
+                    content: noteContent.value,
+                    coverImages: localImages,
+                    mode: mode.value || "ai-generate",
+                    productId: primaryProductId.value || undefined,
+                    xhsNoteId: data.noteId,
+                    xhsNoteUrl: data.noteUrl,
+                }, { showError: false });
+            }
+        } catch (saveErr) {
+            console.error("发布后保存笔记失败:", saveErr);
         }
+
+        // 发布成功后跳转
+        const target = fromPage.value === 'products' ? '/xhs/products' : '/xhs/notes';
+        router.push(target);
     } catch (error) {
         console.error("Publish failed:", error);
         toast.error("发布失败，请检查网络连接后重试");

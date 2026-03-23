@@ -22,6 +22,7 @@ const {
     currentPage,
     total,
     totalPages,
+    limit,
     isLoading,
     error,
     searchKeyword,
@@ -39,6 +40,9 @@ const {
     refresh,
     clearSearch,
 } = useXhsNotes();
+
+// 布局模式：grid = 多列网格，list = 单列列表
+const layoutMode = ref<'grid' | 'list'>('grid');
 
 // 使用分组管理组合式函数
 const { groups, isLoading: isGroupsLoading, fetchGroups } = useXhsGroups();
@@ -496,10 +500,36 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                             <!-- Current filter info -->
                             <div class="text-sm text-stone-500 dark:text-gray-400">
                                 <span v-if="isSearching">找到 {{ total }} 个结果</span>
-                                <span v-else-if="currentGroupId"
-                                    >{{ currentGroupName }} ({{ total }})</span
-                                >
+                                <span v-else-if="currentGroupId">{{ currentGroupName }} ({{ total }})</span>
                                 <span v-else>共 {{ total }} 个笔记</span>
+                            </div>
+
+                            <!-- 布局切换 -->
+                            <div class="ml-auto flex items-center gap-1 rounded-lg border border-gray-200 p-0.5 dark:border-gray-700">
+                                <button
+                                    :class="[
+                                        'flex h-8 w-8 items-center justify-center rounded-md transition-colors',
+                                        layoutMode === 'grid'
+                                            ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
+                                            : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800',
+                                    ]"
+                                    title="网格视图"
+                                    @click="layoutMode = 'grid'"
+                                >
+                                    <UIcon name="i-heroicons-squares-2x2" class="h-4 w-4" />
+                                </button>
+                                <button
+                                    :class="[
+                                        'flex h-8 w-8 items-center justify-center rounded-md transition-colors',
+                                        layoutMode === 'list'
+                                            ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
+                                            : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800',
+                                    ]"
+                                    title="列表视图"
+                                    @click="layoutMode = 'list'"
+                                >
+                                    <UIcon name="i-heroicons-bars-3" class="h-4 w-4" />
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -602,15 +632,20 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                         </div>
                     </div>
 
-                    <!-- Notes grid -->
+                    <!-- Notes grid / list -->
                     <div v-else-if="!isEmpty" class="space-y-4">
-                        <div class="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+                        <div
+                            :class="layoutMode === 'grid'
+                                ? 'grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3'
+                                : 'flex flex-col gap-3'"
+                        >
                             <NoteCard
                                 v-for="note in notes"
                                 :key="note.id"
                                 :note="note"
                                 :show-checkbox="isBatchMode"
                                 :is-selected="selectedNoteIds.includes(note.id)"
+                                :list-mode="layoutMode === 'list'"
                                 @click="handleNoteClick"
                                 @delete="handleDeleteClick"
                                 @select="handleNoteSelect"
@@ -618,13 +653,47 @@ const getGroupNoteCount = (groupId: string | undefined) => {
                         </div>
 
                         <!-- Pagination -->
-                        <div v-if="totalPages > 1" class="mt-8 flex justify-center">
-                            <UPagination
-                                v-model="currentPage"
-                                :page-count="totalPages"
-                                :total="total"
-                                @update:model-value="handlePageChange"
+                        <div v-if="totalPages > 1" class="mt-8 flex items-center justify-center gap-2">
+                            <UButton
+                                size="sm"
+                                variant="outline"
+                                color="neutral"
+                                :disabled="currentPage <= 1 || isLoading"
+                                icon="i-heroicons-chevron-left"
+                                @click="handlePageChange(currentPage - 1)"
                             />
+                            <div class="flex items-center gap-1">
+                                <template v-for="p in totalPages" :key="p">
+                                    <button
+                                        v-if="p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2"
+                                        :class="[
+                                            'flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium transition-colors',
+                                            p === currentPage
+                                                ? 'bg-primary-600 text-white'
+                                                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+                                        ]"
+                                        :disabled="isLoading"
+                                        @click="handlePageChange(p)"
+                                    >
+                                        {{ p }}
+                                    </button>
+                                    <span
+                                        v-else-if="p === currentPage - 3 || p === currentPage + 3"
+                                        class="px-1 text-gray-400"
+                                    >…</span>
+                                </template>
+                            </div>
+                            <UButton
+                                size="sm"
+                                variant="outline"
+                                color="neutral"
+                                :disabled="currentPage >= totalPages || isLoading"
+                                icon="i-heroicons-chevron-right"
+                                @click="handlePageChange(currentPage + 1)"
+                            />
+                            <span class="ml-2 text-sm text-gray-500 dark:text-gray-400">
+                                第 {{ currentPage }} / {{ totalPages }} 页，共 {{ total }} 条
+                            </span>
                         </div>
                     </div>
 

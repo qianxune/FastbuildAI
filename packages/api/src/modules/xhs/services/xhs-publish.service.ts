@@ -303,7 +303,6 @@ export class XhsPublishService {
         if (this.sessionId) {
             headers["mcp-session-id"] = this.sessionId;
         }
-
         return headers;
     }
 
