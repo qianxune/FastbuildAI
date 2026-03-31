@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { XhsProduct, XhsProductGroup } from "@/types/xhs";
-import type { AiModel } from "@buildingai/service/webapi/ai-conversation";
+import { apiGetAiProviders, type AiModel } from "@buildingai/service/webapi/ai-conversation";
 import { useXhsProducts } from "~/composables/useXhsProducts";
 
 definePageMeta({
@@ -46,8 +46,30 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 // 顶层获取 HTTP 方法，避免在异步回调中丢失 Nuxt 上下文
 const { get: authGet, post: authPost, del: authDel } = useAuthFetch();
 
+/** 商品管理页默认选中的 LLM（按后台配置的 model 标识匹配） */
+const DEFAULT_PRODUCTS_AI_MODEL_SLUG = "deepseek-chat";
+
 // AI模型选择
 const selectedModelId = ref<string>("");
+
+/** 若尚未选择模型，则默认选中 deepseek-chat（若存在且启用） */
+const applyDefaultAiModelIfEmpty = async () => {
+    if (selectedModelId.value) {
+        return;
+    }
+    try {
+        const providerList = await apiGetAiProviders({ supportedModelTypes: ["llm"] });
+        const models = providerList.flatMap((p) => p.models ?? []);
+        const m = models.find(
+            (x) => x.model === DEFAULT_PRODUCTS_AI_MODEL_SLUG && x.isActive !== false,
+        );
+        if (m?.id) {
+            selectedModelId.value = m.id;
+        }
+    } catch {
+        /* 忽略：无模型列表时保持为空 */
+    }
+};
 
 // 提示词模板选择
 interface PromptTemplateOption {
@@ -98,6 +120,7 @@ const loadPromptTemplates = async () => {
 
 onMounted(() => {
     loadPromptTemplates();
+    void applyDefaultAiModelIfEmpty();
 });
 
 const allImages = (p: XhsProduct) => {

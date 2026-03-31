@@ -252,6 +252,27 @@ watch(isOpen, (newValue) => {
     }
 });
 
+/** 父组件异步设置 v-model 时同步选中态（defaultSelected=false 时 loadModels 只读一次 props） */
+watch(
+    () => [props.modelValue, loading.value, providers.value] as const,
+    () => {
+        if (props.defaultSelected || loading.value) {
+            return;
+        }
+        const id = props.modelValue?.trim();
+        if (!id) {
+            selected.value = null;
+            return;
+        }
+        const m = allModels.value.find((x) => x.id === id);
+        if (m && selected.value?.id !== id) {
+            selected.value = m;
+            expandProviderByModel(m);
+        }
+    },
+    { flush: "post" },
+);
+
 const handleScrollEnd = useDebounceFn(() => {
     isScrolling.value = false;
 }, 200);
