@@ -85,9 +85,9 @@ export const useXhsPublish = () => {
         images: string[];
         productId?: string;
         /**
-         * 可选：用于在小红书中按标题搜索店内商品并挂载
+         * 可选：妙手/外部商品 ID（对应 xhs_product.external_product_id），用于挂载店内商品
          */
-        productSearchTitle?: string;
+        productSearchId?: string;
     }): Promise<PublishResult> => {
         try {
             console.log("📝 开始发布笔记:", {
@@ -148,7 +148,7 @@ export const useXhsPublish = () => {
                 title: params.title,
                 content: params.content,
                 images: localImages,
-                productSearchTitle: params.productSearchTitle,
+                productSearchId: params.productSearchId,
             });
 
             console.log("📡 发布API响应:", { data, error });

@@ -44,8 +44,8 @@ const toggleMenu = (key: string) => {
 const showPreview = ref(false);
 const wordCount = computed(() => noteContent.value.length);
 
-// 如果是从商品列表跳转过来，用于记录主商品标题和ID
-const primaryProductTitle = ref<string | null>(null);
+// 如果是从商品列表跳转过来，用于记录主商品 ID 与外部商品 ID（发布挂品）
+const primaryProductExternalId = ref<string | null>(null);
 const primaryProductId = ref<string | null>(null);
 // 记录来源页面，决定保存/发布后跳转目标
 // 'products' = 商品管理页，'notes' = 笔记管理页（默认）
@@ -220,7 +220,7 @@ onMounted(async () => {
         // 需要先加载模型列表，然后设置选中的模型
         const { get } = useAuthFetch();
         try {
-            const { data } = await get<AiModel[]>('/consoleapi/ai-models', { showError: false });
+            const { data } = await get<AiModel[]>("/api/ai-models", { showError: false });
             if (data && Array.isArray(data)) {
                 const selectedModel = data.find(m => m.id === modelId);
                 if (selectedModel) {
@@ -258,9 +258,10 @@ onMounted(async () => {
                     if (allUrls.length > 0) {
                         coverImages.value = [...new Set(allUrls)].slice(0, 9)
                     }
-                    // 记录第一个商品的标题和ID，作为发布时的商品搜索标题和关联商品
-                    primaryProductTitle.value = list[0]?.name || null
+                    // 第一个商品的库内 ID、external_product_id（发布挂品）
                     primaryProductId.value = list[0]?.id || null
+                    primaryProductExternalId.value =
+                        list[0]?.externalProductId?.trim() || null
                     toast.success(`已根据 ${list.length} 个商品填充主题，正在自动生成笔记...`)
                     
                     // 自动生成笔记
@@ -508,6 +509,62 @@ const handleClearAllImages = () => {
     toast.success("已清空所有图片");
 };
 
+/** 拖动排序配图 */
+const reorderCoverImages = (fromIndex: number, toIndex: number) => {
+    const arr = coverImages.value;
+    if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= arr.length ||
+        toIndex >= arr.length
+    ) {
+        return;
+    }
+    const next = [...arr];
+    const [item] = next.splice(fromIndex, 1);
+    if (item === undefined) {
+        return;
+    }
+    next.splice(toIndex, 0, item);
+    coverImages.value.splice(0, coverImages.value.length, ...next);
+};
+
+const coverImageDrag = ref<{ fromIndex: number } | null>(null);
+
+const onCoverImageDragStart = (e: DragEvent, index: number) => {
+    coverImageDrag.value = { fromIndex: index };
+    e.dataTransfer?.setData("text/plain", String(index));
+    if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+    }
+};
+
+const onCoverImageDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = "move";
+    }
+};
+
+const onCoverImageDrop = (e: DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    const src = coverImageDrag.value;
+    if (!src) {
+        return;
+    }
+    const from = src.fromIndex;
+    if (from === dropIndex) {
+        return;
+    }
+    reorderCoverImages(from, dropIndex);
+    coverImageDrag.value = null;
+};
+
+const onCoverImageDragEnd = () => {
+    coverImageDrag.value = null;
+};
+
 // 文件上传相关
 const fileInput = ref<HTMLInputElement | null>(null);
 const isUploading = ref(false);
@@ -543,14 +600,14 @@ const handleAutoImageGenerate = async () => {
                     isActive: boolean;
                     name: string;
                 }>
-            >("/consoleapi/ai-models", { showError: false }),
+            >("/api/ai-models", { showError: false }),
             get<
                 Array<{
                     id: string;
                     provider: string;
                     name: string;
                 }>
-            >("/consoleapi/ai-providers", { showError: false }),
+            >("/api/ai-providers", { showError: false }),
         ]);
 
         const modelsData = modelsResponse.data;
@@ -925,7 +982,7 @@ const doPublish = async () => {
                 title: noteTitle.value,
                 content: noteContent.value,
                 images: localImages,
-                productSearchTitle: primaryProductTitle.value || undefined,
+                productSearchId: primaryProductExternalId.value || undefined,
             },
             { showError: false },
         );
@@ -1241,13 +1298,26 @@ const doPublish = async () => {
                             <UIcon :name="coverImagesStripExpanded ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'" class="h-4 w-4 text-slate-400" />
                         </div>
                     </button>
-                    <div v-show="coverImagesStripExpanded" class="flex flex-wrap gap-3 px-5 pb-5">
+                    <div v-show="coverImagesStripExpanded" class="px-5 pb-5">
+                        <p class="mb-2 text-xs text-slate-500 dark:text-slate-400">拖动缩略图可调整顺序（首张为封面）</p>
+                        <div class="flex flex-wrap gap-3">
                         <div
                             v-for="(image, index) in coverImages"
-                            :key="index"
-                            class="group relative h-[88px] w-[88px] flex-shrink-0 overflow-hidden rounded-lg border border-slate-100 dark:border-slate-700"
+                            :key="`${index}-${image}`"
+                            class="group relative h-[88px] w-[88px] flex-shrink-0 cursor-grab overflow-hidden rounded-lg border border-slate-100 active:cursor-grabbing dark:border-slate-700"
+                            draggable="true"
+                            @dragstart="onCoverImageDragStart($event, index)"
+                            @dragend="onCoverImageDragEnd"
+                            @dragover.prevent="onCoverImageDragOver"
+                            @drop="onCoverImageDrop($event, index)"
                         >
-                            <img :src="image" :alt="`图片 ${index + 1}`" class="h-full w-full cursor-pointer object-cover" @click="handlePreviewImage(index)" />
+                            <img
+                                :src="image"
+                                :alt="`图片 ${index + 1}`"
+                                class="h-full w-full cursor-pointer select-none object-cover"
+                                draggable="false"
+                                @click="handlePreviewImage(index)"
+                            />
                             <div class="absolute top-1 left-1 flex h-4 w-4 items-center justify-center rounded bg-black/60 text-[10px] text-white">{{ index + 1 }}</div>
                             <!-- 悬停遮罩：预览 + 删除 -->
                             <div class="absolute inset-0 flex items-center justify-center gap-1.5 bg-black/0 transition-all group-hover:bg-black/40">
@@ -1274,10 +1344,11 @@ const doPublish = async () => {
                             v-if="coverImages.length < 9"
                             type="button"
                             @click="fileInput?.click()"
-                            class="flex h-[88px] w-[88px] flex-shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-slate-200 text-slate-400 hover:border-blue-400 hover:text-blue-500 transition-colors dark:border-slate-600"
+                            class="flex h-[88px] w-[88px] flex-shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-slate-200 text-slate-400 transition-colors hover:border-blue-400 hover:text-blue-500 dark:border-slate-600"
                         >
                             <UIcon name="i-heroicons-plus" class="text-2xl" />
                         </button>
+                        </div>
                     </div>
                 </div>
 

@@ -209,6 +209,7 @@ const closePreview = () => {
         :is-open="previewOpen"
         :title="previewNote.title"
         :content="previewNote.content"
+        :cover-images="previewNote.coverImages ?? []"
         :product="previewProduct"
         @close="closePreview"
     />

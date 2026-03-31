@@ -16,11 +16,11 @@ export class PublishNoteDto {
     images?: string[];
 
     /**
-     * 可选：用于在小红书「添加商品」弹窗中按标题搜索并挂载店内商品
+     * 可选：妙手/外部商品 ID（对应 xhs_product.external_product_id），传给 MCP 用于挂载店内商品
      */
     @IsOptional()
     @IsString()
-    productSearchTitle?: string;
+    productSearchId?: string;
 }
 
 export class PublishNoteByIdDto {

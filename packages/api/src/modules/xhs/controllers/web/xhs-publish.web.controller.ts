@@ -55,7 +55,7 @@ export class XhsPublishWebController extends BaseController {
             title: dto.title,
             content: dto.content,
             images: dto.images,
-            productSearchTitle: dto.productSearchTitle,
+            productSearchId: dto.productSearchId,
         });
 
         return result;

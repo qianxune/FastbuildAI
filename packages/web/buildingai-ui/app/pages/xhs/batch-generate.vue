@@ -2,6 +2,7 @@
 import type { XhsProduct } from "@/types/xhs";
 import { useXhsPublish } from "@/composables/useXhsPublish";
 import NotePreviewModal from "@/components/xhs/note-preview-modal.vue";
+import { onKeyStroke } from "@vueuse/core";
 
 definePageMeta({
     layout: false,
@@ -21,6 +22,8 @@ interface GenerationTask {
     progress: number;
     title: string;
     content: string;
+    /** 发布到小红书时使用的配图（可编辑，最多 9 张） */
+    coverImages: string[];
     error?: string;
     noteId?: string;
     isPublished?: boolean;
@@ -136,6 +139,186 @@ const maybeShowQrOnPublishError = async (message: string) => {
     }
 };
 
+const MAX_NOTE_IMAGES = 9;
+
+/** 从商品主图与附图构建初始配图列表 */
+const buildInitialCoverImages = (product: XhsProduct): string[] => {
+    const urls: string[] = [];
+    if (product.imageUrl) urls.push(product.imageUrl);
+    if (product.extraImages?.length) urls.push(...product.extraImages);
+    return [...new Set(urls.map((u) => u.trim()).filter(Boolean))].slice(0, MAX_NOTE_IMAGES);
+};
+
+/** 发布时使用的图片（以用户编辑后的 coverImages 为准） */
+const getPublishImages = (task: GenerationTask): string[] => {
+    const raw =
+        task.coverImages?.length > 0
+            ? task.coverImages
+            : buildInitialCoverImages(task.product);
+    return [...new Set(raw.map((u) => u.trim()).filter(Boolean))].slice(0, MAX_NOTE_IMAGES);
+};
+
+const taskCoverPreview = (task: GenerationTask): string | undefined => {
+    const imgs = getPublishImages(task);
+    return imgs[0];
+};
+
+// 本地上传配图（单条任务）
+const taskImageUploadInput = ref<HTMLInputElement | null>(null);
+const uploadImageTaskId = ref<string | null>(null);
+const isUploadingTaskImage = ref(false);
+
+const openTaskImageUpload = (task: GenerationTask) => {
+    if (task.coverImages.length >= MAX_NOTE_IMAGES) {
+        toast.warning(`最多 ${MAX_NOTE_IMAGES} 张图片`);
+        return;
+    }
+    uploadImageTaskId.value = task.productId;
+    nextTick(() => taskImageUploadInput.value?.click());
+};
+
+const removeTaskImage = (task: GenerationTask, index: number) => {
+    task.coverImages.splice(index, 1);
+};
+
+/** 拖动排序：将 fromIndex 移到 toIndex */
+const reorderTaskImages = (task: GenerationTask, fromIndex: number, toIndex: number) => {
+    const arr = task.coverImages;
+    if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= arr.length ||
+        toIndex >= arr.length
+    ) {
+        return;
+    }
+    const next = [...arr];
+    const [item] = next.splice(fromIndex, 1);
+    if (item === undefined) {
+        return;
+    }
+    next.splice(toIndex, 0, item);
+    task.coverImages.splice(0, task.coverImages.length, ...next);
+};
+
+const taskImageDrag = ref<{ taskId: string; fromIndex: number } | null>(null);
+
+const onTaskImageDragStart = (e: DragEvent, task: GenerationTask, index: number) => {
+    taskImageDrag.value = { taskId: task.productId, fromIndex: index };
+    e.dataTransfer?.setData("text/plain", String(index));
+    if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+    }
+};
+
+const onTaskImageDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = "move";
+    }
+};
+
+const onTaskImageDrop = (e: DragEvent, task: GenerationTask, dropIndex: number) => {
+    e.preventDefault();
+    const src = taskImageDrag.value;
+    if (!src || src.taskId !== task.productId) {
+        return;
+    }
+    const from = src.fromIndex;
+    if (from === dropIndex) {
+        return;
+    }
+    reorderTaskImages(task, from, dropIndex);
+    taskImageDrag.value = null;
+};
+
+const onTaskImageDragEnd = () => {
+    taskImageDrag.value = null;
+};
+
+/** 单张配图大图预览 */
+const taskImagePreviewUrl = ref<string | null>(null);
+
+const openTaskImagePreview = (url: string) => {
+    taskImagePreviewUrl.value = url;
+};
+
+const closeTaskImagePreview = () => {
+    taskImagePreviewUrl.value = null;
+};
+
+onKeyStroke("Escape", (e) => {
+    if (!taskImagePreviewUrl.value) {
+        return;
+    }
+    e.preventDefault();
+    closeTaskImagePreview();
+});
+
+const onTaskImageFileChange = async (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    const files = input.files;
+    const pid = uploadImageTaskId.value;
+    input.value = "";
+    uploadImageTaskId.value = null;
+    if (!files?.length || !pid) return;
+
+    const task = tasks.value.find((t) => t.productId === pid);
+    if (!task || task.status !== "success") return;
+
+    const file = files.item(0);
+    if (!file) return;
+
+    const validTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    if (!validTypes.includes(file.type)) {
+        toast.error("只支持 JPG、PNG、GIF、WEBP");
+        return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+        toast.error("单张图片不能超过 5MB");
+        return;
+    }
+    if (task.coverImages.length >= MAX_NOTE_IMAGES) {
+        toast.warning(`最多 ${MAX_NOTE_IMAGES} 张图片`);
+        return;
+    }
+
+    isUploadingTaskImage.value = true;
+    try {
+        const userStore = useUserStore();
+        const authToken = userStore.token || userStore.temporaryToken;
+        if (!authToken) {
+            toast.error("请先登录");
+            return;
+        }
+        const formData = new FormData();
+        formData.append("file", file);
+        const response = await fetch("/api/xhs/images/upload", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${authToken}` },
+            body: formData,
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.message || "上传失败");
+        }
+        const result = await response.json();
+        const imageUrl = result?.data?.data?.url;
+        if (imageUrl) {
+            const absoluteUrl = imageUrl.startsWith("/") ? imageUrl : `/${imageUrl}`;
+            task.coverImages.push(absoluteUrl);
+            toast.success("图片已添加");
+        } else {
+            toast.error("上传成功但未返回图片地址");
+        }
+    } catch (e) {
+        toast.error(e instanceof Error ? e.message : "上传失败");
+    } finally {
+        isUploadingTaskImage.value = false;
+    }
+};
+
 const productIds = ref<string[]>([]);
 const modelId = ref<string>("");
 const templateId = ref<string>("");
@@ -224,6 +407,10 @@ const loadExistingNotes = async (noteIds: string[]) => {
                 progress: 100,
                 title: data.title,
                 content: data.content,
+                coverImages:
+                    coverImages.length > 0
+                        ? [...new Set(coverImages)].slice(0, MAX_NOTE_IMAGES)
+                        : buildInitialCoverImages(productLike),
                 noteId: data.id,
             });
         }
@@ -249,6 +436,7 @@ const loadProducts = async () => {
         progress: 0,
         title: "",
         content: "",
+        coverImages: buildInitialCoverImages(product),
     }));
 };
 
@@ -303,13 +491,18 @@ const startBatchGenerateWithTemplate = async () => {
                 continue;
             }
 
+            const fromApi = (item.cover_images ?? []).filter(Boolean) as string[];
+            task.coverImages = fromApi.length
+                ? [...new Set(fromApi)].slice(0, MAX_NOTE_IMAGES)
+                : buildInitialCoverImages(task.product);
+
             const { post: postNote } = useAuthFetch();
             const { data: noteData } = await postNote<{ id: string }>("/api/xhs/notes", {
                 title,
                 content,
                 mode: "ai-generate",
                 productId: item.product_id,
-                coverImages: item.cover_images?.length ? item.cover_images : undefined,
+                coverImages: task.coverImages.length ? task.coverImages : undefined,
             });
 
             if (noteData?.id) {
@@ -521,11 +714,12 @@ const closePreviewModal = () => {
     currentTask.value = null;
 };
 
-// 保存编辑后的内容
-const handleSaveEdit = (data: { title: string; content: string }) => {
+// 保存编辑后的内容（含配图）
+const handleSaveEdit = (data: { title: string; content: string; coverImages: string[] }) => {
     if (currentTask.value) {
         currentTask.value.title = data.title;
         currentTask.value.content = data.content;
+        currentTask.value.coverImages = [...data.coverImages].slice(0, MAX_NOTE_IMAGES);
         toast.success("内容已更新");
     }
 };
@@ -550,6 +744,7 @@ const regenerateNote = async (task: GenerationTask) => {
     task.title = "";
     task.content = "";
     task.error = undefined;
+    task.coverImages = buildInitialCoverImages(task.product);
 
     try {
         await generateSingleNote(task);
@@ -586,14 +781,7 @@ const publishSingle = async (task: GenerationTask) => {
     publishProgress.value = 0;
 
     try {
-        // 准备图片列表
-        const images: string[] = [];
-        if (task.product.imageUrl) {
-            images.push(task.product.imageUrl);
-        }
-        if (task.product.extraImages?.length) {
-            images.push(...task.product.extraImages);
-        }
+        const images = getPublishImages(task);
 
         // 发布笔记
         const result = await publishNote({
@@ -601,8 +789,8 @@ const publishSingle = async (task: GenerationTask) => {
             content: task.content,
             images,
             productId: task.productId,
-            // 将当前商品标题传递给小红书 MCP，用于按标题搜索并挂载商品
-            productSearchTitle: task.product.name,
+            // 妙手/外部商品 ID，用于小红书挂载商品
+            productSearchId: task.product.externalProductId?.trim() || undefined,
         });
 
         publishCurrent.value = 1;
@@ -668,14 +856,7 @@ const publishBatch = async () => {
 
         task.status = "publishing";
 
-        // 准备图片列表
-        const images: string[] = [];
-        if (task.product.imageUrl) {
-            images.push(task.product.imageUrl);
-        }
-        if (task.product.extraImages?.length) {
-            images.push(...task.product.extraImages);
-        }
+        const images = getPublishImages(task);
 
         try {
             const result = await publishNote({
@@ -683,8 +864,7 @@ const publishBatch = async () => {
                 content: task.content,
                 images,
                 productId: task.productId,
-                // 批量发布时同样传递商品标题
-                productSearchTitle: task.product.name,
+                productSearchId: task.product.externalProductId?.trim() || undefined,
             });
 
             if (result.success) {
@@ -909,11 +1089,11 @@ const getStatusColor = (status: string) => {
                             />
                             <div v-else class="w-4"></div>
 
-                            <!-- Product Image -->
+                            <!-- Product Image（首张配图预览） -->
                             <div class="flex-shrink-0">
                                 <img
-                                    v-if="task.product.imageUrl"
-                                    :src="task.product.imageUrl"
+                                    v-if="taskCoverPreview(task)"
+                                    :src="taskCoverPreview(task)"
                                     :alt="task.product.name"
                                     class="h-16 w-16 rounded object-cover"
                                 />
@@ -972,6 +1152,54 @@ const getStatusColor = (status: string) => {
                                     >
                                         {{ task.content }}
                                     </p>
+
+                                    <!-- 配图管理（发布到小红书将使用此处最终列表） -->
+                                    <div class="mt-3 rounded-lg border border-stone-200 bg-stone-50/80 p-3 dark:border-gray-600 dark:bg-gray-800/50">
+                                        <p class="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+                                            笔记配图（最多 {{ MAX_NOTE_IMAGES }} 张；拖动缩略图排序；单击图片大图预览；悬停角标删除；「+」本地上传）
+                                        </p>
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <div
+                                                v-for="(url, imgIdx) in task.coverImages"
+                                                :key="`${task.productId}-${imgIdx}-${url}`"
+                                                class="group relative h-14 w-14 flex-shrink-0 cursor-grab overflow-hidden rounded-md border border-gray-200 active:cursor-grabbing dark:border-gray-600"
+                                                draggable="true"
+                                                @dragstart="onTaskImageDragStart($event, task, imgIdx)"
+                                                @dragend="onTaskImageDragEnd"
+                                                @dragover.prevent="onTaskImageDragOver"
+                                                @drop="onTaskImageDrop($event, task, imgIdx)"
+                                            >
+                                                <img
+                                                    :src="url"
+                                                    alt=""
+                                                    class="h-full w-full select-none object-cover"
+                                                    draggable="false"
+                                                    @click="openTaskImagePreview(url)"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    class="absolute bottom-0 right-0 flex items-center justify-center rounded-tl-md bg-black/60 p-1 text-white opacity-0 transition-opacity hover:bg-black/75 group-hover:opacity-100"
+                                                    title="删除"
+                                                    @click.stop="removeTaskImage(task, imgIdx)"
+                                                >
+                                                    <UIcon name="i-heroicons-trash" class="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                            <button
+                                                v-if="task.coverImages.length < MAX_NOTE_IMAGES"
+                                                type="button"
+                                                :disabled="isUploadingTaskImage"
+                                                class="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-md border-2 border-dashed border-gray-300 text-gray-400 transition-colors hover:border-primary-500 hover:text-primary-500 disabled:opacity-50 dark:border-gray-600"
+                                                @click.stop="openTaskImageUpload(task)"
+                                            >
+                                                <UIcon
+                                                    :name="isUploadingTaskImage ? 'i-heroicons-arrow-path' : 'i-heroicons-plus'"
+                                                    class="h-6 w-6"
+                                                    :class="{ 'animate-spin': isUploadingTaskImage }"
+                                                />
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <!-- Error Message -->
@@ -1041,12 +1269,21 @@ const getStatusColor = (status: string) => {
             </UCard>
         </div>
 
+        <input
+            ref="taskImageUploadInput"
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            class="hidden"
+            @change="onTaskImageFileChange"
+        />
+
         <!-- 预览弹窗 -->
         <NotePreviewModal
             v-if="currentTask"
             :is-open="showPreviewModal"
             :title="currentTask.title"
             :content="currentTask.content"
+            :cover-images="currentTask.coverImages"
             :product="currentTask.product"
             @close="closePreviewModal"
             @save="handleSaveEdit"
@@ -1138,6 +1375,34 @@ const getStatusColor = (status: string) => {
                             </button>
                         </div>
                     </div>
+                </div>
+            </Transition>
+        </Teleport>
+
+        <!-- 单张配图大图预览 -->
+        <Teleport to="body">
+            <Transition name="fade">
+                <div
+                    v-if="taskImagePreviewUrl"
+                    class="fixed inset-0 z-[201] flex items-center justify-center bg-black/85 p-4"
+                    role="dialog"
+                    aria-modal="true"
+                    @click.self="closeTaskImagePreview"
+                >
+                    <button
+                        type="button"
+                        class="absolute right-4 top-4 rounded-full bg-white/15 p-2 text-white transition-colors hover:bg-white/25"
+                        title="关闭"
+                        @click="closeTaskImagePreview"
+                    >
+                        <UIcon name="i-heroicons-x-mark" class="h-6 w-6" />
+                    </button>
+                    <img
+                        :src="taskImagePreviewUrl"
+                        alt=""
+                        class="max-h-[90vh] max-w-full object-contain shadow-2xl"
+                        @click.stop
+                    />
                 </div>
             </Transition>
         </Teleport>

@@ -1,35 +1,57 @@
 <script setup lang="ts">
 import type { XhsProduct } from "@/types/xhs";
 
+const MAX_IMAGES = 9;
+
 interface Props {
     isOpen: boolean;
     title: string;
     content: string;
     product: XhsProduct;
+    /** 笔记配图 URL 列表（与批量生成页一致，可编辑） */
+    coverImages?: string[];
 }
 
 interface Emits {
     (e: "close"): void;
-    (e: "save", data: { title: string; content: string }): void;
+    (e: "save", data: { title: string; content: string; coverImages: string[] }): void;
     (e: "publish"): void;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+    coverImages: () => [],
+});
 const emit = defineEmits<Emits>();
+
+const toast = useMessage();
 
 // 编辑状态
 const isEditing = ref(false);
 const editTitle = ref(props.title);
 const editContent = ref(props.content);
 
+// 配图（弹窗内可增删）
+const editImages = ref<string[]>([]);
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const isUploading = ref(false);
+
+const syncEditImagesFromProps = () => {
+    const fromProp = props.coverImages?.length
+        ? [...props.coverImages]
+        : [];
+    if (fromProp.length > 0) {
+        editImages.value = [...new Set(fromProp)].slice(0, MAX_IMAGES);
+        return;
+    }
+    const fallback: string[] = [];
+    if (props.product.imageUrl) fallback.push(props.product.imageUrl);
+    if (props.product.extraImages?.length) fallback.push(...props.product.extraImages);
+    editImages.value = [...new Set(fallback)].slice(0, MAX_IMAGES);
+};
+
 // 图片轮播
 const currentImageIndex = ref(0);
-const images = computed(() => {
-    const imgs: string[] = [];
-    if (props.product.imageUrl) imgs.push(props.product.imageUrl);
-    if (props.product.extraImages?.length) imgs.push(...props.product.extraImages);
-    return imgs;
-});
+const images = computed(() => editImages.value);
 
 // 监听 props 变化更新编辑内容
 watch(
@@ -44,6 +66,20 @@ watch(
     (newVal) => {
         editContent.value = newVal;
     },
+);
+
+// 首次挂载时 isOpen 可能已是 true，必须用 immediate，否则会跳过 sync，配图一直为空
+watch(
+    () => props.isOpen,
+    (open) => {
+        if (open) {
+            editTitle.value = props.title;
+            editContent.value = props.content;
+            syncEditImagesFromProps();
+            currentImageIndex.value = 0;
+        }
+    },
+    { immediate: true },
 );
 
 // 切换到上一张图片
@@ -70,21 +106,86 @@ const nextImage = (e: Event) => {
 const toggleEdit = () => {
     isEditing.value = !isEditing.value;
     if (!isEditing.value) {
-        // 取消编辑，恢复原值
         editTitle.value = props.title;
         editContent.value = props.content;
+        syncEditImagesFromProps();
+    }
+};
+
+const removeImage = (index: number) => {
+    editImages.value.splice(index, 1);
+    if (currentImageIndex.value >= editImages.value.length) {
+        currentImageIndex.value = Math.max(0, editImages.value.length - 1);
+    }
+};
+
+const openFilePicker = () => {
+    if (editImages.value.length >= MAX_IMAGES) {
+        toast.warning(`最多 ${MAX_IMAGES} 张图片`);
+        return;
+    }
+    fileInputRef.value?.click();
+};
+
+const onFileChange = async (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+
+    const validTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    if (!validTypes.includes(file.type)) {
+        toast.error("只支持 JPG、PNG、GIF、WEBP");
+        return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+        toast.error("单张图片不能超过 5MB");
+        return;
+    }
+    if (editImages.value.length >= MAX_IMAGES) return;
+
+    isUploading.value = true;
+    try {
+        const userStore = useUserStore();
+        const authToken = userStore.token || userStore.temporaryToken;
+        if (!authToken) {
+            toast.error("请先登录");
+            return;
+        }
+        const formData = new FormData();
+        formData.append("file", file);
+        const response = await fetch("/api/xhs/images/upload", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${authToken}` },
+            body: formData,
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.message || "上传失败");
+        }
+        const result = await response.json();
+        const imageUrl = result?.data?.data?.url;
+        if (imageUrl) {
+            const absoluteUrl = imageUrl.startsWith("/") ? imageUrl : `/${imageUrl}`;
+            editImages.value.push(absoluteUrl);
+            toast.success("图片已添加");
+        } else {
+            toast.error("上传成功但未返回图片地址");
+        }
+    } catch (err) {
+        toast.error(err instanceof Error ? err.message : "上传失败");
+    } finally {
+        isUploading.value = false;
     }
 };
 
 // 保存编辑
 const handleSave = () => {
     if (!editTitle.value.trim()) {
-        const toast = useMessage();
         toast.warning("标题不能为空");
         return;
     }
     if (!editContent.value.trim()) {
-        const toast = useMessage();
         toast.warning("内容不能为空");
         return;
     }
@@ -92,6 +193,7 @@ const handleSave = () => {
     emit("save", {
         title: editTitle.value,
         content: editContent.value,
+        coverImages: [...editImages.value].slice(0, MAX_IMAGES),
     });
     isEditing.value = false;
 };
@@ -100,6 +202,7 @@ const handleSave = () => {
 const handleClose = () => {
     isEditing.value = false;
     currentImageIndex.value = 0;
+    syncEditImagesFromProps();
     emit("close");
 };
 
@@ -234,6 +337,53 @@ const handlePublish = () => {
                                 />
                                 <p class="mt-2 text-sm text-gray-500">暂无图片</p>
                             </div>
+                        </div>
+
+                        <!-- 配图管理（与发布到小红书一致） -->
+                        <div class="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                            <p class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                                配图（最多 {{ MAX_IMAGES }} 张，发布时使用此列表）
+                            </p>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <div
+                                    v-for="(imgUrl, idx) in editImages"
+                                    :key="`${imgUrl}-${idx}`"
+                                    class="group relative h-12 w-12"
+                                >
+                                    <img
+                                        :src="imgUrl"
+                                        alt=""
+                                        class="h-full w-full rounded-md border border-gray-200 object-cover dark:border-gray-600"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="absolute inset-0 flex items-center justify-center rounded-md bg-black/50 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                                        @click.stop="removeImage(idx)"
+                                    >
+                                        <UIcon name="i-heroicons-trash" class="h-4 w-4" />
+                                    </button>
+                                </div>
+                                <button
+                                    v-if="editImages.length < MAX_IMAGES"
+                                    type="button"
+                                    :disabled="isUploading"
+                                    class="flex h-12 w-12 items-center justify-center rounded-md border-2 border-dashed border-gray-300 text-gray-400 hover:border-primary-500 hover:text-primary-500 disabled:opacity-50 dark:border-gray-600"
+                                    @click="openFilePicker"
+                                >
+                                    <UIcon
+                                        :name="isUploading ? 'i-heroicons-arrow-path' : 'i-heroicons-plus'"
+                                        class="h-5 w-5"
+                                        :class="{ 'animate-spin': isUploading }"
+                                    />
+                                </button>
+                            </div>
+                            <input
+                                ref="fileInputRef"
+                                type="file"
+                                accept="image/jpeg,image/png,image/gif,image/webp"
+                                class="hidden"
+                                @change="onFileChange"
+                            />
                         </div>
 
                         <!-- 笔记内容 -->

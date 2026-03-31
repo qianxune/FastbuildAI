@@ -341,14 +341,17 @@ export class XhsPublishScheduleService {
                     throw new Error("笔记不存在");
                 }
 
-                // 获取关联商品名称（用于小红书挂商品）
-                let productSearchTitle: string | undefined;
+                // 关联商品的妙手/外部商品 ID（用于小红书挂商品）
+                let productSearchId: string | undefined;
                 if (note.productId) {
                     const product = await this.productRepository.findOne({
                         where: { id: note.productId },
-                        select: ["name"],
+                        select: ["externalProductId"],
                     });
-                    productSearchTitle = product?.name;
+                    const ext = product?.externalProductId?.trim();
+                    if (ext) {
+                        productSearchId = ext;
+                    }
                 }
 
                 // 准备图片列表
@@ -362,7 +365,7 @@ export class XhsPublishScheduleService {
                     title: note.title,
                     content: note.content,
                     images,
-                    productSearchTitle,
+                    productSearchId,
                 });
 
                 if (result.success) {
