@@ -232,7 +232,7 @@ const handlePublish = () => {
     <Teleport to="body">
         <div
             v-if="props.isOpen"
-            class="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            class="xhs-theme fixed inset-0 z-[100] flex items-center justify-center p-4"
             @click.self="handleClose"
         >
             <!-- 遮罩层 -->
@@ -241,33 +241,38 @@ const handlePublish = () => {
             <!-- 内容区域 -->
             <div class="relative mx-auto w-full max-w-md">
                 <!-- 手机外壳 -->
-                <div class="overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-gray-900">
+                <div
+                    class="overflow-hidden rounded-3xl shadow-2xl"
+                    style="background: var(--xhs-card)"
+                >
                     <!-- 手机顶部状态栏 -->
-                    <div
-                        class="flex items-center justify-between bg-white px-4 py-2 dark:bg-gray-900"
-                    >
-                        <div class="flex items-center gap-1 text-xs text-gray-900 dark:text-white">
+                    <div class="flex items-center justify-between px-4 py-2" style="background: var(--xhs-card)">
+                        <div class="flex items-center gap-1 text-xs" style="color: var(--xhs-text)">
                             <span>9:41</span>
                         </div>
                         <div class="flex items-center gap-2">
                             <UIcon
                                 name="i-heroicons-signal"
-                                class="h-4 w-4 text-gray-900 dark:text-white"
+                                class="h-4 w-4"
+                                style="color: var(--xhs-text)"
                             />
                             <UIcon
                                 name="i-heroicons-wifi"
-                                class="h-4 w-4 text-gray-900 dark:text-white"
+                                class="h-4 w-4"
+                                style="color: var(--xhs-text)"
                             />
                             <UIcon
                                 name="i-heroicons-battery-100"
-                                class="h-4 w-4 text-gray-900 dark:text-white"
+                                class="h-4 w-4"
+                                style="color: var(--xhs-text)"
                             />
                         </div>
                     </div>
 
                     <!-- 导航栏 -->
                     <div
-                        class="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900"
+                        class="flex items-center justify-between border-b px-4 py-3"
+                        style="border-color: var(--xhs-border); background: var(--xhs-card)"
                     >
                         <UButton
                             variant="ghost"
@@ -276,9 +281,7 @@ const handlePublish = () => {
                             size="sm"
                             @click="handleClose"
                         />
-                        <span class="text-sm font-medium text-gray-900 dark:text-white"
-                            >笔记预览</span
-                        >
+                        <span class="text-sm font-medium" style="color: var(--xhs-text)">笔记预览</span>
                         <UButton
                             variant="ghost"
                             color="neutral"
@@ -288,11 +291,12 @@ const handlePublish = () => {
                     </div>
 
                     <!-- 内容区域 -->
-                    <div class="max-h-[600px] overflow-y-auto bg-white dark:bg-gray-900">
+                    <div class="max-h-[600px] overflow-y-auto" style="background: var(--xhs-card)">
                         <!-- 图片轮播 -->
                         <div
                             v-if="images.length > 0"
-                            class="relative aspect-square w-full bg-gray-100 dark:bg-gray-800"
+                            class="relative aspect-square w-full"
+                            style="background: var(--xhs-muted-bg)"
                         >
                             <img
                                 :src="images[currentImageIndex]"
@@ -344,20 +348,22 @@ const handlePublish = () => {
                         <!-- 无图片占位 -->
                         <div
                             v-else
-                            class="flex aspect-square w-full items-center justify-center bg-gray-100 dark:bg-gray-800"
+                            class="flex aspect-square w-full items-center justify-center"
+                            style="background: var(--xhs-muted-bg)"
                         >
                             <div class="text-center">
                                 <UIcon
                                     name="i-heroicons-photo"
-                                    class="mx-auto h-16 w-16 text-gray-400"
+                                    class="mx-auto h-16 w-16"
+                                    style="color: var(--xhs-text-soft)"
                                 />
-                                <p class="mt-2 text-sm text-gray-500">暂无图片</p>
+                                <p class="mt-2 text-sm" style="color: var(--xhs-text-muted)">暂无图片</p>
                             </div>
                         </div>
 
                         <!-- 配图管理（与发布到小红书一致） -->
-                        <div class="border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-                            <p class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                        <div class="border-b px-4 py-3" style="border-color: var(--xhs-border)">
+                            <p class="mb-2 text-xs font-medium" style="color: var(--xhs-text-muted)">
                                 配图（最多 {{ MAX_IMAGES }} 张，发布时使用此列表）
                             </p>
                             <div class="flex flex-wrap items-center gap-2">
@@ -369,7 +375,8 @@ const handlePublish = () => {
                                     <img
                                         :src="imgUrl"
                                         alt=""
-                                        class="h-full w-full rounded-md border border-gray-200 object-cover dark:border-gray-600"
+                                        class="h-full w-full rounded-md border object-cover"
+                                        style="border-color: var(--xhs-border)"
                                     />
                                     <button
                                         type="button"
@@ -383,7 +390,7 @@ const handlePublish = () => {
                                     v-if="editImages.length < MAX_IMAGES"
                                     type="button"
                                     :disabled="isUploading"
-                                    class="flex h-12 w-12 items-center justify-center rounded-md border-2 border-dashed border-gray-300 text-gray-400 hover:border-primary-500 hover:text-primary-500 disabled:opacity-50 dark:border-gray-600"
+                                    class="flex h-12 w-12 items-center justify-center rounded-md border-2 border-dashed border-[color:var(--xhs-border)] text-[color:var(--xhs-text-soft)] hover:border-[color:var(--xhs-brand)] hover:text-[color:var(--xhs-brand)] disabled:opacity-50"
                                     @click="openFilePicker"
                                 >
                                     <UIcon
@@ -408,7 +415,8 @@ const handlePublish = () => {
                             <div class="mb-3">
                                 <div
                                     v-if="!isEditing"
-                                    class="text-lg font-semibold text-gray-900 dark:text-white"
+                                    class="text-lg font-semibold"
+                                    style="color: var(--xhs-text)"
                                 >
                                     {{ editTitle }}
                                 </div>
@@ -417,7 +425,12 @@ const handlePublish = () => {
                                     v-model="editTitle"
                                     rows="2"
                                     placeholder="输入标题..."
-                                    class="focus:border-primary-500 focus:ring-primary-500/20 w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-lg font-semibold focus:ring-2 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                                    class="w-full resize-none rounded-lg border px-3 py-2 text-lg font-semibold focus:border-[color:var(--xhs-brand)] focus:ring-2 focus:ring-[color:var(--xhs-brand)]/20 focus:outline-none"
+                                    style="
+                                        border-color: var(--xhs-border);
+                                        background: var(--xhs-card);
+                                        color: var(--xhs-text);
+                                    "
                                 />
                             </div>
 
@@ -425,7 +438,8 @@ const handlePublish = () => {
                             <div class="mb-4">
                                 <div
                                     v-if="!isEditing"
-                                    class="text-sm leading-relaxed whitespace-pre-wrap text-gray-700 dark:text-gray-300"
+                                    class="text-sm leading-relaxed whitespace-pre-wrap"
+                                    style="color: var(--xhs-text)"
                                 >
                                     {{ editContent }}
                                 </div>
@@ -434,13 +448,22 @@ const handlePublish = () => {
                                     v-model="editContent"
                                     rows="8"
                                     placeholder="输入正文内容..."
-                                    class="focus:border-primary-500 focus:ring-primary-500/20 w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm leading-relaxed focus:ring-2 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                                    class="w-full resize-none rounded-lg border px-3 py-2 text-sm leading-relaxed focus:border-[color:var(--xhs-brand)] focus:ring-2 focus:ring-[color:var(--xhs-brand)]/20 focus:outline-none"
+                                    style="
+                                        border-color: var(--xhs-border);
+                                        background: var(--xhs-card);
+                                        color: var(--xhs-text);
+                                    "
                                 />
                             </div>
 
                             <!-- 商品信息卡片 -->
                             <div
-                                class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800"
+                                class="rounded-lg border p-3"
+                                style="
+                                    border-color: var(--xhs-border);
+                                    background: var(--xhs-muted-bg);
+                                "
                             >
                                 <div class="flex items-center gap-3">
                                     <img
@@ -450,20 +473,20 @@ const handlePublish = () => {
                                         class="h-16 w-16 flex-shrink-0 rounded object-cover"
                                     />
                                     <div class="min-w-0 flex-1">
-                                        <p
-                                            class="truncate text-sm font-medium text-gray-900 dark:text-white"
-                                        >
+                                        <p class="truncate text-sm font-medium" style="color: var(--xhs-text)">
                                             {{ props.product.name }}
                                         </p>
                                         <p
                                             v-if="props.product.spec"
-                                            class="truncate text-xs text-gray-600 dark:text-gray-400"
+                                            class="truncate text-xs"
+                                            style="color: var(--xhs-text-muted)"
                                         >
                                             {{ props.product.spec }}
                                         </p>
                                         <p
                                             v-if="props.product.price"
-                                            class="mt-1 text-sm font-semibold text-red-600"
+                                            class="mt-1 text-sm font-semibold"
+                                            style="color: var(--xhs-brand)"
                                         >
                                             ¥{{ props.product.price }}
                                         </p>
@@ -478,7 +501,8 @@ const handlePublish = () => {
 
                     <!-- 底部操作栏 -->
                     <div
-                        class="border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900"
+                        class="border-t px-4 py-3"
+                        style="border-color: var(--xhs-border); background: var(--xhs-card)"
                     >
                         <div v-if="!isEditing" class="flex gap-2">
                             <UButton

@@ -118,16 +118,18 @@ const modeColor = computed(() => getModeColor(props.note.mode));
     <!-- 列表模式 -->
     <UCard
         v-if="props.listMode"
-        class="group cursor-pointer transition-shadow duration-200 hover:shadow-md"
+        class="group !rounded-2xl shadow-[var(--xhs-shadow-card)] transition-shadow duration-200 hover:shadow-[var(--xhs-shadow-card-hover)]"
         :class="{
-            'ring-primary-500 ring-2': props.isSelected,
-            'hover:ring-1 hover:ring-gray-300': !props.showCheckbox,
+            'ring-2 ring-[color:var(--xhs-brand)]': props.isSelected,
+            'hover:ring-1 hover:ring-[color:var(--xhs-border)]': !props.showCheckbox,
         }"
         @click="handleCardClick"
     >
         <div class="flex items-start gap-4">
             <!-- 左侧：封面图 -->
-            <div class="relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800">
+            <div
+                class="relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-xl bg-[color:var(--xhs-muted-bg)] dark:bg-[color:var(--xhs-muted-bg)]"
+            >
                 <img
                     v-if="props.note.coverImages && props.note.coverImages.length > 0"
                     :src="props.note.coverImages[0]"
@@ -157,7 +159,10 @@ const modeColor = computed(() => getModeColor(props.note.mode));
                             @change="handleCheckboxChange"
                             @click.stop
                         />
-                        <h3 class="truncate text-base font-semibold text-gray-900 dark:text-white" :title="props.note.title">
+                        <h3
+                            class="truncate text-base font-semibold text-[color:var(--xhs-text)]"
+                            :title="props.note.title"
+                        >
                             {{ props.note.title }}
                         </h3>
                     </div>
@@ -175,11 +180,11 @@ const modeColor = computed(() => getModeColor(props.note.mode));
                     </div>
                 </div>
 
-                <p class="mt-1 line-clamp-2 text-sm text-gray-600 dark:text-gray-400">
+                <p class="mt-1 line-clamp-2 text-sm text-[color:var(--xhs-text-muted)]">
                     {{ contentPreview }}
                 </p>
 
-                <div class="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <div class="mt-2 flex flex-wrap items-center gap-4 text-xs text-[color:var(--xhs-text-muted)]">
                     <span class="flex items-center gap-1">
                         <UIcon name="i-heroicons-document-text" class="h-3 w-3" />
                         {{ props.note.wordCount || props.note.content.length }}字
@@ -207,10 +212,10 @@ const modeColor = computed(() => getModeColor(props.note.mode));
     <!-- 网格模式（默认） -->
     <UCard
         v-else
-        class="group cursor-pointer transition-shadow duration-200 hover:shadow-md"
+        class="group !rounded-2xl shadow-[var(--xhs-shadow-card)] transition-shadow duration-200 hover:shadow-[var(--xhs-shadow-card-hover)]"
         :class="{
-            'ring-primary-500 ring-2': props.isSelected,
-            'hover:ring-1 hover:ring-gray-300': !props.showCheckbox,
+            'ring-2 ring-[color:var(--xhs-brand)]': props.isSelected,
+            'hover:ring-1 hover:ring-[color:var(--xhs-border)]': !props.showCheckbox,
         }"
         @click="handleCardClick"
     >
@@ -224,7 +229,10 @@ const modeColor = computed(() => getModeColor(props.note.mode));
                         @change="handleCheckboxChange"
                         @click.stop
                     />
-                    <h3 class="flex-1 truncate text-lg font-semibold text-gray-900 dark:text-white" :title="props.note.title">
+                    <h3
+                        class="flex-1 truncate text-lg font-semibold text-[color:var(--xhs-text)]"
+                        :title="props.note.title"
+                    >
                         {{ props.note.title }}
                     </h3>
                 </div>
@@ -250,7 +258,7 @@ const modeColor = computed(() => getModeColor(props.note.mode));
                 <div
                     v-for="(image, index) in props.note.coverImages.slice(0, 3)"
                     :key="index"
-                    class="relative h-16 w-16 overflow-hidden rounded-md bg-gray-100 dark:bg-gray-800"
+                    class="relative h-16 w-16 overflow-hidden rounded-xl bg-[color:var(--xhs-muted-bg)]"
                 >
                     <img
                         :src="image"
@@ -261,19 +269,22 @@ const modeColor = computed(() => getModeColor(props.note.mode));
                 </div>
                 <div
                     v-if="props.note.coverImages.length > 3"
-                    class="flex h-16 w-16 items-center justify-center rounded-md bg-gray-100 dark:bg-gray-800"
+                    class="flex h-16 w-16 items-center justify-center rounded-xl bg-[color:var(--xhs-muted-bg)]"
                 >
                     <span class="text-xs text-gray-500">+{{ props.note.coverImages.length - 3 }}</span>
                 </div>
             </div>
 
             <!-- Content preview -->
-            <p class="line-clamp-3 text-sm text-gray-600 dark:text-gray-400" :title="props.note.content">
+            <p
+                class="line-clamp-3 text-sm text-[color:var(--xhs-text-muted)]"
+                :title="props.note.content"
+            >
                 {{ contentPreview }}
             </p>
 
             <!-- Footer with metadata -->
-            <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+            <div class="flex items-center justify-between text-xs text-[color:var(--xhs-text-muted)]">
                 <div class="flex items-center space-x-4">
                     <span class="flex items-center space-x-1">
                         <UIcon name="i-heroicons-document-text" class="h-3 w-3" />

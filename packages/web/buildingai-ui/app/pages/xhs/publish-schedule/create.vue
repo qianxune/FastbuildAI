@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { xhsLayoutKey } from "@/constants/xhs-layout";
 import { usePublishSchedule } from "@/composables/usePublishSchedule";
 import type { CreatePublishScheduleDto } from "@/types/xhs";
 
 definePageMeta({
-    layout: false,
+    layout: xhsLayoutKey,
     name: "Create Publish Schedule",
     auth: true,
 });
@@ -155,7 +156,7 @@ const handleCancel = () => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-stone-50 dark:bg-gray-900">
+    <div>
         <div class="container mx-auto px-4 py-8 md:py-10">
             <!-- Header -->
             <header class="mb-8">

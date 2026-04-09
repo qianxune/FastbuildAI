@@ -303,7 +303,8 @@ export const configPresets: ExtendedNuxtConfig = {
     },
     typescript: {
         strict: true,
-        typeCheck: true,
+        /** 构建期 vue-tsc 易在 monorepo / Docker 下误报；单独跑 `nuxt typecheck` 或设 NUXT_BUILD_TYPECHECK=true */
+        typeCheck: process.env.NUXT_BUILD_TYPECHECK === "true",
         tsConfig: {
             compilerOptions: {
                 strictPropertyInitialization: false,

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { GenerationMode } from "@/types/xhs";
+import { xhsLayoutKey } from "@/constants/xhs-layout";
 import { useXhsGenerate } from "@/composables/useXhsGenerate";
 
 // Page metadata configuration
 definePageMeta({
-    layout: false,
+    layout: xhsLayoutKey,
     name: "XHS Note Generator",
     auth: true,
 });
@@ -44,10 +45,30 @@ const generationModes: GenerationMode[] = [
 
 // 功能卡片配置
 const featureCards = [
-    { icon: "🎯", title: "AI一键生成小红书笔记", color: "bg-red-50" },
-    { icon: "📝", title: "批量生成小红书笔记", color: "bg-orange-50" },
-    { icon: "🏆", title: "AI智能美图省时高效", color: "bg-yellow-50" },
-    { icon: "📊", title: "海量图片模板随心用", color: "bg-pink-50" },
+    {
+        icon: "🎯",
+        title: "AI一键生成小红书笔记",
+        cardClass:
+            "border-rose-100/80 bg-rose-50/90 dark:border-rose-900/35 dark:bg-rose-950/25",
+    },
+    {
+        icon: "📝",
+        title: "批量生成小红书笔记",
+        cardClass:
+            "border-orange-100/80 bg-orange-50/90 dark:border-orange-900/35 dark:bg-orange-950/25",
+    },
+    {
+        icon: "🏆",
+        title: "AI智能美图省时高效",
+        cardClass:
+            "border-amber-100/80 bg-amber-50/90 dark:border-amber-900/35 dark:bg-amber-950/25",
+    },
+    {
+        icon: "📊",
+        title: "海量图片模板随心用",
+        cardClass:
+            "border-pink-100/80 bg-pink-50/90 dark:border-pink-900/35 dark:bg-pink-950/25",
+    },
 ];
 
 // 获取输入框占位符文本
@@ -116,32 +137,41 @@ const goToBatchGenerate = () => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-stone-50 dark:bg-gray-900">
+    <div>
         <!-- Main Content -->
         <div class="container mx-auto max-w-5xl px-4 py-10 md:py-12">
             <!-- Header Section -->
             <header class="mb-10 text-center md:mb-12">
                 <!-- Brand Logo -->
                 <div
-                    class="mb-5 inline-flex items-center gap-2 rounded-xl bg-red-500 px-5 py-2.5 text-white shadow-sm"
+                    class="mb-5 inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-white shadow-[var(--xhs-shadow-card)]"
+                    style="background-color: var(--xhs-brand)"
                 >
                     <span class="text-lg font-bold tracking-tight">AI小红书</span>
                 </div>
 
                 <!-- Main Title -->
-                <h1 class="mb-4 text-3xl font-bold tracking-tight text-stone-900 md:text-4xl dark:text-white">
-                    一键「<span class="text-red-500">智创</span>」爆款小红书笔记
+                <h1
+                    class="mb-4 text-3xl font-bold tracking-tight md:text-4xl"
+                    style="color: var(--xhs-text)"
+                >
+                    一键「<span style="color: var(--xhs-brand)">智创</span>」爆款小红书笔记
                 </h1>
 
                 <!-- Subtitle -->
-                <p class="text-lg text-stone-600 dark:text-gray-400">
+                <p class="text-lg" style="color: var(--xhs-text-muted)">
                     输入你的内容主题，让AI为你服务到底
                 </p>
             </header>
 
             <!-- Generation Card -->
             <section
-                class="mb-10 rounded-2xl border border-stone-200/80 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800 md:p-8 md:mb-12"
+                class="mb-10 rounded-2xl border p-6 md:mb-12 md:p-8"
+                style="
+                    border-color: var(--xhs-border);
+                    background: var(--xhs-card);
+                    box-shadow: var(--xhs-shadow-card);
+                "
             >
                 <!-- Top Right Quick Actions -->
                 <div class="mb-5 flex justify-end gap-3">
@@ -164,8 +194,8 @@ const goToBatchGenerate = () => {
                         :class="[
                             'rounded-full px-5 py-2.5 text-sm font-semibold transition-all',
                             mode === m.key
-                                ? 'bg-red-500 text-white shadow-sm'
-                                : 'bg-stone-100 text-stone-600 hover:bg-stone-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600',
+                                ? 'bg-[color:var(--xhs-brand)] text-white shadow-sm'
+                                : 'bg-[color:var(--xhs-muted-bg)] text-[color:var(--xhs-text-muted)] hover:bg-[color:var(--xhs-hover-bg)]',
                         ]"
                     >
                         {{ m.label }}
@@ -175,18 +205,21 @@ const goToBatchGenerate = () => {
                 <!-- Input Area -->
                 <div class="relative mb-5">
                     <div
-                        class="flex items-center overflow-hidden rounded-xl border border-stone-200 dark:border-gray-600"
+                        class="flex items-center overflow-hidden rounded-2xl border"
+                        style="border-color: var(--xhs-border)"
                     >
                         <input
                             v-model="content"
                             type="text"
                             :placeholder="inputPlaceholder"
-                            class="min-w-0 flex-1 border-none bg-transparent px-4 py-4 text-base text-stone-900 placeholder-stone-400 outline-none dark:text-white"
+                            class="min-w-0 flex-1 border-none bg-transparent px-4 py-4 text-base outline-none placeholder:text-[color:var(--xhs-text-soft)]"
+                            style="color: var(--xhs-text)"
                         />
 
                         <!-- Generate Button -->
                         <div
-                            class="flex shrink-0 items-center gap-3 border-l border-stone-200 px-4 dark:border-gray-600"
+                            class="flex shrink-0 items-center gap-3 border-l px-4"
+                            style="border-color: var(--xhs-border)"
                         >
                             <UButton
                                 color="primary"
@@ -194,7 +227,7 @@ const goToBatchGenerate = () => {
                                 :loading="isGenerating"
                                 :disabled="isInputEmpty"
                                 @click="handleGenerate"
-                                class="rounded-lg bg-gradient-to-r from-red-500 to-orange-500 px-6 hover:from-red-600 hover:to-orange-600"
+                                class="rounded-xl bg-gradient-to-r px-6 from-[color:var(--xhs-brand)] to-[color:var(--xhs-brand-2)] hover:from-[color:var(--xhs-brand-hover)] hover:to-[color:var(--xhs-brand-2-hover)]"
                             >
                                 {{ isGenerating ? "生成中..." : "自动生成(消耗1字)" }}
                             </UButton>
@@ -257,18 +290,25 @@ const goToBatchGenerate = () => {
             <!-- Generated Content Display (when available) -->
             <section
                 v-if="generatedTitle || generatedContent"
-                class="mb-10 rounded-2xl border border-stone-200/80 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800 md:mb-12 md:p-8"
+                class="mb-10 rounded-2xl border p-6 md:mb-12 md:p-8"
+                style="
+                    border-color: var(--xhs-border);
+                    background: var(--xhs-card);
+                    box-shadow: var(--xhs-shadow-card);
+                "
             >
-                <h3 class="mb-5 text-xl font-semibold tracking-tight text-stone-900 dark:text-white">生成结果</h3>
+                <h3 class="mb-5 text-xl font-semibold tracking-tight" style="color: var(--xhs-text)">
+                    生成结果
+                </h3>
 
                 <!-- Title Section -->
                 <div v-if="generatedTitle" class="mb-5">
                     <div class="mb-2 flex items-center justify-between gap-3">
-                        <span class="text-sm font-medium text-stone-500 dark:text-gray-400">标题</span>
+                        <span class="text-sm font-medium" style="color: var(--xhs-text-muted)">标题</span>
                         <UButton variant="ghost" size="xs" @click="copyTitle">复制标题</UButton>
                     </div>
-                    <div class="rounded-xl bg-stone-50 p-4 dark:bg-gray-700/50">
-                        <p class="text-lg font-semibold leading-snug text-stone-900 dark:text-white">
+                    <div class="rounded-xl p-4" style="background: var(--xhs-muted-bg)">
+                        <p class="text-lg font-semibold leading-snug" style="color: var(--xhs-text)">
                             {{ generatedTitle }}
                         </p>
                     </div>
@@ -277,11 +317,14 @@ const goToBatchGenerate = () => {
                 <!-- Content Section -->
                 <div v-if="generatedContent" class="mb-5">
                     <div class="mb-2 flex items-center justify-between gap-3">
-                        <span class="text-sm font-medium text-stone-500 dark:text-gray-400">正文</span>
+                        <span class="text-sm font-medium" style="color: var(--xhs-text-muted)">正文</span>
                         <UButton variant="ghost" size="xs" @click="copyContent">复制正文</UButton>
                     </div>
-                    <div class="rounded-xl bg-stone-50 p-4 dark:bg-gray-700/50">
-                        <div class="whitespace-pre-wrap text-base leading-relaxed text-stone-800 dark:text-gray-100">
+                    <div class="rounded-xl p-4" style="background: var(--xhs-muted-bg)">
+                        <div
+                            class="whitespace-pre-wrap text-base leading-relaxed"
+                            style="color: var(--xhs-text)"
+                        >
                             {{ generatedContent }}
                         </div>
                     </div>
@@ -310,13 +353,12 @@ const goToBatchGenerate = () => {
                     v-for="(card, index) in featureCards"
                     :key="index"
                     :class="[
-                        'cursor-pointer rounded-2xl border p-6 text-center transition-shadow hover:shadow-md focus-within:ring-2 focus-within:ring-red-500/20 dark:border-gray-700',
-                        card.color,
-                        'border-stone-200/80 dark:bg-gray-800',
+                        'cursor-pointer rounded-2xl border p-6 text-center shadow-[var(--xhs-shadow-card)] transition-shadow hover:shadow-[var(--xhs-shadow-card-hover)] focus-within:ring-2 focus-within:ring-[color:var(--xhs-brand)]/25',
+                        card.cardClass,
                     ]"
                 >
                     <div class="mb-3 text-3xl" aria-hidden="true">{{ card.icon }}</div>
-                    <p class="text-sm font-semibold text-stone-700 dark:text-gray-300">
+                    <p class="text-sm font-semibold" style="color: var(--xhs-text)">
                         {{ card.title }}
                     </p>
                 </div>

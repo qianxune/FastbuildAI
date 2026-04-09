@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { xhsLayoutKey } from "@/constants/xhs-layout";
+
 definePageMeta({
-    layout: false,
+    layout: xhsLayoutKey,
     name: "XHS Prompt Templates",
     auth: true,
 });
@@ -258,7 +260,7 @@ onMounted(async () => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-stone-50 dark:bg-gray-900">
+    <div>
         <div class="container mx-auto px-4 py-8 md:py-10">
             <!-- 页头 -->
             <header class="mb-8 md:mb-10 flex flex-wrap items-center justify-between gap-4">

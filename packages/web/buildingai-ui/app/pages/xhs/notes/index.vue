@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { XhsNote } from "@/types/xhs";
+import { xhsLayoutKey } from "@/constants/xhs-layout";
 import NoteCard from "@/components/xhs/note-card.vue";
 import GroupManager from "@/components/xhs/group-manager.vue";
 
 // Page metadata configuration
 definePageMeta({
-    layout: false,
+    layout: xhsLayoutKey,
     name: "XHS Notes List",
     auth: true, // Require authentication as per requirements
 });
@@ -342,7 +343,7 @@ const getGroupNoteCount = (groupId: string | undefined) => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-stone-50 dark:bg-gray-900">
+    <div>
         <div class="container mx-auto px-4 py-8 md:py-10">
             <!-- Page Header -->
             <header class="mb-8 md:mb-10">

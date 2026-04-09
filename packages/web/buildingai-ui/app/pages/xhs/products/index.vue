@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { XhsProduct, XhsProductGroup } from "@/types/xhs";
+import { xhsLayoutKey } from "@/constants/xhs-layout";
 import { apiGetAiProviders, type AiModel } from "@buildingai/service/webapi/ai-conversation";
 import { useXhsProducts } from "~/composables/useXhsProducts";
 
 definePageMeta({
-    layout: false,
+    layout: xhsLayoutKey,
     name: "XHS Products List",
     auth: true,
 });
@@ -749,7 +750,6 @@ const doConfirmDelete = async () => {
 
 <template>
     <div
-        class="min-h-screen bg-stone-50 dark:bg-gray-900"
         :class="{
             'pb-16': hasSelected && !previewExpanded,
             'pb-[66vh]': hasSelected && previewExpanded,

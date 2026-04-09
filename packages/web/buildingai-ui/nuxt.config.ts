@@ -51,7 +51,7 @@ export default defineBuildingAIConfig({
         },
     },
 
-    css: ["assets/styles/globals.css"],
+    css: ["assets/styles/globals.css", "assets/styles/xhs-theme.css"],
 
     spaLoadingTemplate: "../public/spa-loading-template.html",
 

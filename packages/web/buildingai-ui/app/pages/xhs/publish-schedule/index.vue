@@ -4,10 +4,11 @@ import type {
     PublishScheduleStatus,
     PublishScheduleItem,
 } from "@/types/xhs";
+import { xhsLayoutKey } from "@/constants/xhs-layout";
 import { usePublishSchedule } from "@/composables/usePublishSchedule";
 
 definePageMeta({
-    layout: false,
+    layout: xhsLayoutKey,
     name: "Publish Schedule List",
     auth: true,
 });
@@ -238,7 +239,7 @@ const goBack = () => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-stone-50 dark:bg-gray-900">
+    <div>
         <div class="container mx-auto px-4 py-8 md:py-10">
             <!-- Header -->
             <header class="mb-8 flex flex-wrap items-center justify-between gap-4">

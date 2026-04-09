@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { XhsProduct } from "@/types/xhs";
+import { xhsLayoutKey } from "@/constants/xhs-layout";
 import { useXhsPublish } from "@/composables/useXhsPublish";
 import NotePreviewModal from "@/components/xhs/note-preview-modal.vue";
 import { onKeyStroke } from "@vueuse/core";
 
 definePageMeta({
-    layout: false,
+    layout: xhsLayoutKey,
     name: "XHS Batch Generate",
     auth: true,
 });
@@ -714,13 +715,20 @@ const closePreviewModal = () => {
     currentTask.value = null;
 };
 
-// 保存编辑后的内容（含配图）
-const handleSaveEdit = (data: { title: string; content: string; coverImages: string[] }) => {
+// 保存编辑后的内容（含配图）；silent 为 true 时表示发布前静默同步，不弹「内容已更新」
+const handleSaveEdit = (data: {
+    title: string;
+    content: string;
+    coverImages: string[];
+    silent?: boolean;
+}) => {
     if (currentTask.value) {
         currentTask.value.title = data.title;
         currentTask.value.content = data.content;
         currentTask.value.coverImages = [...data.coverImages].slice(0, MAX_NOTE_IMAGES);
-        toast.success("内容已更新");
+        if (!data.silent) {
+            toast.success("内容已更新");
+        }
     }
 };
 
@@ -972,7 +980,7 @@ const getStatusColor = (status: string) => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-stone-50 dark:bg-gray-900">
+    <div>
         <div class="container mx-auto px-4 py-8 md:py-10">
             <!-- Header -->
             <header class="mb-8 md:mb-10 flex flex-wrap items-center justify-between gap-4">

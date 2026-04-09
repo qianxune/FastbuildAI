@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { XhsNote } from '../../types/xhs'
 import type { AiModel } from '@buildingai/service/webapi/ai-conversation'
+import { xhsLayoutKey } from '@/constants/xhs-layout'
 import { useXhsGenerate } from '../../composables/useXhsGenerate'
 import { useAuthFetch } from '../../composables/useAuthFetch'
 import { useXhsProducts } from '~/composables/useXhsProducts'
 
 definePageMeta({
-  layout: false,
+  layout: xhsLayoutKey,
     name: "XHS Note Create",
     auth: true,
 });
@@ -128,7 +129,7 @@ const templateCategories = [
     {
         key: "ootd",
         label: "OOTD",
-        color: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+        color: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400",
     },
     {
         key: "share",
@@ -1046,11 +1047,11 @@ const doPublish = async () => {
 
 <template>
     <!-- 外层整页灰底，三栏（左菜单+编辑区+右操作）放在居中容器内，靠近编辑区 -->
-    <div class="flex h-screen items-stretch bg-slate-200 dark:bg-slate-900">
+    <div class="flex h-screen items-stretch bg-[color:var(--xhs-chrome-bg)]">
         <div class="mx-auto flex h-full w-full max-w-[1100px] shadow-lg">
 
         <!-- 1. 左侧菜单栏（精简版，w-14） -->
-        <div class="flex w-14 flex-shrink-0 flex-col items-center border-r border-slate-200 bg-white py-3 dark:border-slate-700 dark:bg-slate-800">
+        <div class="flex w-14 flex-shrink-0 flex-col items-center border-r border-[color:var(--xhs-border)] bg-white py-3 dark:border-[color:var(--xhs-border)] dark:bg-[color:var(--xhs-card)]">
             <button
                 v-for="item in menuItems"
                 :key="item.key"
@@ -1058,8 +1059,8 @@ const doPublish = async () => {
                 :class="[
                     'mb-1 flex h-12 w-12 cursor-pointer flex-col items-center justify-center rounded-lg transition-all duration-200',
                     activeMenu === item.key
-                        ? 'bg-blue-50 text-blue-600 shadow-sm dark:bg-blue-900/30 dark:text-blue-400'
-                        : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700',
+                        ? 'bg-[color:var(--xhs-brand-soft)] text-[color:var(--xhs-brand)] shadow-sm dark:bg-[color:var(--xhs-brand-soft-dark)] dark:text-[color:var(--xhs-brand)]'
+                        : 'text-[color:var(--xhs-text-muted)] hover:bg-[color:var(--xhs-hover-bg)] dark:text-[color:var(--xhs-text-muted)] dark:hover:bg-[color:var(--xhs-hover-bg)]',
                 ]"
                 :title="item.label"
             >
@@ -1071,7 +1072,7 @@ const doPublish = async () => {
 
             <button
                 @click="goToMyNotes"
-                class="flex h-12 w-12 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+                class="flex h-12 w-12 cursor-pointer flex-col items-center justify-center rounded-lg text-[color:var(--xhs-text-muted)] transition-colors duration-200 hover:bg-[color:var(--xhs-hover-bg)] dark:text-[color:var(--xhs-text-muted)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                 title="我的笔记"
             >
                 <UIcon name="i-heroicons-document-text" class="text-lg" />
@@ -1079,7 +1080,7 @@ const doPublish = async () => {
             </button>
             <button
                 @click="goBack"
-                class="mt-1 flex h-12 w-12 cursor-pointer flex-col items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+                class="mt-1 flex h-12 w-12 cursor-pointer flex-col items-center justify-center rounded-lg text-[color:var(--xhs-text-muted)] transition-colors duration-200 hover:bg-[color:var(--xhs-hover-bg)] dark:text-[color:var(--xhs-text-muted)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                 title="返回首页"
             >
                 <UIcon name="i-heroicons-home" class="text-lg" />
@@ -1098,7 +1099,7 @@ const doPublish = async () => {
         >
         <div
             v-if="activeMenu !== null"
-            class="h-full w-72 flex-shrink-0 overflow-y-auto border-r border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800"
+            class="h-full w-72 flex-shrink-0 overflow-y-auto border-r border-[color:var(--xhs-border)] bg-white dark:border-[color:var(--xhs-border)] dark:bg-[color:var(--xhs-card)]"
         >
             <!-- 模版内容 -->
             <div v-if="activeMenu === 'template'" class="p-4">
@@ -1120,15 +1121,15 @@ const doPublish = async () => {
                         v-for="(tpl, idx) in sampleTemplates"
                         :key="idx"
                         @click="insertTemplate(tpl)"
-                        class="cursor-pointer rounded-lg bg-slate-50 p-3 transition-all duration-200 hover:bg-slate-100 hover:shadow-sm dark:bg-slate-700 dark:hover:bg-slate-600"
+                        class="cursor-pointer rounded-lg bg-[color:var(--xhs-muted-bg)] p-3 transition-all duration-200 hover:bg-[color:var(--xhs-hover-bg)] hover:shadow-sm dark:bg-[color:var(--xhs-muted-bg)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                     >
                         <h4
-                            class="mb-1 line-clamp-1 text-sm font-medium text-slate-900 dark:text-white"
+                            class="mb-1 line-clamp-1 text-sm font-medium text-[color:var(--xhs-text)]"
                         >
                             {{ tpl.title }}
                         </h4>
                         <p
-                            class="line-clamp-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400"
+                            class="line-clamp-3 text-xs leading-relaxed text-[color:var(--xhs-text-muted)]"
                         >
                             {{ tpl.preview }}
                         </p>
@@ -1138,28 +1139,28 @@ const doPublish = async () => {
 
             <!-- 格式内容 -->
             <div v-else-if="activeMenu === 'format'" class="p-4">
-                <h3 class="mb-3 text-sm font-semibold text-slate-900 dark:text-white">文本格式</h3>
+                <h3 class="mb-3 text-sm font-semibold text-[color:var(--xhs-text)]">文本格式</h3>
                 <div class="space-y-2">
                     <button
-                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition-colors duration-150 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-[color:var(--xhs-text)] transition-colors duration-150 hover:bg-[color:var(--xhs-hover-bg)] dark:text-[color:var(--xhs-text)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                     >
                         <UIcon name="i-heroicons-bold" class="mr-2 inline-block" />
                         加粗
                     </button>
                     <button
-                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition-colors duration-150 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-[color:var(--xhs-text)] transition-colors duration-150 hover:bg-[color:var(--xhs-hover-bg)] dark:text-[color:var(--xhs-text)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                     >
                         <UIcon name="i-heroicons-italic" class="mr-2 inline-block" />
                         斜体
                     </button>
                     <button
-                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition-colors duration-150 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-[color:var(--xhs-text)] transition-colors duration-150 hover:bg-[color:var(--xhs-hover-bg)] dark:text-[color:var(--xhs-text)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                     >
                         <UIcon name="i-heroicons-underline" class="mr-2 inline-block" />
                         下划线
                     </button>
                     <button
-                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition-colors duration-150 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                        class="w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-[color:var(--xhs-text)] transition-colors duration-150 hover:bg-[color:var(--xhs-hover-bg)] dark:text-[color:var(--xhs-text)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                     >
                         <UIcon name="i-heroicons-minus" class="mr-2 inline-block" />
                         分割线
@@ -1169,13 +1170,13 @@ const doPublish = async () => {
 
             <!-- 表情内容 -->
             <div v-else-if="activeMenu === 'emoji'" class="p-4">
-                <h3 class="mb-3 text-sm font-semibold text-slate-900 dark:text-white">常用表情</h3>
+                <h3 class="mb-3 text-sm font-semibold text-[color:var(--xhs-text)]">常用表情</h3>
                 <div class="grid grid-cols-5 gap-2">
                     <button
                         v-for="emoji in emojiList"
                         :key="emoji"
                         @click="insertEmoji(emoji)"
-                        class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg text-lg transition-colors duration-150 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg text-lg transition-colors duration-150 hover:bg-[color:var(--xhs-hover-bg)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                     >
                         {{ emoji }}
                     </button>
@@ -1184,13 +1185,13 @@ const doPublish = async () => {
 
             <!-- 话题内容 -->
             <div v-else-if="activeMenu === 'topic'" class="p-4">
-                <h3 class="mb-3 text-sm font-semibold text-slate-900 dark:text-white">热门话题</h3>
+                <h3 class="mb-3 text-sm font-semibold text-[color:var(--xhs-text)]">热门话题</h3>
                 <div class="space-y-2">
                     <button
                         v-for="topic in topicList"
                         :key="topic"
                         @click="insertTopic(topic)"
-                        class="block w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-blue-600 transition-all duration-150 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                        class="block w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm text-[color:var(--xhs-brand)] transition-all duration-150 hover:bg-[color:var(--xhs-brand-soft)] dark:text-[color:var(--xhs-brand)] dark:hover:bg-[color:var(--xhs-brand-soft-dark)]"
                     >
                         {{ topic }}
                     </button>
@@ -1199,26 +1200,26 @@ const doPublish = async () => {
 
             <!-- 文案库内容 -->
             <div v-else-if="activeMenu === 'library'" class="p-4">
-                <h3 class="mb-3 text-sm font-semibold text-slate-900 dark:text-white">文案库</h3>
-                <div class="rounded-lg bg-slate-50 p-4 text-center dark:bg-slate-700">
+                <h3 class="mb-3 text-sm font-semibold text-[color:var(--xhs-text)]">文案库</h3>
+                <div class="rounded-lg bg-[color:var(--xhs-muted-bg)] p-4 text-center dark:bg-[color:var(--xhs-muted-bg)]">
                     <UIcon
                         name="i-heroicons-folder-open"
-                        class="mx-auto mb-2 text-3xl text-slate-400"
+                        class="mx-auto mb-2 text-3xl text-[color:var(--xhs-text-soft)]"
                     />
-                    <p class="text-sm text-slate-500 dark:text-slate-400">收藏的文案将显示在这里</p>
+                    <p class="text-sm text-[color:var(--xhs-text-muted)]">收藏的文案将显示在这里</p>
                 </div>
             </div>
         </div>
         </Transition>
 
         <!-- 3. 笔记编辑区域：灰底 + 内部卡片布局 -->
-        <div class="min-h-0 flex-1 flex flex-col overflow-y-auto bg-[#F1F5F9] p-5 dark:bg-slate-900" @click.self="activeMenu = null">
+        <div class="min-h-0 flex flex-1 flex-col overflow-y-auto bg-[color:var(--xhs-editor-bg)] p-5" @click.self="activeMenu = null">
 
             <!-- 加载状态 -->
             <div v-if="isLoadingNote" class="flex h-full items-center justify-center">
                 <div class="text-center">
-                    <div class="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-blue-500"></div>
-                    <p class="text-sm text-slate-500 dark:text-slate-400">正在加载笔记...</p>
+                    <div class="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-b-2 border-[color:var(--xhs-brand)]"></div>
+                    <p class="text-sm text-[color:var(--xhs-text-muted)]">正在加载笔记...</p>
                 </div>
             </div>
 
@@ -1226,18 +1227,18 @@ const doPublish = async () => {
                 <div class="flex flex-1 flex-col gap-4">
 
                 <!-- 卡片1：图片工具栏 -->
-                <div class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                <div class="rounded-xl border border-[color:var(--xhs-border)] bg-white shadow-sm dark:border-[color:var(--xhs-border)] dark:bg-[color:var(--xhs-card)]">
                     <button
                         @click="toggleImageToolbar"
-                        class="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                        class="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-[color:var(--xhs-muted-bg)] dark:hover:bg-[color:var(--xhs-hover-bg)]/70"
                     >
-                        <div class="flex items-center gap-2 text-sm font-semibold text-blue-600 dark:text-blue-400">
+                        <div class="flex items-center gap-2 text-sm font-semibold text-[color:var(--xhs-brand)] dark:text-[color:var(--xhs-brand)]">
                             <UIcon name="i-heroicons-photo" class="text-lg" />
                             点击下方按钮可制作配图
                         </div>
                         <UIcon
                             :name="showImageToolbar ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'"
-                            class="text-slate-400"
+                            class="text-[color:var(--xhs-text-soft)]"
                         />
                     </button>
                     <div v-if="showImageToolbar" class="grid grid-cols-4 gap-4 px-5 pb-5">
@@ -1248,8 +1249,8 @@ const doPublish = async () => {
                             :class="[
                                 'group relative flex cursor-pointer flex-col items-center gap-2 rounded-xl border p-4 transition-all duration-200',
                                 activeImageTab === item.key
-                                    ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/30'
-                                    : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50 dark:border-slate-700 dark:bg-slate-800',
+                                    ? 'border-[color:var(--xhs-brand)] bg-[color:var(--xhs-brand-soft)] dark:border-[color:var(--xhs-brand)] dark:bg-[color:var(--xhs-brand-soft-dark)]'
+                                    : 'border-[color:var(--xhs-border)] bg-white hover:border-[color:var(--xhs-brand)]/45 hover:bg-[color:var(--xhs-brand-soft)] dark:border-[color:var(--xhs-border)] dark:bg-[color:var(--xhs-card)]',
                             ]"
                         >
                             <div
@@ -1262,15 +1263,15 @@ const doPublish = async () => {
                                 :class="[
                                     'flex h-10 w-10 items-center justify-center rounded-full transition-colors',
                                     activeImageTab === item.key
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-slate-100 text-slate-500 group-hover:bg-blue-100 group-hover:text-blue-600 dark:bg-slate-700 dark:text-slate-400',
+                                        ? 'bg-[color:var(--xhs-brand)] text-white'
+                                        : 'bg-[color:var(--xhs-muted-bg)] text-[color:var(--xhs-text-muted)] group-hover:bg-[color:var(--xhs-brand-soft)] group-hover:text-[color:var(--xhs-brand)] dark:bg-[color:var(--xhs-muted-bg)] dark:text-[color:var(--xhs-text-soft)]',
                                 ]"
                             >
                                 <UIcon :name="item.icon" class="text-xl" />
                             </div>
                             <div class="text-center">
-                                <div :class="['text-[13px] font-bold', activeImageTab === item.key ? 'text-blue-600' : 'text-slate-700 dark:text-slate-300']">{{ item.label }}</div>
-                                <div class="mt-0.5 text-[10px] text-slate-400 dark:text-slate-500">{{ item.description }}</div>
+                                <div :class="['text-[13px] font-bold', activeImageTab === item.key ? 'text-[color:var(--xhs-brand)]' : 'text-[color:var(--xhs-text)]']">{{ item.label }}</div>
+                                <div class="mt-0.5 text-[10px] text-[color:var(--xhs-text-soft)] dark:text-[color:var(--xhs-text-muted)]">{{ item.description }}</div>
                             </div>
                         </button>
                     </div>
@@ -1279,32 +1280,32 @@ const doPublish = async () => {
                 <!-- 卡片2：已上传图片（grid布局） -->
                 <div
                     v-if="coverImages.length > 0"
-                    class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
+                    class="rounded-xl border border-[color:var(--xhs-border)] bg-white shadow-sm dark:border-[color:var(--xhs-border)] dark:bg-[color:var(--xhs-card)]"
                 >
                     <button
                         type="button"
-                        class="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                        class="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-[color:var(--xhs-muted-bg)] dark:hover:bg-[color:var(--xhs-hover-bg)]/70"
                         @click="toggleCoverImagesStrip"
                     >
                         <div class="flex items-center gap-2">
-                            <UIcon name="i-heroicons-photo" class="text-lg text-blue-500" />
-                            <span class="text-sm font-bold text-slate-700 dark:text-slate-300">已上传图片</span>
-                            <span class="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                            <UIcon name="i-heroicons-photo" class="text-lg text-[color:var(--xhs-brand)]" />
+                            <span class="text-sm font-bold text-[color:var(--xhs-text)]">已上传图片</span>
+                            <span class="rounded bg-[color:var(--xhs-brand-soft)] px-1.5 py-0.5 text-[10px] font-bold text-[color:var(--xhs-brand)] dark:bg-[color:var(--xhs-brand-soft-dark)] dark:text-[color:var(--xhs-brand)]">
                                 {{ coverImages.length }}/9
                             </span>
                         </div>
                         <div class="flex items-center gap-3">
                             <span class="text-xs font-bold text-red-500 hover:text-red-600" @click.stop="handleClearAllImages">清空</span>
-                            <UIcon :name="coverImagesStripExpanded ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'" class="h-4 w-4 text-slate-400" />
+                            <UIcon :name="coverImagesStripExpanded ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'" class="h-4 w-4 text-[color:var(--xhs-text-soft)]" />
                         </div>
                     </button>
                     <div v-show="coverImagesStripExpanded" class="px-5 pb-5">
-                        <p class="mb-2 text-xs text-slate-500 dark:text-slate-400">拖动缩略图可调整顺序（首张为封面）</p>
+                        <p class="mb-2 text-xs text-[color:var(--xhs-text-muted)]">拖动缩略图可调整顺序（首张为封面）</p>
                         <div class="flex flex-wrap gap-3">
                         <div
                             v-for="(image, index) in coverImages"
                             :key="`${index}-${image}`"
-                            class="group relative h-[88px] w-[88px] flex-shrink-0 cursor-grab overflow-hidden rounded-lg border border-slate-100 active:cursor-grabbing dark:border-slate-700"
+                            class="group relative h-[88px] w-[88px] flex-shrink-0 cursor-grab overflow-hidden rounded-lg border border-[color:var(--xhs-border)] active:cursor-grabbing dark:border-[color:var(--xhs-border)]"
                             draggable="true"
                             @dragstart="onCoverImageDragStart($event, index)"
                             @dragend="onCoverImageDragEnd"
@@ -1324,7 +1325,7 @@ const doPublish = async () => {
                                 <button
                                     type="button"
                                     @click.stop="handlePreviewImage(index)"
-                                    class="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-700 opacity-0 transition-opacity group-hover:opacity-100"
+                                    class="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-[color:var(--xhs-text)] opacity-0 transition-opacity group-hover:opacity-100"
                                     aria-label="预览图片"
                                 >
                                     <UIcon name="i-heroicons-eye" class="text-sm" />
@@ -1344,7 +1345,7 @@ const doPublish = async () => {
                             v-if="coverImages.length < 9"
                             type="button"
                             @click="fileInput?.click()"
-                            class="flex h-[88px] w-[88px] flex-shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-slate-200 text-slate-400 transition-colors hover:border-blue-400 hover:text-blue-500 dark:border-slate-600"
+                            class="flex h-[88px] w-[88px] flex-shrink-0 cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-[color:var(--xhs-border)] text-[color:var(--xhs-text-soft)] transition-colors hover:border-[color:var(--xhs-brand)] hover:text-[color:var(--xhs-brand)] dark:border-[color:var(--xhs-border)]"
                         >
                             <UIcon name="i-heroicons-plus" class="text-2xl" />
                         </button>
@@ -1353,15 +1354,15 @@ const doPublish = async () => {
                 </div>
 
                 <!-- 卡片3：笔记编辑器，flex-1 撑满剩余高度 -->
-                <div class="flex flex-1 flex-col rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+                <div class="flex flex-1 flex-col rounded-xl border border-[color:var(--xhs-border)] bg-white shadow-sm dark:border-[color:var(--xhs-border)] dark:bg-[color:var(--xhs-card)]">
                     <!-- 标题栏 -->
-                    <div class="border-b border-slate-100 px-6 pb-3 pt-5 dark:border-slate-700">
+                    <div class="border-b border-[color:var(--xhs-border)] px-6 pb-3 pt-5 dark:border-[color:var(--xhs-border)]">
                         <div class="flex items-center justify-between gap-3">
                             <input
                                 v-model="noteTitle"
                                 type="text"
                                 placeholder="请输入笔记标题"
-                                class="flex-1 border-none bg-transparent text-2xl font-bold text-slate-900 placeholder-slate-300 outline-none focus:ring-0 dark:text-white dark:placeholder-slate-600"
+                                class="flex-1 border-none bg-transparent text-2xl font-bold text-[color:var(--xhs-text)] placeholder-[color:var(--xhs-text-soft)] outline-none focus:ring-0 dark:text-[color:var(--xhs-text)] dark:placeholder-[color:var(--xhs-text-muted)]"
                             />
                             <UBadge v-if="isEditMode" color="primary" variant="soft" size="sm">编辑模式</UBadge>
                         </div>
@@ -1372,8 +1373,8 @@ const doPublish = async () => {
                         <!-- 生成中状态 -->
                         <div v-if="isGenerating" class="flex h-40 items-center justify-center">
                             <div class="text-center">
-                                <div class="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-b-2 border-blue-500"></div>
-                                <p class="text-sm text-slate-500 dark:text-slate-400">正在生成内容...</p>
+                                <div class="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-b-2 border-[color:var(--xhs-brand)]"></div>
+                                <p class="text-sm text-[color:var(--xhs-text-muted)]">正在生成内容...</p>
                             </div>
                         </div>
                         <!-- 错误状态 -->
@@ -1391,12 +1392,12 @@ const doPublish = async () => {
                             v-else
                             v-model="noteContent"
                             placeholder="开始输入内容..."
-                            class="h-full w-full resize-none border-none bg-transparent text-base leading-relaxed text-slate-900 placeholder-slate-300 outline-none focus:ring-0 dark:text-white dark:placeholder-slate-600"
+                            class="h-full w-full resize-none border-none bg-transparent text-base leading-relaxed text-[color:var(--xhs-text)] placeholder-[color:var(--xhs-text-soft)] outline-none focus:ring-0 dark:text-[color:var(--xhs-text)] dark:placeholder-[color:var(--xhs-text-muted)]"
                         ></textarea>
                     </div>
 
                     <!-- 状态栏 -->
-                    <div class="flex items-center justify-between rounded-b-xl border-t border-slate-100 bg-slate-50/50 px-6 py-3 text-[11px] font-medium text-slate-400 dark:border-slate-700 dark:bg-slate-800/50">
+                    <div class="flex items-center justify-between rounded-b-xl border-t border-[color:var(--xhs-border)] bg-[color:var(--xhs-muted-bg)]/50 px-6 py-3 text-[11px] font-medium text-[color:var(--xhs-text-soft)] dark:border-[color:var(--xhs-border)] dark:bg-[color:var(--xhs-card)]/50">
                         <span>{{ isSaving ? '保存中...' : '已自动保存' }}</span>
                         <span class="font-mono">{{ wordCount }} / 1000</span>
                     </div>
@@ -1407,27 +1408,27 @@ const doPublish = async () => {
         </div>
 
         <!-- 4. 右侧操作栏 -->
-        <div class="flex w-20 flex-shrink-0 flex-col items-center border-l border-slate-200 bg-white py-6 dark:border-slate-700 dark:bg-slate-800">
+        <div class="flex w-20 flex-shrink-0 flex-col items-center border-l border-[color:var(--xhs-border)] bg-white py-6 dark:border-[color:var(--xhs-border)] dark:bg-[color:var(--xhs-card)]">
             <!-- 顶部功能按钮 -->
             <div class="flex flex-1 flex-col items-center gap-5">
                 <button
                     @click="handleCopyTitle"
-                    class="group flex flex-col items-center gap-1 text-slate-500 dark:text-slate-400"
+                    class="group flex flex-col items-center gap-1 text-[color:var(--xhs-text-muted)]"
                     title="复制标题"
                 >
-                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700">
-                        <UIcon name="i-heroicons-clipboard-document" class="text-[22px] group-hover:text-slate-800 dark:group-hover:text-slate-200" />
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-[color:var(--xhs-muted-bg)] dark:hover:bg-[color:var(--xhs-hover-bg)]">
+                        <UIcon name="i-heroicons-clipboard-document" class="text-[22px] group-hover:text-[color:var(--xhs-text)] dark:group-hover:text-[color:var(--xhs-text)]" />
                     </div>
                     <span class="text-[10px] font-medium leading-none">复制标题</span>
                 </button>
 
                 <button
                     @click="handleCopyContent"
-                    class="group flex flex-col items-center gap-1 text-slate-500 dark:text-slate-400"
+                    class="group flex flex-col items-center gap-1 text-[color:var(--xhs-text-muted)]"
                     title="复制正文"
                 >
-                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700">
-                        <UIcon name="i-heroicons-document-text" class="text-[22px] group-hover:text-slate-800 dark:group-hover:text-slate-200" />
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-[color:var(--xhs-muted-bg)] dark:hover:bg-[color:var(--xhs-hover-bg)]">
+                        <UIcon name="i-heroicons-document-text" class="text-[22px] group-hover:text-[color:var(--xhs-text)] dark:group-hover:text-[color:var(--xhs-text)]" />
                     </div>
                     <span class="text-[10px] font-medium leading-none">复制正文</span>
                 </button>
@@ -1435,13 +1436,13 @@ const doPublish = async () => {
                 <button
                     @click="handleSave"
                     :disabled="isSaving"
-                    class="group flex flex-col items-center gap-1 text-slate-500 disabled:opacity-50 dark:text-slate-400"
+                    class="group flex flex-col items-center gap-1 text-[color:var(--xhs-text-muted)] disabled:opacity-50 dark:text-[color:var(--xhs-text-soft)]"
                     :title="isEditMode ? '更新笔记' : '保存笔记'"
                 >
-                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-[color:var(--xhs-muted-bg)] dark:hover:bg-[color:var(--xhs-hover-bg)]">
                         <UIcon
                             :name="isSaving ? 'i-heroicons-arrow-path' : 'i-heroicons-arrow-path-rounded-square'"
-                            :class="['text-[22px] group-hover:text-slate-800 dark:group-hover:text-slate-200', isSaving ? 'animate-spin' : '']"
+                            :class="['text-[22px] group-hover:text-[color:var(--xhs-text)] dark:group-hover:text-[color:var(--xhs-text)]', isSaving ? 'animate-spin' : '']"
                         />
                     </div>
                     <span class="text-[10px] font-medium leading-none">{{ isEditMode ? '更新' : '保存' }}</span>
@@ -1449,11 +1450,11 @@ const doPublish = async () => {
 
                 <button
                     @click="handlePreview"
-                    class="group flex flex-col items-center gap-1 text-slate-500 dark:text-slate-400"
+                    class="group flex flex-col items-center gap-1 text-[color:var(--xhs-text-muted)]"
                     title="预览笔记"
                 >
-                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-slate-50 dark:hover:bg-slate-700">
-                        <UIcon name="i-heroicons-eye" class="text-[22px] group-hover:text-slate-800 dark:group-hover:text-slate-200" />
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-[color:var(--xhs-muted-bg)] dark:hover:bg-[color:var(--xhs-hover-bg)]">
+                        <UIcon name="i-heroicons-eye" class="text-[22px] group-hover:text-[color:var(--xhs-text)] dark:group-hover:text-[color:var(--xhs-text)]" />
                     </div>
                     <span class="text-[10px] font-medium leading-none">预览笔记</span>
                 </button>
@@ -1468,7 +1469,7 @@ const doPublish = async () => {
                         :disabled="isPublishing"
                         :class="[
                             'flex h-12 w-12 items-center justify-center rounded-2xl text-white shadow-lg transition-all active:scale-95',
-                            isPublishing ? 'cursor-not-allowed bg-blue-400 shadow-blue-200' : 'bg-blue-600 shadow-blue-200 hover:bg-blue-700'
+                            isPublishing ? 'cursor-not-allowed bg-[color:var(--xhs-brand)]/65 shadow-[color:var(--xhs-brand)]/20' : 'bg-[color:var(--xhs-brand)] shadow-[color:var(--xhs-brand)]/20 hover:bg-[color:var(--xhs-brand-hover)]'
                         ]"
                         aria-label="发布笔记"
                     >
@@ -1477,12 +1478,12 @@ const doPublish = async () => {
                             :class="['text-[22px]', isPublishing ? 'animate-spin' : '']"
                         />
                     </button>
-                    <span class="text-[10px] font-bold text-blue-600 dark:text-blue-400">{{ isPublishing ? '发布中' : '发布笔记' }}</span>
+                    <span class="text-[10px] font-bold text-[color:var(--xhs-brand)] dark:text-[color:var(--xhs-brand)]">{{ isPublishing ? '发布中' : '发布笔记' }}</span>
                 </div>
 
                 <button
                     @click="handleClear"
-                    class="group flex flex-col items-center gap-1 text-slate-500 dark:text-slate-400"
+                    class="group flex flex-col items-center gap-1 text-[color:var(--xhs-text-muted)]"
                     aria-label="清空笔记"
                 >
                     <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-red-50 group-hover:text-red-500 dark:hover:bg-red-900/20">
@@ -1508,20 +1509,20 @@ const doPublish = async () => {
                     <div class="overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-gray-900">
                         <!-- 手机顶部状态栏 -->
                         <div class="flex items-center justify-between bg-white px-4 py-2 dark:bg-gray-900">
-                            <div class="flex items-center gap-1 text-xs text-gray-900 dark:text-white">
+                            <div class="flex items-center gap-1 text-xs text-gray-900 dark:text-[color:var(--xhs-text)]">
                                 <span>9:41</span>
                             </div>
                             <div class="flex items-center gap-2">
-                                <UIcon name="i-heroicons-signal" class="h-4 w-4 text-gray-900 dark:text-white" />
-                                <UIcon name="i-heroicons-wifi" class="h-4 w-4 text-gray-900 dark:text-white" />
-                                <UIcon name="i-heroicons-battery-100" class="h-4 w-4 text-gray-900 dark:text-white" />
+                                <UIcon name="i-heroicons-signal" class="h-4 w-4 text-gray-900 dark:text-[color:var(--xhs-text)]" />
+                                <UIcon name="i-heroicons-wifi" class="h-4 w-4 text-gray-900 dark:text-[color:var(--xhs-text)]" />
+                                <UIcon name="i-heroicons-battery-100" class="h-4 w-4 text-gray-900 dark:text-[color:var(--xhs-text)]" />
                             </div>
                         </div>
 
                         <!-- 导航栏 -->
                         <div class="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900">
                             <UButton variant="ghost" color="neutral" icon="i-heroicons-arrow-left" size="sm" @click="showPreview = false" />
-                            <span class="text-sm font-medium text-gray-900 dark:text-white">笔记预览</span>
+                            <span class="text-sm font-medium text-gray-900 dark:text-[color:var(--xhs-text)]">笔记预览</span>
                             <UButton variant="ghost" color="neutral" icon="i-heroicons-ellipsis-horizontal" size="sm" />
                         </div>
 
@@ -1576,7 +1577,7 @@ const doPublish = async () => {
 
                             <!-- 笔记内容 -->
                             <div class="p-4">
-                                <div class="mb-3 text-lg font-semibold text-gray-900 dark:text-white">
+                                <div class="mb-3 text-lg font-semibold text-gray-900 dark:text-[color:var(--xhs-text)]">
                                     {{ noteTitle || '未填写标题' }}
                                 </div>
                                 <div class="mb-4 text-sm leading-relaxed whitespace-pre-wrap text-gray-700 dark:text-gray-300">
@@ -1615,21 +1616,21 @@ const doPublish = async () => {
                     class="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4"
                     @click.self="closeLoginQrCode"
                 >
-                    <div class="w-full max-w-sm rounded-2xl bg-white shadow-2xl dark:bg-slate-800">
+                    <div class="w-full max-w-sm rounded-2xl bg-white shadow-2xl dark:bg-[color:var(--xhs-card)]">
                         <!-- 标题 -->
-                        <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-700">
+                        <div class="flex items-center justify-between border-b border-[color:var(--xhs-border)] px-5 py-4 dark:border-[color:var(--xhs-border)]">
                             <div class="flex items-center gap-3">
                                 <div class="flex h-9 w-9 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
                                     <UIcon name="i-heroicons-qr-code" class="text-lg text-red-600 dark:text-red-400" />
                                 </div>
                                 <div>
-                                    <h3 class="text-base font-semibold text-slate-900 dark:text-white">小红书登录</h3>
-                                    <p class="text-xs text-slate-500 dark:text-slate-400">请使用小红书 App 扫码登录</p>
+                                    <h3 class="text-base font-semibold text-[color:var(--xhs-text)]">小红书登录</h3>
+                                    <p class="text-xs text-[color:var(--xhs-text-muted)]">请使用小红书 App 扫码登录</p>
                                 </div>
                             </div>
                             <button
                                 type="button"
-                                class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
+                                class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[color:var(--xhs-text-soft)] transition-colors hover:bg-[color:var(--xhs-hover-bg)] hover:text-[color:var(--xhs-text-muted)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                                 @click="closeLoginQrCode"
                             >
                                 <UIcon name="i-heroicons-x-mark" class="text-xl" />
@@ -1641,18 +1642,18 @@ const doPublish = async () => {
                             <!-- 加载状态 -->
                             <div
                                 v-if="isLoadingQrCode"
-                                class="flex h-56 w-56 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-700"
+                                class="flex h-56 w-56 items-center justify-center rounded-xl bg-[color:var(--xhs-muted-bg)] dark:bg-[color:var(--xhs-muted-bg)]"
                             >
                                 <div class="text-center">
                                     <div class="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-red-200 border-t-red-500"></div>
-                                    <p class="text-sm text-slate-500 dark:text-slate-400">正在获取二维码...</p>
+                                    <p class="text-sm text-[color:var(--xhs-text-muted)]">正在获取二维码...</p>
                                 </div>
                             </div>
 
                             <!-- 二维码图片 -->
                             <div
                                 v-else-if="loginQrCodeUrl"
-                                class="rounded-xl border-2 border-slate-200 bg-white p-3 dark:border-slate-600 dark:bg-slate-800"
+                                class="rounded-xl border-2 border-[color:var(--xhs-border)] bg-white p-3 dark:border-[color:var(--xhs-border)] dark:bg-[color:var(--xhs-card)]"
                             >
                                 <img :src="loginQrCodeUrl" alt="小红书登录二维码" class="h-52 w-52 object-contain" />
                             </div>
@@ -1660,21 +1661,21 @@ const doPublish = async () => {
                             <!-- 获取失败 -->
                             <div
                                 v-else
-                                class="flex h-56 w-56 flex-col items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-700"
+                                class="flex h-56 w-56 flex-col items-center justify-center rounded-xl bg-[color:var(--xhs-muted-bg)] dark:bg-[color:var(--xhs-muted-bg)]"
                             >
-                                <UIcon name="i-heroicons-exclamation-circle" class="mb-2 text-4xl text-slate-400" />
-                                <p class="text-sm text-slate-500 dark:text-slate-400">获取二维码失败</p>
+                                <UIcon name="i-heroicons-exclamation-circle" class="mb-2 text-4xl text-[color:var(--xhs-text-soft)]" />
+                                <p class="text-sm text-[color:var(--xhs-text-muted)]">获取二维码失败</p>
                             </div>
 
-                            <p class="mt-4 text-sm text-slate-600 dark:text-slate-400">打开小红书 App，扫描上方二维码</p>
-                            <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">扫码后点击「确认已登录」，再点发布按钮发布笔记</p>
+                            <p class="mt-4 text-sm text-[color:var(--xhs-text-muted)]">打开小红书 App，扫描上方二维码</p>
+                            <p class="mt-1 text-xs text-[color:var(--xhs-text-soft)] dark:text-[color:var(--xhs-text-muted)]">扫码后点击「确认已登录」，再点发布按钮发布笔记</p>
                         </div>
 
                         <!-- 操作按钮 -->
-                        <div class="flex gap-3 border-t border-slate-200 px-5 py-4 dark:border-slate-700">
+                        <div class="flex gap-3 border-t border-[color:var(--xhs-border)] px-5 py-4 dark:border-[color:var(--xhs-border)]">
                             <button
                                 type="button"
-                                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+                                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[color:var(--xhs-border)] px-4 py-2 text-sm font-medium text-[color:var(--xhs-text)] transition-colors hover:bg-[color:var(--xhs-muted-bg)] disabled:opacity-50 dark:border-[color:var(--xhs-border)] dark:text-[color:var(--xhs-text)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                                 :disabled="isLoadingQrCode"
                                 @click="refreshQrCode"
                             >
@@ -1683,7 +1684,7 @@ const doPublish = async () => {
                             </button>
                             <button
                                 type="button"
-                                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                                class="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[color:var(--xhs-brand)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[color:var(--xhs-brand-hover)] disabled:opacity-50"
                                 :disabled="isCheckingLoginStatus"
                                 @click="checkLoginStatusAndPublish"
                             >
@@ -1725,7 +1726,7 @@ const doPublish = async () => {
                         <button
                             v-if="coverImages.length > 1"
                             type="button"
-                            class="flex h-12 w-12 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/90 text-slate-700 shadow-lg transition-colors hover:bg-white dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                            class="flex h-12 w-12 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/90 text-[color:var(--xhs-text)] shadow-lg transition-colors hover:bg-white dark:bg-[color:var(--xhs-card)] dark:text-[color:var(--xhs-text)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                             aria-label="上一张"
                             @click.stop="prevPreviewImage"
                         >
@@ -1735,7 +1736,7 @@ const doPublish = async () => {
                         <!-- 图片 + 关闭 -->
                         <div class="relative">
                             <button
-                                class="absolute -top-2 -right-2 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-lg transition-colors hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-300"
+                                class="absolute -top-2 -right-2 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white/90 text-[color:var(--xhs-text-muted)] shadow-lg transition-colors hover:bg-[color:var(--xhs-hover-bg)] dark:bg-[color:var(--xhs-muted-bg)] dark:text-[color:var(--xhs-text)]"
                                 aria-label="关闭预览"
                                 @click="closeImagePreview"
                             >
@@ -1759,7 +1760,7 @@ const doPublish = async () => {
                         <button
                             v-if="coverImages.length > 1"
                             type="button"
-                            class="flex h-12 w-12 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/90 text-slate-700 shadow-lg transition-colors hover:bg-white dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                            class="flex h-12 w-12 flex-shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/90 text-[color:var(--xhs-text)] shadow-lg transition-colors hover:bg-white dark:bg-[color:var(--xhs-card)] dark:text-[color:var(--xhs-text)] dark:hover:bg-[color:var(--xhs-hover-bg)]"
                             aria-label="下一张"
                             @click.stop="nextPreviewImage"
                         >

@@ -133,12 +133,13 @@ const closePreview = () => {
         }"
     >
         <template #content>
-            <div class="flex h-full flex-col bg-gray-50 dark:bg-gray-900">
+            <div class="xhs-theme flex h-full flex-col" style="background: var(--xhs-page-bg)">
                 <!-- 标题栏 -->
                 <div
-                    class="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700"
+                    class="flex shrink-0 items-center justify-between border-b px-4 py-3"
+                    style="border-color: var(--xhs-border)"
                 >
-                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">关联笔记</h2>
+                    <h2 class="text-lg font-semibold" style="color: var(--xhs-text)">关联笔记</h2>
                     <UButton
                         variant="ghost"
                         color="neutral"
@@ -150,11 +151,11 @@ const closePreview = () => {
                 </div>
 
                 <!-- 商品名 + 数量 -->
-                <div class="shrink-0 border-b border-gray-200 px-4 py-2 dark:border-gray-700">
-                    <p class="truncate text-sm font-medium text-gray-700 dark:text-gray-300">
+                <div class="shrink-0 border-b px-4 py-2" style="border-color: var(--xhs-border)">
+                    <p class="truncate text-sm font-medium" style="color: var(--xhs-text)">
                         {{ productName }}
                     </p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">共 {{ total }} 条笔记</p>
+                    <p class="text-xs" style="color: var(--xhs-text-muted)">共 {{ total }} 条笔记</p>
                 </div>
 
                 <!-- 内容区：加载 / 错误 / 空 / 列表 -->
@@ -162,7 +163,7 @@ const closePreview = () => {
                     <div v-if="isLoading" class="flex justify-center py-12">
                         <UIcon
                             name="i-heroicons-arrow-path"
-                            class="text-primary-500 h-8 w-8 animate-spin"
+                            class="h-8 w-8 animate-spin text-[color:var(--xhs-brand)]"
                         />
                     </div>
                     <div v-else-if="error" class="py-8 text-center text-sm text-red-500">
@@ -170,7 +171,8 @@ const closePreview = () => {
                     </div>
                     <div
                         v-else-if="notes.length === 0"
-                        class="py-12 text-center text-sm text-gray-500 dark:text-gray-400"
+                        class="py-12 text-center text-sm"
+                        style="color: var(--xhs-text-muted)"
                     >
                         暂无关联笔记
                     </div>
@@ -178,7 +180,12 @@ const closePreview = () => {
                             <div
                                 v-for="note in notes"
                                 :key="note.id"
-                                class="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800"
+                                class="rounded-xl border p-3"
+                                style="
+                                    border-color: var(--xhs-border);
+                                    background: var(--xhs-card);
+                                    box-shadow: var(--xhs-shadow-card);
+                                "
                             >
                                 <NoteCard :note="note" @click="handleNoteClick" />
                                 <div class="mt-2 flex justify-end gap-2">
