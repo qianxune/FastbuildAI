@@ -708,6 +708,9 @@ export class XhsNoteService extends BaseService<XhsNote> {
         if (dto.content) {
             updateData.wordCount = dto.content.length;
         }
+        if (dto.isPublished === true) {
+            updateData.publishedAt = new Date();
+        }
 
         await this.noteRepository.update(id, updateData);
 

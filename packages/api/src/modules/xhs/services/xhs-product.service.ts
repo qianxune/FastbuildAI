@@ -54,7 +54,156 @@ export class XhsProductService extends BaseService<XhsProduct> {
         }
         return map;
     }
-    
+
+    private applyProductKeywordFilter(
+        qb: ReturnType<Repository<XhsProduct>["createQueryBuilder"]>,
+        keyword: string,
+    ): void {
+        const kw = `%${keyword.trim()}%`;
+        qb.andWhere(
+            "(p.name ILIKE :kw OR p.skuCode ILIKE :kw OR p.spec ILIKE :kw OR p.externalProductId ILIKE :kw OR (p.category IS NOT NULL AND p.category ILIKE :kw))",
+            { kw },
+        );
+    }
+
+    private applyProductCategoryFilter(
+        qb: ReturnType<Repository<XhsProduct>["createQueryBuilder"]>,
+        category: string,
+    ): void {
+        qb.andWhere("TRIM(p.category) = :cat", { cat: category.trim() });
+    }
+
+    /**
+     * 当前用户已使用的分类列表（用于筛选下拉）
+     */
+    async listDistinctCategories(userId: string): Promise<string[]> {
+        const rows = (await this.productRepository.query(
+            `SELECT DISTINCT TRIM(category) AS c FROM xhs_product WHERE user_id = $1 AND category IS NOT NULL AND TRIM(category) <> '' ORDER BY 1`,
+            [userId],
+        )) as Array<{ c: string }>;
+        return rows.map((r) => r.c).filter(Boolean);
+    }
+
+    /**
+     * 各分类下的 SKU 数量（分类管理页）
+     */
+    async listCategoryStats(
+        userId: string,
+    ): Promise<Array<{ name: string; count: number }>> {
+        const rows = (await this.productRepository.query(
+            `SELECT TRIM(category) AS name, COUNT(*)::int AS count
+             FROM xhs_product
+             WHERE user_id = $1 AND category IS NOT NULL AND TRIM(category) <> ''
+             GROUP BY TRIM(category)
+             ORDER BY TRIM(category)`,
+            [userId],
+        )) as Array<{ name: string; count: number }>;
+        return rows.filter((r) => r.name);
+    }
+
+    /**
+     * 将某分类下所有商品改为新分类名称（重命名/合并）
+     */
+    async renameCategoryForUser(
+        userId: string,
+        fromCategory: string,
+        toCategory: string,
+    ): Promise<number> {
+        const from = fromCategory.trim();
+        const to = toCategory.trim().slice(0, 100);
+        if (!from || !to) {
+            throw HttpErrorFactory.badRequest("分类名称不能为空");
+        }
+        if (from === to) {
+            return 0;
+        }
+        const result = await this.productRepository
+            .createQueryBuilder()
+            .update(XhsProduct)
+            .set({ category: to, updatedAt: new Date() } as any)
+            .where("userId = :userId", { userId })
+            .andWhere("TRIM(category) = :from", { from })
+            .execute();
+        return result.affected ?? 0;
+    }
+
+    /**
+     * 清空某分类名称下所有商品的分类（不删商品）
+     */
+    async clearCategoryByNameForUser(userId: string, categoryName: string): Promise<number> {
+        const cat = categoryName.trim();
+        if (!cat) {
+            throw HttpErrorFactory.badRequest("分类名称不能为空");
+        }
+        const result = await this.productRepository
+            .createQueryBuilder()
+            .update(XhsProduct)
+            .set({ category: null, updatedAt: new Date() } as any)
+            .where("userId = :userId", { userId })
+            .andWhere("TRIM(category) = :cat", { cat })
+            .execute();
+        return result.affected ?? 0;
+    }
+
+    /**
+     * 批量设置分类（仅更新属于当前用户的记录）
+     */
+    async batchSetCategoryForUser(
+        ids: string[],
+        category: string | undefined,
+        userId: string,
+    ): Promise<number> {
+        if (!ids.length) return 0;
+        const raw = category?.trim();
+        const value = raw === undefined || raw === "" ? null : raw.slice(0, 100);
+        const result = await this.productRepository
+            .createQueryBuilder()
+            .update(XhsProduct)
+            .set({ category: value, updatedAt: new Date() } as any)
+            .where("id IN (:...ids)", { ids })
+            .andWhere("userId = :userId", { userId })
+            .execute();
+        return result.affected ?? 0;
+    }
+
+    /**
+     * 无妙手 SKU ID / 本地 SKU 编码时，用「商品ID|规格」生成稳定 sku_code，避免每次导入用行号导致重复插入、创建时间被刷新。
+     */
+    private stableSkuCodeFromProductRow(parsed: Record<string, unknown>): string | undefined {
+        const extPid = parsed.externalProductId
+            ? String(parsed.externalProductId).trim()
+            : "";
+        if (!extPid) return undefined;
+        const spec = parsed.spec != null && parsed.spec !== "" ? String(parsed.spec).trim() : "";
+        return `${extPid}|${spec}`.slice(0, 100);
+    }
+
+    /**
+     * 查找当前用户下是否已有同一 Excel 行对应的商品（用于更新而非重复插入；createdAt 保持不变）。
+     */
+    private async findExistingProductForExcelImport(
+        userId: string,
+        externalSkuId: string | undefined,
+        skuCodeFromExcel: string | undefined,
+        resolvedSkuCode: string,
+    ): Promise<XhsProduct | null> {
+        if (externalSkuId) {
+            const byExt = await this.productRepository.findOne({
+                where: { userId, externalSkuId },
+            });
+            if (byExt) return byExt;
+        }
+        if (skuCodeFromExcel) {
+            const bySku = await this.productRepository.findOne({
+                where: { userId, skuCode: skuCodeFromExcel },
+            });
+            if (bySku) return bySku;
+        }
+        return this.productRepository.findOne({
+            where: { userId, skuCode: resolvedSkuCode },
+        });
+    }
+
     async importFromExcel(file: Express.Multer.File, userId: string): Promise<ImportProductResult> {
         const result: ImportProductResult = { success: 0, skipped: 0, failed: 0, errors: [] };
         const CHUNK = 100;
@@ -92,37 +241,23 @@ export class XhsProductService extends BaseService<XhsProduct> {
                     const externalSkuId = parsed.externalSkuId
                         ? String(parsed.externalSkuId).trim()
                         : undefined;
-                    const skuCode = parsed.skuCode ? String(parsed.skuCode).trim() : undefined;
+                    const skuCodeFromExcel = parsed.skuCode
+                        ? String(parsed.skuCode).trim()
+                        : undefined;
+                    const stableSku = this.stableSkuCodeFromProductRow(parsed);
+                    const resolvedSkuCode =
+                        skuCodeFromExcel || stableSku || `row-${rowIndex}`;
 
-                    let exists = false;
-                    if (externalSkuId) {
-                        exists = !!(await this.productRepository.findOne({
-                            where: { userId, externalSkuId },
-                        }));
-                    } else if (skuCode) {
-                        exists = !!(await this.productRepository.findOne({
-                            where: { userId, skuCode },
-                        }));
-                    }
-                    if (exists) {
-                        result.skipped += 1;
-                        continue;
-                    }
-
-                    const alreadyInBatch = toInsert.some(
-                        (p) =>
-                            (externalSkuId && p.externalSkuId === externalSkuId) ||
-                            (skuCode && p.skuCode === skuCode),
-                    );
-                    if (alreadyInBatch) {
-                        result.skipped += 1;
-                        continue;
-                    }
-
-                    toInsert.push({
+                    const existing = await this.findExistingProductForExcelImport(
                         userId,
+                        externalSkuId,
+                        skuCodeFromExcel,
+                        resolvedSkuCode,
+                    );
+
+                    const rowPayload: Record<string, unknown> = {
                         name,
-                        skuCode: skuCode || `row-${rowIndex}`,
+                        skuCode: resolvedSkuCode,
                         externalSkuId: externalSkuId || undefined,
                         externalProductId: parsed.externalProductId
                             ? String(parsed.externalProductId).trim()
@@ -151,6 +286,43 @@ export class XhsProductService extends BaseService<XhsProduct> {
                         productUrl: parsed.productUrl
                             ? String(parsed.productUrl).trim()
                             : undefined,
+                        category: parsed.category
+                            ? String(parsed.category).trim().slice(0, 100)
+                            : undefined,
+                    };
+
+                    if (existing) {
+                        // update 不写入 created_at，避免重复导入刷新创建时间
+                        await this.productRepository.update(
+                            { id: existing.id },
+                            {
+                                ...(rowPayload as Partial<XhsProduct>),
+                                externalSkuId:
+                                    (rowPayload.externalSkuId as string | undefined) ??
+                                    existing.externalSkuId,
+                                category:
+                                    (rowPayload.category as string | undefined) ??
+                                    (existing as { category?: string }).category,
+                                updatedAt: new Date(),
+                            } as any,
+                        );
+                        result.success += 1;
+                        continue;
+                    }
+
+                    const alreadyInBatch = toInsert.some(
+                        (p) =>
+                            (externalSkuId && p.externalSkuId === externalSkuId) ||
+                            p.skuCode === resolvedSkuCode,
+                    );
+                    if (alreadyInBatch) {
+                        result.skipped += 1;
+                        continue;
+                    }
+
+                    toInsert.push({
+                        userId,
+                        ...(rowPayload as Partial<XhsProduct>),
                     });
                 } catch (err) {
                     result.failed += 1;
@@ -179,16 +351,17 @@ export class XhsProductService extends BaseService<XhsProduct> {
         userId: string,
         query: QueryProductDto,
     ): Promise<{ items: XhsProductWithNoteCount[]; total: number; page: number; limit: number }> {
-        const { page = 1, limit = 20, keyword, sortBy = "createdAt", sortOrder = "DESC" } = query;
+        const { page = 1, limit = 20, keyword, category, sortBy = "createdAt", sortOrder = "DESC" } =
+            query;
         const qb = this.productRepository
             .createQueryBuilder("p")
             .where("p.userId = :userId", { userId });
 
         if (keyword?.trim()) {
-            qb.andWhere(
-                "(p.name ILIKE :kw OR p.skuCode ILIKE :kw OR p.spec ILIKE :kw OR p.externalProductId ILIKE :kw)",
-                { kw: `%${keyword.trim()}%` },
-            );
+            this.applyProductKeywordFilter(qb, keyword);
+        }
+        if (category?.trim()) {
+            this.applyProductCategoryFilter(qb, category);
         }
 
         if (sortBy === "noteCount") {
@@ -259,12 +432,15 @@ export class XhsProductService extends BaseService<XhsProduct> {
             imageUrl?: string;
             sourceUrl?: string;
             productUrl?: string;
+            /** 组内任一 SKU 的分类（展示用） */
+            category?: string;
         }>;
         total: number;
         page: number;
         limit: number;
     }> {
-        const { page = 1, limit = 20, keyword, sortBy = "createdAt", sortOrder = "DESC" } = query;
+        const { page = 1, limit = 20, keyword, category, sortBy = "createdAt", sortOrder = "DESC" } =
+            query;
 
         // 构建查询
         const qb = this.productRepository
@@ -273,10 +449,10 @@ export class XhsProductService extends BaseService<XhsProduct> {
             .orderBy("p.createdAt", "DESC");
 
         if (keyword?.trim()) {
-            qb.andWhere(
-                "(p.name ILIKE :kw OR p.skuCode ILIKE :kw OR p.spec ILIKE :kw OR p.externalProductId ILIKE :kw)",
-                { kw: `%${keyword.trim()}%` },
-            );
+            this.applyProductKeywordFilter(qb, keyword);
+        }
+        if (category?.trim()) {
+            this.applyProductCategoryFilter(qb, category);
         }
 
         // 获取所有匹配的商品
@@ -323,13 +499,24 @@ export class XhsProductService extends BaseService<XhsProduct> {
             return { ...group, noteCount };
         });
 
+        const minSkuCreatedTime = (skus: XhsProduct[]): number => {
+            let min = Infinity;
+            for (const s of skus) {
+                const t = s.createdAt?.getTime();
+                if (t != null && !Number.isNaN(t) && t < min) {
+                    min = t;
+                }
+            }
+            return min === Infinity ? 0 : min;
+        };
+
         const groups = groupsWithCount.sort((a, b) => {
             if (sortBy === "noteCount") {
                 const diff = a.noteCount - b.noteCount;
                 return sortOrder === "ASC" ? diff : -diff;
             }
-            const timeA = a.skus[0]?.createdAt?.getTime() || 0;
-            const timeB = b.skus[0]?.createdAt?.getTime() || 0;
+            const timeA = minSkuCreatedTime(a.skus);
+            const timeB = minSkuCreatedTime(b.skus);
             return sortOrder === "ASC" ? timeA - timeB : timeB - timeA;
         });
 
@@ -342,6 +529,10 @@ export class XhsProductService extends BaseService<XhsProduct> {
         const items = paginatedGroups.map((group) => ({
             ...group,
             skuCount: group.skus.length,
+            category:
+                group.skus
+                    .map((s) => (s as { category?: string }).category)
+                    .find((c) => c && String(c).trim()) || undefined,
         }));
 
         return { items, total, page, limit };

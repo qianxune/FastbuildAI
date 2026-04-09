@@ -22,6 +22,13 @@ export class QueryProductDto {
     @IsString({ message: "搜索关键词必须是字符串" })
     keyword?: string;
 
+    /**
+     * 按分类精确筛选（与 keyword 可同时使用）
+     */
+    @IsOptional()
+    @IsString({ message: "分类必须是字符串" })
+    category?: string;
+
     @IsOptional()
     @IsIn(["createdAt", "noteCount"], { message: "排序字段只能是 createdAt 或 noteCount" })
     sortBy?: string = "createdAt";

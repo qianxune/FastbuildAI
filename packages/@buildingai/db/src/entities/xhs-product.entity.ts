@@ -27,6 +27,12 @@ export class XhsProduct extends BaseEntity {
     user: Relation<User>;
 
     /**
+     * 商品分类（用户自定义或 Excel 导入）
+     */
+    @Column({ type: "varchar", length: 100, nullable: true, comment: "商品分类" })
+    category?: string;
+
+    /**
      * 商品名称（同商品多 SKU 时可能重复）
      */
     @Column({ type: "varchar", length: 200, comment: "商品名称" })

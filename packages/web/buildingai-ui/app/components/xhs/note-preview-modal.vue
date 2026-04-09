@@ -12,9 +12,17 @@ interface Props {
     coverImages?: string[];
 }
 
+interface SavePayload {
+    title: string;
+    content: string;
+    coverImages: string[];
+    /** 为 true 时不提示「内容已更新」（发布前静默同步） */
+    silent?: boolean;
+}
+
 interface Emits {
     (e: "close"): void;
-    (e: "save", data: { title: string; content: string; coverImages: string[] }): void;
+    (e: "save", data: SavePayload): void;
     (e: "publish"): void;
 }
 
@@ -179,22 +187,28 @@ const onFileChange = async (e: Event) => {
     }
 };
 
-// 保存编辑
-const handleSave = () => {
+/** 将弹窗内当前标题/正文/配图同步给父组件（发布前必须调用，否则父级仍用旧稿） */
+const flushToParent = (silent: boolean): boolean => {
     if (!editTitle.value.trim()) {
         toast.warning("标题不能为空");
-        return;
+        return false;
     }
     if (!editContent.value.trim()) {
         toast.warning("内容不能为空");
-        return;
+        return false;
     }
-
     emit("save", {
-        title: editTitle.value,
+        title: editTitle.value.trim(),
         content: editContent.value,
         coverImages: [...editImages.value].slice(0, MAX_IMAGES),
+        silent,
     });
+    return true;
+};
+
+// 保存编辑
+const handleSave = () => {
+    if (!flushToParent(false)) return;
     isEditing.value = false;
 };
 
@@ -206,8 +220,10 @@ const handleClose = () => {
     emit("close");
 };
 
-// 发布
+// 发布（先同步正文与配图，再通知父级发小红书）
 const handlePublish = () => {
+    if (!flushToParent(true)) return;
+    isEditing.value = false;
     emit("publish");
 };
 </script>

@@ -15,7 +15,12 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 
-import { BatchDeleteProductsDto } from "../../dto";
+import {
+    BatchDeleteProductsDto,
+    BatchSetProductCategoryDto,
+    ClearProductCategoryDto,
+    RenameProductCategoryDto,
+} from "../../dto";
 import { QueryProductDto } from "../../dto/query-product.dto";
 import type { ImportProductResult } from "../../services/xhs-product.service";
 import { XhsProductService } from "../../services/xhs-product.service";
@@ -75,6 +80,82 @@ export class XhsProductWebController extends BaseController {
         }
         const items = await this.xhsProductService.findByIds(ids, user.id);
         return { items };
+    }
+
+    /**
+     * 分类及 SKU 数量（分类管理页，须写在 products/categories 之前）
+     * GET /api/xhs/products/categories/stats
+     */
+    @Get("products/categories/stats")
+    async categoryStats(@Playground() user: UserPlayground) {
+        const items = await this.xhsProductService.listCategoryStats(user.id);
+        return { items };
+    }
+
+    /**
+     * 当前用户已使用的商品分类（用于筛选）
+     * GET /api/xhs/products/categories
+     */
+    @Get("products/categories")
+    async listCategories(@Playground() user: UserPlayground) {
+        const items = await this.xhsProductService.listDistinctCategories(user.id);
+        return { items };
+    }
+
+    /**
+     * 重命名分类（将该分类下全部 SKU 改到新名称）
+     * POST /api/xhs/products/rename-category
+     */
+    @Post("products/rename-category")
+    async renameCategory(
+        @Body() dto: RenameProductCategoryDto,
+        @Playground() user: UserPlayground,
+    ) {
+        const updated = await this.xhsProductService.renameCategoryForUser(
+            user.id,
+            dto.fromCategory,
+            dto.toCategory,
+        );
+        return {
+            updated,
+            message: updated ? `已更新 ${updated} 个商品的分类` : "没有需要更新的商品",
+        };
+    }
+
+    /**
+     * 清空某分类（该名称下全部 SKU 的 category 置空）
+     * POST /api/xhs/products/clear-category
+     */
+    @Post("products/clear-category")
+    async clearCategoryByName(
+        @Body() dto: ClearProductCategoryDto,
+        @Playground() user: UserPlayground,
+    ) {
+        const updated = await this.xhsProductService.clearCategoryByNameForUser(
+            user.id,
+            dto.category,
+        );
+        return {
+            updated,
+            message: updated ? `已清空 ${updated} 个商品的分类` : "没有匹配的商品",
+        };
+    }
+
+    /**
+     * 批量设置商品分类
+     * POST /api/xhs/products/batch-set-category
+     */
+    @Post("products/batch-set-category")
+    async batchSetCategory(
+        @Body() dto: BatchSetProductCategoryDto,
+        @Playground() user: UserPlayground,
+    ) {
+        const updated = await this.xhsProductService.batchSetCategoryForUser(
+            dto.ids,
+            dto.category,
+            user.id,
+        );
+        return { updated, message: updated ? `已更新 ${updated} 个商品的分类` : "未更新任何商品" };
     }
 
     /**

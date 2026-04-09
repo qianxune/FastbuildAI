@@ -20,6 +20,9 @@ export const useXhsProducts = () => {
     const isLoading = ref(false);
     const error = ref("");
     const keyword = ref("");
+    /** 分类筛选（与 keyword 可同时生效，传接口 category 精确匹配） */
+    const category = ref("");
+    const categoryOptions = ref<string[]>([]);
     const viewMode = ref<"list" | "grouped">("grouped");
     const sortBy = ref<"createdAt" | "noteCount">("createdAt");
     const sortOrder = ref<"ASC" | "DESC">("DESC");
@@ -29,6 +32,7 @@ export const useXhsProducts = () => {
     const fetchProducts = async (opts?: {
         page?: number;
         keyword?: string;
+        category?: string;
         sortBy?: "createdAt" | "noteCount";
         sortOrder?: "ASC" | "DESC";
     }) => {
@@ -36,6 +40,7 @@ export const useXhsProducts = () => {
         error.value = "";
         const p = opts?.page ?? page.value;
         const kw = opts?.keyword !== undefined ? opts.keyword : keyword.value;
+        const cat = opts?.category !== undefined ? opts.category : category.value;
         const sb = opts?.sortBy ?? sortBy.value;
         const so = opts?.sortOrder ?? sortOrder.value;
         const params = new URLSearchParams({
@@ -45,6 +50,7 @@ export const useXhsProducts = () => {
             sortOrder: so,
         });
         if (kw?.trim()) params.set("keyword", kw.trim());
+        if (cat?.trim()) params.set("category", cat.trim());
 
         const { data, error: apiError } = await get<{
             items: XhsProduct[];
@@ -68,6 +74,7 @@ export const useXhsProducts = () => {
     const fetchProductsGrouped = async (opts?: {
         page?: number;
         keyword?: string;
+        category?: string;
         sortBy?: "createdAt" | "noteCount";
         sortOrder?: "ASC" | "DESC";
     }) => {
@@ -75,6 +82,7 @@ export const useXhsProducts = () => {
         error.value = "";
         const p = opts?.page ?? page.value;
         const kw = opts?.keyword !== undefined ? opts.keyword : keyword.value;
+        const cat = opts?.category !== undefined ? opts.category : category.value;
         const sb = opts?.sortBy ?? sortBy.value;
         const so = opts?.sortOrder ?? sortOrder.value;
         const params = new URLSearchParams({
@@ -84,6 +92,7 @@ export const useXhsProducts = () => {
             sortOrder: so,
         });
         if (kw?.trim()) params.set("keyword", kw.trim());
+        if (cat?.trim()) params.set("category", cat.trim());
 
         const { data, error: apiError } = await get<ProductGroupListResponse>(
             `/api/xhs/products/grouped?${params.toString()}`,
@@ -156,6 +165,19 @@ export const useXhsProducts = () => {
         }
     };
 
+    /** 拉取当前用户已有分类（下拉用） */
+    const fetchCategoryOptions = async () => {
+        const { data, error: apiError } = await get<{ items: string[] }>(
+            "/api/xhs/products/categories",
+            { showError: false },
+        );
+        if (apiError || !data?.items) {
+            categoryOptions.value = [];
+            return;
+        }
+        categoryOptions.value = data.items;
+    };
+
     return {
         products,
         productGroups,
@@ -166,11 +188,14 @@ export const useXhsProducts = () => {
         isLoading,
         error,
         keyword,
+        category,
+        categoryOptions,
         viewMode,
         sortBy,
         sortOrder,
         fetchProducts,
         fetchProductsGrouped,
+        fetchCategoryOptions,
         fetchByIds,
         importExcel,
     };

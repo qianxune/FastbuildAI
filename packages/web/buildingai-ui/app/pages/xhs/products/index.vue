@@ -27,11 +27,14 @@ const {
     totalPages,
     isLoading,
     error,
+    category,
+    categoryOptions,
     viewMode,
     sortBy,
     sortOrder,
     fetchProducts,
     fetchProductsGrouped,
+    fetchCategoryOptions,
     fetchByIds,
     importExcel,
 } = useXhsProducts();
@@ -42,6 +45,54 @@ const expandedGroups = ref<Set<string>>(new Set());
 const isImporting = ref(false);
 const importResult = ref<{ success: number; skipped: number; failed: number } | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
+
+/** 列表请求共用：关键词 + 分类 */
+const listFilters = () => ({
+    keyword: searchInput.value.trim(),
+    category: category.value.trim(),
+});
+
+/** 仅具体分类名；「全部」通过清空筛选（不放在下拉里，避免与选中某分类冲突） */
+const categoryFilterOnlyItems = computed(() =>
+    categoryOptions.value.map((c) => ({ label: c, value: c })),
+);
+
+/** 筛选下拉：无选中时用 undefined，避免与具体分类值混淆 */
+const categoryFilterModel = computed<string | undefined>({
+    get: () => (category.value.trim() ? category.value.trim() : undefined),
+    set: (v) => {
+        category.value = typeof v === "string" ? v : "";
+    },
+});
+
+const clearCategoryFilter = async () => {
+    category.value = "";
+    await router.push({
+        query: { ...route.query, category: undefined, page: undefined },
+    });
+    if (viewMode.value === "grouped") {
+        await fetchProductsGrouped({ page: 1, keyword: searchInput.value.trim(), category: "" });
+    } else {
+        await fetchProducts({ page: 1, keyword: searchInput.value.trim(), category: "" });
+    }
+};
+
+/** 移动到分类：可选已有 / 手动输入 / 清除 */
+const movePick = ref<string>("");
+
+const moveCategoryMenuItems = computed(() => [
+    { label: "清除所选商品的分类", value: "__clear__" },
+    { label: "手动输入新分类…", value: "__custom__" },
+    ...categoryOptions.value.map((c) => ({ label: c, value: c })),
+]);
+
+const resolveBatchTargetCategory = (): string | undefined => {
+    const p = movePick.value;
+    if (p === "__clear__") return undefined;
+    if (p === "__custom__") return categoryDraft.value.trim() || undefined;
+    if (p) return p;
+    return categoryDraft.value.trim() || undefined;
+};
 
 // 顶层获取 HTTP 方法，避免在异步回调中丢失 Nuxt 上下文
 const { get: authGet, post: authPost, del: authDel } = useAuthFetch();
@@ -208,10 +259,73 @@ const toggleNoteCountSort = () => {
         sortOrder.value = "DESC";
     }
     if (viewMode.value === "grouped") {
-        fetchProductsGrouped({ page: 1, sortBy: sortBy.value, sortOrder: sortOrder.value });
+        fetchProductsGrouped({
+            page: 1,
+            sortBy: sortBy.value,
+            sortOrder: sortOrder.value,
+            ...listFilters(),
+        });
     } else {
-        fetchProducts({ page: 1, sortBy: sortBy.value, sortOrder: sortOrder.value });
+        fetchProducts({
+            page: 1,
+            sortBy: sortBy.value,
+            sortOrder: sortOrder.value,
+            ...listFilters(),
+        });
     }
+};
+
+const toggleCreatedAtSort = () => {
+    if (sortBy.value === "createdAt") {
+        sortOrder.value = sortOrder.value === "ASC" ? "DESC" : "ASC";
+    } else {
+        sortBy.value = "createdAt";
+        sortOrder.value = "DESC";
+    }
+    if (viewMode.value === "grouped") {
+        fetchProductsGrouped({
+            page: 1,
+            sortBy: sortBy.value,
+            sortOrder: sortOrder.value,
+            ...listFilters(),
+        });
+    } else {
+        fetchProducts({
+            page: 1,
+            sortBy: sortBy.value,
+            sortOrder: sortOrder.value,
+            ...listFilters(),
+        });
+    }
+};
+
+/** 列表/分组展示用 */
+const formatProductCreatedAt = (iso: string | Date | undefined | null) => {
+    if (iso == null) return "-";
+    const d = iso instanceof Date ? iso : new Date(iso);
+    if (Number.isNaN(d.getTime())) return "-";
+    return d.toLocaleString("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+};
+
+/**
+ * 分组视图：后端按 SKU 创建时间倒序拉平再分组，skus[0] 往往是「最新」SKU。
+ * 商品创建时间应展示组内最早一条 SKU 的创建时间，避免新导入规格把整行时间顶成当前时间。
+ */
+const groupEarliestCreatedAt = (group: XhsProductGroup): Date | null => {
+    let min = Infinity;
+    for (const s of group.skus) {
+        const raw = s.createdAt;
+        if (raw == null) continue;
+        const t = new Date(raw as string | Date).getTime();
+        if (!Number.isNaN(t) && t < min) min = t;
+    }
+    return min === Infinity ? null : new Date(min);
 };
 
 // 单条生成 - 跳转到笔记编辑页
@@ -293,12 +407,16 @@ const isGroupPartiallySelected = (group: XhsProductGroup) => {
 onMounted(async () => {
     const urlPage = parseInt((route.query.page as string) || "1");
     const urlKw = (route.query.keyword as string) || "";
+    const urlCat = (route.query.category as string) || "";
     if (urlKw) searchInput.value = urlKw;
+    if (urlCat) category.value = urlCat;
+
+    await fetchCategoryOptions();
 
     if (viewMode.value === "grouped") {
-        await fetchProductsGrouped({ page: urlPage, keyword: urlKw });
+        await fetchProductsGrouped({ page: urlPage, keyword: urlKw, category: urlCat });
     } else {
-        await fetchProducts({ page: urlPage, keyword: urlKw });
+        await fetchProducts({ page: urlPage, keyword: urlKw, category: urlCat });
     }
 });
 
@@ -314,12 +432,38 @@ const handleModelChange = (model: AiModel | null) => {
 let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 const handleSearch = async () => {
     const kw = searchInput.value.trim();
-    await router.push({ query: { ...route.query, keyword: kw || undefined, page: undefined } });
+    const cat = category.value.trim();
+    await router.push({
+        query: {
+            ...route.query,
+            keyword: kw || undefined,
+            category: cat || undefined,
+            page: undefined,
+        },
+    });
 
     if (viewMode.value === "grouped") {
-        await fetchProductsGrouped({ page: 1, keyword: kw });
+        await fetchProductsGrouped({ page: 1, keyword: kw, category: cat });
     } else {
-        await fetchProducts({ page: 1, keyword: kw });
+        await fetchProducts({ page: 1, keyword: kw, category: cat });
+    }
+};
+
+const syncCategoryFilter = async () => {
+    const kw = searchInput.value.trim();
+    const cat = category.value.trim();
+    await router.push({
+        query: {
+            ...route.query,
+            keyword: kw || undefined,
+            category: cat || undefined,
+            page: undefined,
+        },
+    });
+    if (viewMode.value === "grouped") {
+        await fetchProductsGrouped({ page: 1, keyword: kw, category: cat });
+    } else {
+        await fetchProducts({ page: 1, keyword: kw, category: cat });
     }
 };
 
@@ -333,9 +477,9 @@ watch(viewMode, async (newMode) => {
     expandedGroups.value.clear();
 
     if (newMode === "grouped") {
-        await fetchProductsGrouped({ page: 1, keyword: searchInput.value.trim() });
+        await fetchProductsGrouped({ page: 1, ...listFilters() });
     } else {
-        await fetchProducts({ page: 1, keyword: searchInput.value.trim() });
+        await fetchProducts({ page: 1, ...listFilters() });
     }
 });
 
@@ -393,9 +537,9 @@ const handlePageChange = async (p: number) => {
     await router.push({ query: { ...route.query, page: p.toString() } });
 
     if (viewMode.value === "grouped") {
-        await fetchProductsGrouped({ page: p, keyword: searchInput.value.trim() });
+        await fetchProductsGrouped({ page: p, ...listFilters() });
     } else {
-        await fetchProducts({ page: p, keyword: searchInput.value.trim() });
+        await fetchProducts({ page: p, ...listFilters() });
     }
 };
 
@@ -429,9 +573,9 @@ const limitOptions = [20, 50, 100];
 const handleLimitChange = async () => {
     await router.push({ query: { ...route.query, page: undefined } });
     if (viewMode.value === "grouped") {
-        await fetchProductsGrouped({ page: 1, keyword: searchInput.value.trim() });
+        await fetchProductsGrouped({ page: 1, ...listFilters() });
     } else {
-        await fetchProducts({ page: 1, keyword: searchInput.value.trim() });
+        await fetchProducts({ page: 1, ...listFilters() });
     }
 };
 
@@ -471,10 +615,11 @@ const onFileChange = async (e: Event) => {
                 `Import done: success ${result.success}, skipped ${result.skipped}, failed ${result.failed}`,
             );
             if (viewMode.value === "grouped") {
-                await fetchProductsGrouped({ page: 1, keyword: searchInput.value.trim() });
+                await fetchProductsGrouped({ page: 1, ...listFilters() });
             } else {
-                await fetchProducts({ page: 1, keyword: searchInput.value.trim() });
+                await fetchProducts({ page: 1, ...listFilters() });
             }
+            await fetchCategoryOptions();
         }
     } catch (err) {
         toast.error(err instanceof Error ? err.message : "Import failed");
@@ -518,6 +663,47 @@ const cancelDelete = () => {
     deleteTargetIds.value = [];
 };
 
+const showCategoryModal = ref(false);
+const categoryDraft = ref("");
+const isSavingCategory = ref(false);
+
+const openBatchCategoryModal = async () => {
+    if (!selectedIds.value.length) return;
+    movePick.value = "";
+    categoryDraft.value = "";
+    await fetchCategoryOptions();
+    showCategoryModal.value = true;
+};
+
+const saveBatchCategory = async () => {
+    if (!selectedIds.value.length) return;
+    const targetCategory = resolveBatchTargetCategory();
+    isSavingCategory.value = true;
+    try {
+        const { data, error } = await authPost<{ updated: number; message: string }>(
+            "/api/xhs/products/batch-set-category",
+            {
+                ids: selectedIds.value,
+                category: targetCategory,
+            },
+        );
+        if (error) {
+            toast.error(error);
+            return;
+        }
+        toast.success(data?.message ?? "已更新分类");
+        showCategoryModal.value = false;
+        await fetchCategoryOptions();
+        if (viewMode.value === "grouped") {
+            await fetchProductsGrouped({ page: page.value, ...listFilters() });
+        } else {
+            await fetchProducts({ page: page.value, ...listFilters() });
+        }
+    } finally {
+        isSavingCategory.value = false;
+    }
+};
+
 const doConfirmDelete = async () => {
     const ids = deleteTargetIds.value;
     if (!ids.length) {
@@ -548,10 +734,11 @@ const doConfirmDelete = async () => {
         showDeleteConfirm.value = false;
         deleteTargetIds.value = [];
         if (viewMode.value === "grouped") {
-            await fetchProductsGrouped({ page: page.value, keyword: searchInput.value.trim() });
+            await fetchProductsGrouped({ page: page.value, ...listFilters() });
         } else {
-            await fetchProducts({ page: page.value, keyword: searchInput.value.trim() });
+            await fetchProducts({ page: page.value, ...listFilters() });
         }
+        await fetchCategoryOptions();
     } catch (e) {
         toast.error("删除失败，请重试");
     } finally {
@@ -596,6 +783,10 @@ const doConfirmDelete = async () => {
                             <UIcon name="i-heroicons-arrow-up-tray" class="mr-1" />
                             Import Excel
                         </UButton>
+                        <UButton variant="outline" color="neutral" to="/xhs/product-categories">
+                            <UIcon name="i-heroicons-folder-open" class="mr-1" />
+                            分类管理
+                        </UButton>
                         <UButton
                             v-if="selectedIds.length === 1"
                             color="primary"
@@ -613,6 +804,16 @@ const doConfirmDelete = async () => {
                         >
                             <UIcon name="i-heroicons-sparkles" class="mr-1" />
                             Batch Generate ({{ selectedIds.length }} selected)
+                        </UButton>
+                        <UButton
+                            v-if="selectedIds.length > 0"
+                            color="primary"
+                            variant="outline"
+                            :disabled="isSavingCategory"
+                            @click="openBatchCategoryModal"
+                        >
+                            <UIcon name="i-heroicons-arrow-right-circle" class="mr-1" />
+                            移动到分类 ({{ selectedIds.length }})
                         </UButton>
                         <UButton
                             v-if="selectedIds.length > 0"
@@ -660,11 +861,31 @@ const doConfirmDelete = async () => {
             <div class="mb-6 flex flex-wrap items-center gap-4 md:mb-8">
                 <UInput
                     v-model="searchInput"
-                    placeholder="Search product name, SKU, spec..."
+                    placeholder="Search product name, SKU, spec, category..."
                     class="max-w-xs"
                     icon="i-heroicons-magnifying-glass"
                     size="md"
                 />
+                <div class="flex flex-wrap items-center gap-2">
+                    <USelectMenu
+                        v-model="categoryFilterModel"
+                        :items="categoryFilterOnlyItems"
+                        value-key="value"
+                        size="md"
+                        placeholder="按分类筛选"
+                        class="min-w-[180px]"
+                        @update:model-value="syncCategoryFilter"
+                    />
+                    <UButton
+                        v-if="category.trim()"
+                        size="xs"
+                        variant="soft"
+                        color="neutral"
+                        @click="clearCategoryFilter"
+                    >
+                        查看全部商品
+                    </UButton>
+                </div>
 
                 <!-- AI模型选择 -->
                 <div class="flex items-center gap-2">
@@ -772,6 +993,9 @@ const doConfirmDelete = async () => {
                                         Product Name
                                     </th>
                                     <th class="py-3 font-medium text-gray-700 dark:text-gray-300">
+                                        分类
+                                    </th>
+                                    <th class="py-3 font-medium text-gray-700 dark:text-gray-300">
                                         SKUs
                                     </th>
                                     <th class="py-3 font-medium text-gray-700 dark:text-gray-300">
@@ -782,6 +1006,21 @@ const doConfirmDelete = async () => {
                                         >
                                             笔记数
                                             <template v-if="sortBy === 'noteCount'">
+                                                <UIcon
+                                                    :name="sortOrder === 'ASC' ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'"
+                                                    class="h-4 w-4"
+                                                />
+                                            </template>
+                                        </button>
+                                    </th>
+                                    <th class="py-3 font-medium text-gray-700 dark:text-gray-300">
+                                        <button
+                                            type="button"
+                                            class="inline-flex items-center gap-1 hover:text-primary-500"
+                                            @click="toggleCreatedAtSort"
+                                        >
+                                            创建时间
+                                            <template v-if="sortBy === 'createdAt'">
                                                 <UIcon
                                                     :name="sortOrder === 'ASC' ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'"
                                                     class="h-4 w-4"
@@ -855,6 +1094,12 @@ const doConfirmDelete = async () => {
                                         >
                                             {{ group.productName }}
                                         </td>
+                                        <td
+                                            class="max-w-[120px] truncate text-gray-600 dark:text-gray-400"
+                                            :title="group.category || ''"
+                                        >
+                                            {{ group.category || "—" }}
+                                        </td>
                                         <td>
                                             <span
                                                 class="inline-flex items-center rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
@@ -873,6 +1118,13 @@ const doConfirmDelete = async () => {
                                             >
                                                 {{ group.noteCount ?? 0 }} 条笔记
                                             </UButton>
+                                        </td>
+                                        <td
+                                            class="whitespace-nowrap py-2 text-gray-500 dark:text-gray-400"
+                                        >
+                                            {{
+                                                formatProductCreatedAt(groupEarliestCreatedAt(group))
+                                            }}
                                         </td>
                                         <td class="py-2">
                                             <div class="flex flex-wrap items-center gap-2">
@@ -923,7 +1175,7 @@ const doConfirmDelete = async () => {
                                         v-if="isExpanded(group.productId)"
                                         class="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-800/30"
                                     >
-                                        <td colspan="8" class="p-4">
+                                        <td colspan="9" class="p-4">
                                             <div class="space-y-2">
                                                 <div
                                                     v-for="sku in group.skus"
@@ -1020,6 +1272,9 @@ const doConfirmDelete = async () => {
                                         Name
                                     </th>
                                     <th class="py-3 font-medium text-gray-700 dark:text-gray-300">
+                                        分类
+                                    </th>
+                                    <th class="py-3 font-medium text-gray-700 dark:text-gray-300">
                                         SKU
                                     </th>
                                     <th class="py-3 font-medium text-gray-700 dark:text-gray-300">
@@ -1032,9 +1287,6 @@ const doConfirmDelete = async () => {
                                         Stock
                                     </th>
                                     <th class="py-3 font-medium text-gray-700 dark:text-gray-300">
-                                        Created
-                                    </th>
-                                    <th class="py-3 font-medium text-gray-700 dark:text-gray-300">
                                         <button
                                             type="button"
                                             class="inline-flex items-center gap-1 hover:text-primary-500"
@@ -1042,6 +1294,21 @@ const doConfirmDelete = async () => {
                                         >
                                             笔记数
                                             <template v-if="sortBy === 'noteCount'">
+                                                <UIcon
+                                                    :name="sortOrder === 'ASC' ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'"
+                                                    class="h-4 w-4"
+                                                />
+                                            </template>
+                                        </button>
+                                    </th>
+                                    <th class="py-3 font-medium text-gray-700 dark:text-gray-300">
+                                        <button
+                                            type="button"
+                                            class="inline-flex items-center gap-1 hover:text-primary-500"
+                                            @click="toggleCreatedAtSort"
+                                        >
+                                            创建时间
+                                            <template v-if="sortBy === 'createdAt'">
                                                 <UIcon
                                                     :name="sortOrder === 'ASC' ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'"
                                                     class="h-4 w-4"
@@ -1098,6 +1365,12 @@ const doConfirmDelete = async () => {
                                     <td class="max-w-[200px] truncate font-medium" :title="p.name">
                                         {{ p.name }}
                                     </td>
+                                    <td
+                                        class="max-w-[100px] truncate text-gray-600 dark:text-gray-400"
+                                        :title="p.category || ''"
+                                    >
+                                        {{ p.category || "—" }}
+                                    </td>
                                     <td class="text-gray-600 dark:text-gray-400">
                                         {{ p.skuCode || "-" }}
                                     </td>
@@ -1108,13 +1381,6 @@ const doConfirmDelete = async () => {
                                     </td>
                                     <td>{{ p.price ?? "-" }}</td>
                                     <td>{{ p.stock ?? "-" }}</td>
-                                    <td class="whitespace-nowrap text-gray-500 dark:text-gray-400">
-                                        {{
-                                            p.createdAt
-                                                ? new Date(p.createdAt).toLocaleDateString()
-                                                : "-"
-                                        }}
-                                    </td>
                                     <td class="py-2">
                                         <UButton
                                             variant="ghost"
@@ -1124,6 +1390,9 @@ const doConfirmDelete = async () => {
                                         >
                                             {{ p.noteCount ?? 0 }} 条笔记
                                         </UButton>
+                                    </td>
+                                    <td class="whitespace-nowrap text-gray-500 dark:text-gray-400">
+                                        {{ formatProductCreatedAt(p.createdAt) }}
                                     </td>
                                     <td class="py-2">
                                         <div class="flex flex-wrap items-center gap-2">
@@ -1349,6 +1618,71 @@ const doConfirmDelete = async () => {
                     </button>
                 </div>
             </div>
+
+            <!-- 移动到分类 -->
+            <UModal v-model:open="showCategoryModal" :ui="{ content: 'sm:max-w-md' }">
+                <template #content>
+                    <UCard>
+                        <template #header>
+                            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">移动到分类</h3>
+                        </template>
+                        <p class="mb-1 text-sm text-gray-600 dark:text-gray-400">
+                            将已选中的 <strong>{{ selectedIds.length }}</strong> 个 SKU
+                            移动到目标分类；也可清除分类或输入新名称。
+                        </p>
+                        <p class="mb-3 text-xs text-gray-500 dark:text-gray-500">
+                            重命名、清空整个分类请打开
+                            <NuxtLink
+                                to="/xhs/product-categories"
+                                class="font-medium text-primary-600 underline dark:text-primary-400"
+                                >商品分类管理</NuxtLink
+                            >。
+                        </p>
+                        <div class="space-y-3">
+                            <UFormField label="目标分类">
+                                <USelectMenu
+                                    v-model="movePick"
+                                    :items="moveCategoryMenuItems"
+                                    value-key="value"
+                                    placeholder="选择已有分类或下方项"
+                                    class="w-full"
+                                />
+                            </UFormField>
+                            <div v-if="movePick === '__custom__'">
+                                <UFormField label="新分类名称">
+                                    <UInput
+                                        v-model="categoryDraft"
+                                        placeholder="输入新的分类名称"
+                                        maxlength="100"
+                                    />
+                                </UFormField>
+                            </div>
+                            <p
+                                v-else-if="movePick === '__clear__'"
+                                class="text-xs text-amber-700 dark:text-amber-400"
+                            >
+                                将移除这些 SKU 上的分类标记（不删除商品）。
+                            </p>
+                            <p
+                                v-else-if="movePick && movePick !== '__custom__' && movePick !== '__clear__'"
+                                class="text-xs text-gray-500 dark:text-gray-400"
+                            >
+                                将归入已有分类「{{ movePick }}」。
+                            </p>
+                        </div>
+                        <template #footer>
+                            <div class="flex justify-end gap-2">
+                                <UButton color="neutral" variant="outline" @click="showCategoryModal = false">
+                                    取消
+                                </UButton>
+                                <UButton color="primary" :loading="isSavingCategory" @click="saveBatchCategory">
+                                    确定
+                                </UButton>
+                            </div>
+                        </template>
+                    </UCard>
+                </template>
+            </UModal>
 
             <!-- 删除确认弹窗 -->
             <UModal

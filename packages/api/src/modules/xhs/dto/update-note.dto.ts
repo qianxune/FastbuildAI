@@ -1,4 +1,13 @@
-import { IsArray, IsOptional, IsString, IsUUID, Length, Matches } from "class-validator";
+import {
+    IsArray,
+    IsBoolean,
+    IsOptional,
+    IsString,
+    IsUUID,
+    Length,
+    Matches,
+    MaxLength,
+} from "class-validator";
 
 /**
  * 更新笔记DTO
@@ -36,4 +45,27 @@ export class UpdateNoteDto {
     @IsArray({ message: "封面图片必须是数组" })
     @IsString({ each: true, message: "每个图片URL必须是字符串" })
     coverImages?: string[];
+
+    /**
+     * 是否已发布到小红书（保存草稿时不要传）
+     */
+    @IsOptional()
+    @IsBoolean({ message: "isPublished 必须是布尔值" })
+    isPublished?: boolean;
+
+    /**
+     * 小红书平台上的笔记 ID（发布后回写）
+     */
+    @IsOptional()
+    @IsString({ message: "小红书笔记ID必须是字符串" })
+    @MaxLength(100, { message: "小红书笔记ID过长" })
+    xhsNoteId?: string;
+
+    /**
+     * 小红书笔记链接（发布后回写）
+     */
+    @IsOptional()
+    @IsString({ message: "小红书笔记URL必须是字符串" })
+    @MaxLength(500, { message: "小红书笔记URL过长" })
+    xhsNoteUrl?: string;
 }

@@ -36,6 +36,9 @@ export const MIAOSHOU_EXCEL_COLUMN_MAP: Record<string, string> = {
     来源标题: "sourceTitle",
     来源链接: "sourceUrl",
     商品链接: "productUrl",
+    分类: "category",
+    类目: "category",
+    商品类目: "category",
     备注: "description",
     描述: "description",
 };

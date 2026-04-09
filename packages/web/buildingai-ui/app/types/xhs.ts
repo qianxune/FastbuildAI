@@ -513,6 +513,8 @@ export interface XhsProduct {
   sourceTitle?: string
   sourceUrl?: string
   productUrl?: string
+  /** 商品分类（用户自定义或 Excel 导入） */
+  category?: string
   createdAt: string
   updatedAt: string
   /** 关联的笔记数量 */
@@ -538,6 +540,8 @@ export interface XhsProductGroup {
   skuCount: number
   /** 组内所有 SKU 的笔记数之和 */
   noteCount?: number
+  /** 组内 SKU 携带的分类（展示用） */
+  category?: string
   skus: XhsProduct[]
   imageUrl?: string
   sourceUrl?: string

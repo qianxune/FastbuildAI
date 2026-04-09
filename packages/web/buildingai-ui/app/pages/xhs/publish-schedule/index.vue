@@ -28,6 +28,7 @@ const {
     pauseSchedule,
     resumeSchedule,
     cancelSchedule,
+    retryFailedItems,
 } = usePublishSchedule();
 
 // 筛选和分页状态
@@ -44,6 +45,20 @@ const isLoadingDetail = ref(false);
 // 取消确认弹窗
 const showCancelModal = ref(false);
 const scheduleToCancel = ref<PublishSchedule | null>(null);
+
+/** 详情内重试失败项时的 loading，避免与列表 isLoading 混用 */
+const isRetryingFailed = ref(false);
+
+const failedItems = computed(() =>
+    scheduleItems.value.filter((i) => i.status === "failed"),
+);
+
+/** 已取消的计划无法通过队列重新发布失败项 */
+const canRetryFailedItems = computed(() => {
+    if (!selectedSchedule.value) return false;
+    if (selectedSchedule.value.status === "cancelled") return false;
+    return failedItems.value.length > 0;
+});
 
 // 加载计划列表
 const loadSchedules = async () => {
@@ -91,6 +106,33 @@ const closeDetailModal = () => {
     showDetailModal.value = false;
     selectedSchedule.value = null;
     scheduleItems.value = [];
+};
+
+const refreshDetailSilent = async () => {
+    if (!selectedSchedule.value) return;
+    const detail = await fetchScheduleDetail(selectedSchedule.value.id, true);
+    if (detail) {
+        scheduleItems.value = detail.items;
+        selectedSchedule.value = detail.schedule;
+    }
+};
+
+/** 重新发布失败项：不传 itemIds 时重试当前详情内全部失败项 */
+const handleRetryFailed = async (itemIds?: string[]) => {
+    if (!selectedSchedule.value || !canRetryFailedItems.value) return;
+    const ids = itemIds ?? failedItems.value.map((i) => i.id);
+    if (ids.length === 0) return;
+
+    isRetryingFailed.value = true;
+    try {
+        const ok = await retryFailedItems(selectedSchedule.value.id, ids);
+        if (ok) {
+            await refreshDetailSilent();
+            await loadSchedules();
+        }
+    } finally {
+        isRetryingFailed.value = false;
+    }
 };
 
 // 获取计划项状态标签
@@ -454,17 +496,30 @@ const goBack = () => {
             <template #content>
                 <UCard v-if="selectedSchedule">
                     <template #header>
-                        <div class="flex items-center justify-between">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
                             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
                                 计划详情
                             </h3>
-                            <UButton
-                                variant="ghost"
-                                color="neutral"
-                                icon="i-heroicons-x-mark"
-                                size="sm"
-                                @click="closeDetailModal"
-                            />
+                            <div class="flex items-center gap-2">
+                                <UButton
+                                    v-if="canRetryFailedItems"
+                                    size="sm"
+                                    variant="outline"
+                                    color="primary"
+                                    :loading="isRetryingFailed"
+                                    @click="handleRetryFailed()"
+                                >
+                                    <UIcon name="i-heroicons-arrow-path" class="mr-1" />
+                                    重新发布失败项（{{ failedItems.length }}）
+                                </UButton>
+                                <UButton
+                                    variant="ghost"
+                                    color="neutral"
+                                    icon="i-heroicons-x-mark"
+                                    size="sm"
+                                    @click="closeDetailModal"
+                                />
+                            </div>
                         </div>
                     </template>
 
@@ -511,6 +566,12 @@ const goBack = () => {
                             <p class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
                                 笔记列表 ({{ selectedSchedule.totalCount }})
                             </p>
+                            <p
+                                v-if="canRetryFailedItems && selectedSchedule.status === 'paused'"
+                                class="mb-3 text-xs text-amber-700 dark:text-amber-400"
+                            >
+                                当前计划已暂停：重新加入队列后，请先点击列表中的「恢复」，系统才会继续发布。
+                            </p>
 
                             <!-- 加载中 -->
                             <div v-if="isLoadingDetail" class="space-y-2">
@@ -551,13 +612,24 @@ const goBack = () => {
                                             </div>
                                         </div>
 
-                                        <!-- 状态标签 -->
-                                        <span
-                                            class="flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
-                                            :class="getItemStatusColor(item.status)"
-                                        >
-                                            {{ getItemStatusLabel(item.status) }}
-                                        </span>
+                                        <div class="flex flex-shrink-0 flex-col items-end gap-2">
+                                            <span
+                                                class="rounded-full px-2 py-0.5 text-xs font-medium"
+                                                :class="getItemStatusColor(item.status)"
+                                            >
+                                                {{ getItemStatusLabel(item.status) }}
+                                            </span>
+                                            <UButton
+                                                v-if="item.status === 'failed' && canRetryFailedItems"
+                                                size="xs"
+                                                variant="outline"
+                                                color="primary"
+                                                :loading="isRetryingFailed"
+                                                @click="handleRetryFailed([item.id])"
+                                            >
+                                                重新发布
+                                            </UButton>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
