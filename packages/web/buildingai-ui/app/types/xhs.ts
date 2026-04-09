@@ -45,6 +45,11 @@ export interface GenerateNoteDto {
      * 高级选项 - 生成标题数量
      */
     titleCount?: string;
+
+    /**
+     * 可选：提示词模板 ID（与后台模板管理一致）
+     */
+    promptTemplateId?: string;
 }
 
 /**

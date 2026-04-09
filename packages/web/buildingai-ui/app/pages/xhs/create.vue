@@ -45,6 +45,42 @@ const toggleMenu = (key: string) => {
 const showPreview = ref(false);
 const wordCount = computed(() => noteContent.value.length);
 
+/** 正文话题高亮：与 textarea 叠放的底层预览同步滚动 */
+const noteContentHighlightBackdropRef = ref<HTMLElement | null>(null);
+const syncNoteContentHighlightScroll = (e: Event) => {
+    const ta = e.target as HTMLTextAreaElement;
+    const back = noteContentHighlightBackdropRef.value;
+    if (back) {
+        back.scrollTop = ta.scrollTop;
+        back.scrollLeft = ta.scrollLeft;
+    }
+};
+
+const HASHTAG_SEGMENT_RE = /(#[^#\s]+)/g;
+
+function escapeHtmlForHighlight(s: string): string {
+    return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+/** 将 #话题 包成蓝色 span（仅用于受控 v-html，片段均已转义） */
+const noteContentHighlightHtml = computed(() => {
+    const raw = noteContent.value;
+    if (!raw) return "";
+    const parts = raw.split(HASHTAG_SEGMENT_RE);
+    return parts
+        .map((part) => {
+            if (/^#[^#\s]+$/.test(part)) {
+                return `<span class="text-blue-600 dark:text-blue-400">${escapeHtmlForHighlight(part)}</span>`;
+            }
+            return escapeHtmlForHighlight(part);
+        })
+        .join("");
+});
+
 // 如果是从商品列表跳转过来，用于记录主商品 ID 与外部商品 ID（发布挂品）
 const primaryProductExternalId = ref<string | null>(null);
 const primaryProductId = ref<string | null>(null);
@@ -158,6 +194,59 @@ const templateCategories = [
     },
 ];
 
+// 后台提示词模板（与商品批量生成共用接口）
+interface PromptTemplateOption {
+    id: string;
+    name: string;
+    groupId?: string;
+    groupName?: string;
+    isDefault?: boolean;
+}
+
+const promptTemplates = ref<PromptTemplateOption[]>([]);
+const selectedPromptTemplateId = ref<string>("");
+const isLoadingPromptTemplates = ref(false);
+
+const loadPromptTemplates = async () => {
+    isLoadingPromptTemplates.value = true;
+    try {
+        const { get } = useAuthFetch();
+        const { data, error } = await get<{
+            items: PromptTemplateOption[];
+            defaultTemplateId: string | null;
+        }>("/api/xhs/prompt-templates?forSelect=true", { showError: false });
+        if (error) {
+            toast.warning("提示词模板加载失败，可稍后在「提示词模板」中配置");
+            return;
+        }
+        if (data) {
+            const raw = Array.isArray(data.items) ? data.items : [];
+            const items: PromptTemplateOption[] = raw.map((t: PromptTemplateOption & { group?: { name?: string } }) => ({
+                id: t.id,
+                name: t.name,
+                groupId: t.groupId,
+                groupName: t.groupName ?? t.group?.name,
+                isDefault: t.isDefault,
+            }));
+            promptTemplates.value = items;
+            if (items.length) {
+                if (data.defaultTemplateId) {
+                    selectedPromptTemplateId.value = data.defaultTemplateId;
+                } else {
+                    const first = items[0];
+                    if (first) selectedPromptTemplateId.value = first.id;
+                }
+            } else {
+                selectedPromptTemplateId.value = "";
+            }
+        }
+    } catch {
+        toast.warning("提示词模板加载失败");
+    } finally {
+        isLoadingPromptTemplates.value = false;
+    }
+};
+
 // 示例模版内容
 const sampleTemplates = [
     {
@@ -202,6 +291,8 @@ const topicList = [
 
 // 页面加载时检查是否需要自动生成或加载已有笔记
 onMounted(async () => {
+    void loadPromptTemplates();
+
     const queryContent = route.query.content as string;
     const queryMode = route.query.mode as string;
     const autoGenerate = route.query.autoGenerate as string;
@@ -406,6 +497,21 @@ const handleSave = async () => {
 const handlePreview = () => {
     previewImageIndex.value = 0;
     showPreview.value = true;
+};
+
+/** 根据当前标题重新生成正文（可选：使用已选提示词模板） */
+const handleRegenerateFromTitle = async () => {
+    const title = noteTitle.value?.trim();
+    if (!title) {
+        toast.warning("请先填写标题");
+        return;
+    }
+    generationError.value = "";
+    mode.value = "ai-generate";
+    await generate({
+        contentOverride: title,
+        promptTemplateId: selectedPromptTemplateId.value || undefined,
+    });
 };
 
 // 清空笔记
@@ -1103,10 +1209,70 @@ const doPublish = async () => {
         >
             <!-- 模版内容 -->
             <div v-if="activeMenu === 'template'" class="p-4">
+                <div class="mb-3 flex items-center justify-between gap-2">
+                    <h3 class="text-sm font-semibold text-[color:var(--xhs-text)]">提示词模板</h3>
+                    <NuxtLink
+                        to="/xhs/prompt-templates"
+                        class="shrink-0 text-[11px] font-medium text-[color:var(--xhs-brand)] hover:underline"
+                    >
+                        管理
+                    </NuxtLink>
+                </div>
+                <p class="mb-2 text-[11px] leading-snug text-[color:var(--xhs-text-muted)]">
+                    生成或「按标题重新生成」时将使用所选模板；模板中可用 <code class="rounded bg-[color:var(--xhs-muted-bg)] px-1">{topic}</code> 表示当前主题（此处为标题）。
+                </p>
+                <div
+                    v-if="isLoadingPromptTemplates"
+                    class="mb-4 rounded-lg bg-[color:var(--xhs-muted-bg)] px-3 py-6 text-center text-xs text-[color:var(--xhs-text-muted)] dark:bg-[color:var(--xhs-muted-bg)]"
+                >
+                    加载模板中…
+                </div>
+                <div
+                    v-else-if="!promptTemplates.length"
+                    class="mb-4 rounded-lg border border-dashed border-[color:var(--xhs-border)] px-3 py-4 text-center text-xs text-[color:var(--xhs-text-muted)]"
+                >
+                    暂无可用模板，请先在「提示词模板管理」中添加并启用。
+                </div>
+                <div v-else class="mb-5 max-h-48 space-y-2 overflow-y-auto pr-1">
+                    <button
+                        v-for="pt in promptTemplates"
+                        :key="pt.id"
+                        type="button"
+                        @click="selectedPromptTemplateId = pt.id"
+                        :class="[
+                            'w-full cursor-pointer rounded-lg border px-3 py-2.5 text-left transition-all duration-200',
+                            selectedPromptTemplateId === pt.id
+                                ? 'border-[color:var(--xhs-brand)] bg-[color:var(--xhs-brand-soft)] shadow-sm dark:bg-[color:var(--xhs-brand-soft-dark)]'
+                                : 'border-transparent bg-[color:var(--xhs-muted-bg)] hover:border-[color:var(--xhs-brand)]/35 hover:bg-[color:var(--xhs-hover-bg)] dark:bg-[color:var(--xhs-muted-bg)]',
+                        ]"
+                    >
+                        <div class="flex items-start justify-between gap-2">
+                            <span class="line-clamp-2 text-sm font-medium text-[color:var(--xhs-text)]">{{
+                                pt.name
+                            }}</span>
+                            <UBadge
+                                v-if="pt.isDefault"
+                                color="primary"
+                                variant="soft"
+                                size="xs"
+                                class="shrink-0"
+                            >默认</UBadge>
+                        </div>
+                        <p
+                            v-if="pt.groupName"
+                            class="mt-0.5 text-[10px] text-[color:var(--xhs-text-soft)]"
+                        >
+                            {{ pt.groupName }}
+                        </p>
+                    </button>
+                </div>
+
+                <h3 class="mb-3 text-sm font-semibold text-[color:var(--xhs-text)]">示例参考</h3>
                 <div class="mb-4 flex flex-wrap gap-2">
                     <button
                         v-for="cat in templateCategories"
                         :key="cat.key"
+                        type="button"
                         :class="[
                             'cursor-pointer rounded-full px-3 py-1 text-sm font-medium transition-all duration-150 hover:opacity-80',
                             cat.color,
@@ -1387,13 +1553,22 @@ const doPublish = async () => {
                                 </div>
                             </div>
                         </div>
-                        <!-- 内容输入框 -->
-                        <textarea
-                            v-else
-                            v-model="noteContent"
-                            placeholder="开始输入内容..."
-                            class="h-full w-full resize-none border-none bg-transparent text-base leading-relaxed text-[color:var(--xhs-text)] placeholder-[color:var(--xhs-text-soft)] outline-none focus:ring-0 dark:text-[color:var(--xhs-text)] dark:placeholder-[color:var(--xhs-text-muted)]"
-                        ></textarea>
+                        <!-- 内容输入框（透明文字 + 底层 HTML 高亮 #话题） -->
+                        <div v-else class="relative h-full min-h-[12rem] w-full">
+                            <div
+                                ref="noteContentHighlightBackdropRef"
+                                class="pointer-events-none absolute inset-0 overflow-auto whitespace-pre-wrap break-words text-base leading-relaxed text-[color:var(--xhs-text)] dark:text-[color:var(--xhs-text)]"
+                                aria-hidden="true"
+                                v-html="noteContentHighlightHtml"
+                            />
+                            <textarea
+                                v-model="noteContent"
+                                placeholder="开始输入内容..."
+                                class="relative z-10 h-full min-h-[12rem] w-full resize-none overflow-auto border-none bg-transparent text-base leading-relaxed text-transparent caret-[color:var(--xhs-text)] placeholder-[color:var(--xhs-text-soft)] outline-none focus:ring-0 dark:caret-[color:var(--xhs-text)] dark:placeholder-[color:var(--xhs-text-muted)]"
+                                spellcheck="false"
+                                @scroll="syncNoteContentHighlightScroll"
+                            ></textarea>
+                        </div>
                     </div>
 
                     <!-- 状态栏 -->
@@ -1431,6 +1606,21 @@ const doPublish = async () => {
                         <UIcon name="i-heroicons-document-text" class="text-[22px] group-hover:text-[color:var(--xhs-text)] dark:group-hover:text-[color:var(--xhs-text)]" />
                     </div>
                     <span class="text-[10px] font-medium leading-none">复制正文</span>
+                </button>
+
+                <button
+                    @click="handleRegenerateFromTitle"
+                    :disabled="isGenerating"
+                    class="group flex flex-col items-center gap-1 text-[color:var(--xhs-text-muted)] disabled:opacity-50 dark:text-[color:var(--xhs-text-soft)]"
+                    title="根据当前标题重新生成正文（可在左侧选择提示词模板）"
+                >
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-[color:var(--xhs-muted-bg)] dark:hover:bg-[color:var(--xhs-hover-bg)]">
+                        <UIcon
+                            :name="isGenerating ? 'i-heroicons-arrow-path' : 'i-heroicons-sparkles'"
+                            :class="['text-[22px] group-hover:text-[color:var(--xhs-text)] dark:group-hover:text-[color:var(--xhs-text)]', isGenerating ? 'animate-spin' : '']"
+                        />
+                    </div>
+                    <span class="text-[10px] font-medium leading-none">重新生成</span>
                 </button>
 
                 <button
@@ -1580,9 +1770,17 @@ const doPublish = async () => {
                                 <div class="mb-3 text-lg font-semibold text-gray-900 dark:text-[color:var(--xhs-text)]">
                                     {{ noteTitle || '未填写标题' }}
                                 </div>
-                                <div class="mb-4 text-sm leading-relaxed whitespace-pre-wrap text-gray-700 dark:text-gray-300">
-                                    {{ noteContent || '未填写内容' }}
+                                <div
+                                    v-if="!noteContent?.trim()"
+                                    class="mb-4 text-sm leading-relaxed text-gray-500 dark:text-gray-400"
+                                >
+                                    未填写内容
                                 </div>
+                                <div
+                                    v-else
+                                    class="mb-4 text-sm leading-relaxed whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300"
+                                    v-html="noteContentHighlightHtml"
+                                ></div>
                             </div>
                         </div>
 

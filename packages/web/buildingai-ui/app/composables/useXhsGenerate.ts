@@ -2,6 +2,13 @@ import type { GenerateNoteDto } from "@/types/xhs";
 import type { AiModel } from "@buildingai/service/webapi/ai-conversation";
 import { useAuthFetch } from "~/composables/useAuthFetch";
 
+export type XhsGenerateOptions = {
+    /** 不传则使用 composable 的 content */
+    contentOverride?: string;
+    /** 选用后台提示词模板时传入 */
+    promptTemplateId?: string;
+};
+
 /**
  * XHS笔记生成组合式函数
  * 提供笔记生成相关的状态管理和方法
@@ -44,51 +51,46 @@ export const useXhsGenerate = () => {
         generationProgress.value = "";
     };
 
-    // 输入验证函数
-    const validateInput = (): boolean => {
-        // 清除之前的错误
+    /** 校验用于生成的文本（可为 content 或标题覆盖） */
+    const validateContentString = (text: string): boolean => {
         generationError.value = "";
 
-        console.log("当前mode值:", mode.value);
-        console.log("当前content值:", content.value);
-        console.log("当前selectedModel值:", selectedModel.value);
-        console.log("selectedModel.value?.id:", selectedModel.value?.id);
-
-        if (isInputEmpty.value) {
+        const trimmed = text.trim();
+        if (!trimmed) {
             generationError.value = "请输入内容";
             toast.error("请输入内容");
             return false;
         }
 
-        if (content.value.length > 2000) {
+        if (trimmed.length > 2000) {
             generationError.value = "输入内容不能超过2000个字符";
             toast.error("输入内容不能超过2000个字符");
             return false;
         }
 
-        // 检查是否只包含空白字符
-        if (!/.*\S.*/.test(content.value)) {
+        if (!/.*\S.*/.test(trimmed)) {
             generationError.value = "输入内容不能只包含空白字符，请输入有效内容";
             toast.error("输入内容不能只包含空白字符，请输入有效内容");
             return false;
         }
 
-        // 检查是否选择了模型
         if (!selectedModel.value?.id) {
             generationError.value = "请选择AI模型";
             toast.error("请选择AI模型");
-            console.error("模型验证失败 - selectedModel.value:", selectedModel.value);
-            console.error("模型验证失败 - selectedModel.value?.id:", selectedModel.value?.id);
             return false;
         }
 
         return true;
     };
 
+    // 输入验证函数（默认校验侧边栏/输入区的 content）
+    const validateInput = (): boolean => validateContentString(content.value);
+
     // 生成笔记内容
-    const generate = async (): Promise<void> => {
-        // 输入验证
-        if (!validateInput()) {
+    const generate = async (options?: XhsGenerateOptions): Promise<void> => {
+        const effectiveContent = (options?.contentOverride ?? content.value).trim();
+
+        if (!validateContentString(effectiveContent)) {
             return;
         }
 
@@ -103,10 +105,12 @@ export const useXhsGenerate = () => {
         try {
             // 准备请求数据
             const generateDto: GenerateNoteDto = {
-                content: content.value.trim(),
+                content: effectiveContent,
                 mode: mode.value,
-                // 添加模型ID到请求中
                 aiModel: selectedModel.value?.id,
+                ...(options?.promptTemplateId
+                    ? { promptTemplateId: options.promptTemplateId }
+                    : {}),
             };
 
             // 调试日志

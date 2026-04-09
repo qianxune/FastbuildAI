@@ -150,6 +150,17 @@ const buildInitialCoverImages = (product: XhsProduct): string[] => {
     return [...new Set(urls.map((u) => u.trim()).filter(Boolean))].slice(0, MAX_NOTE_IMAGES);
 };
 
+/** 外部图片下载为本地路径（写入笔记库前使用，与笔记编辑页一致） */
+const downloadExternalImage = async (imageUrl: string): Promise<string | null> => {
+    const { post } = useAuthFetch();
+    const { data } = await post<{ success: boolean; localPath?: string }>(
+        "/api/xhs/images/download",
+        { imageUrl },
+        { showError: false },
+    );
+    return data?.success && data.localPath ? data.localPath : null;
+};
+
 /** 发布时使用的图片（以用户编辑后的 coverImages 为准） */
 const getPublishImages = (task: GenerationTask): string[] => {
     const raw =
@@ -157,6 +168,71 @@ const getPublishImages = (task: GenerationTask): string[] => {
             ? task.coverImages
             : buildInitialCoverImages(task.product);
     return [...new Set(raw.map((u) => u.trim()).filter(Boolean))].slice(0, MAX_NOTE_IMAGES);
+};
+
+/** 将任务当前配图转为可入库的本地路径列表 */
+const buildLocalCoverImagesForTask = async (task: GenerationTask): Promise<string[]> => {
+    const raw = getPublishImages(task);
+    const localImages: string[] = [];
+    for (const img of raw) {
+        if (img.startsWith("/uploads/")) {
+            localImages.push(img);
+        } else {
+            const localPath = await downloadExternalImage(img);
+            localImages.push(localPath ?? img);
+        }
+    }
+    return localImages.slice(0, MAX_NOTE_IMAGES);
+};
+
+/**
+ * 把当前任务正文与配图写入笔记库（新建或更新）。
+ * 批量生成阶段不落库，仅在批量/定时/单条发布前调用。
+ */
+const persistTaskToDatabase = async (task: GenerationTask): Promise<boolean> => {
+    if (!task.title?.trim() || !task.content?.trim()) {
+        toast.error("笔记标题或正文为空");
+        return false;
+    }
+
+    const coverSlice = await buildLocalCoverImagesForTask(task);
+    const { post, put } = useAuthFetch();
+
+    if (task.noteId) {
+        const { error } = await put(
+            `/api/xhs/notes/${task.noteId}`,
+            {
+                title: task.title.trim(),
+                content: task.content,
+                coverImages: coverSlice,
+            },
+            { showError: false },
+        );
+        if (error) {
+            toast.error(typeof error === "string" ? error : "同步笔记到服务器失败");
+            return false;
+        }
+    } else {
+        const { data, error } = await post<{ id: string }>(
+            "/api/xhs/notes",
+            {
+                title: task.title.trim(),
+                content: task.content,
+                mode: "ai-generate",
+                productId: task.productId,
+                coverImages: coverSlice.length > 0 ? coverSlice : undefined,
+            },
+            { showError: false },
+        );
+        if (error || !data?.id) {
+            toast.error(typeof error === "string" ? error : "创建笔记失败");
+            return false;
+        }
+        task.noteId = data.id;
+    }
+
+    task.coverImages = [...coverSlice];
+    return true;
 };
 
 const taskCoverPreview = (task: GenerationTask): string | undefined => {
@@ -327,6 +403,8 @@ const noteIdsMode = ref(false); // true = 从已有笔记直接进入发布模�
 const tasks = ref<GenerationTask[]>([]);
 const isGenerating = ref(false);
 const isPublishing = ref(false);
+/** 定时发布跳转前，正在把选中任务写入笔记库 */
+const isPersistingForSchedule = ref(false);
 const selectedTaskIds = ref<string[]>([]);
 
 // 发布进度
@@ -497,25 +575,12 @@ const startBatchGenerateWithTemplate = async () => {
                 ? [...new Set(fromApi)].slice(0, MAX_NOTE_IMAGES)
                 : buildInitialCoverImages(task.product);
 
-            const { post: postNote } = useAuthFetch();
-            const { data: noteData } = await postNote<{ id: string }>("/api/xhs/notes", {
-                title,
-                content,
-                mode: "ai-generate",
-                productId: item.product_id,
-                coverImages: task.coverImages.length ? task.coverImages : undefined,
-            });
-
-            if (noteData?.id) {
-                task.noteId = noteData.id;
-                task.title = title;
-                task.content = content;
-                task.status = "success";
-                task.progress = 100;
-            } else {
-                task.status = "error";
-                task.error = "保存笔记失败";
-            }
+            // 仅前端展示，不落库；批量/定时/即时发布时再写入笔记库
+            task.noteId = undefined;
+            task.title = title;
+            task.content = content;
+            task.status = "success";
+            task.progress = 100;
         }
 
         const successCount = tasks.value.filter((t) => t.status === "success").length;
@@ -715,20 +780,24 @@ const closePreviewModal = () => {
     currentTask.value = null;
 };
 
-// 保存编辑后的内容（含配图）；silent 为 true 时表示发布前静默同步，不弹「内容已更新」
+// 保存编辑后的内容（仅本页内存；入库仅在批量发布 / 定时发布 / 从预览即时发布时）
 const handleSaveEdit = (data: {
     title: string;
     content: string;
     coverImages: string[];
     silent?: boolean;
 }) => {
-    if (currentTask.value) {
-        currentTask.value.title = data.title;
-        currentTask.value.content = data.content;
-        currentTask.value.coverImages = [...data.coverImages].slice(0, MAX_NOTE_IMAGES);
-        if (!data.silent) {
-            toast.success("内容已更新");
-        }
+    if (!currentTask.value) {
+        return;
+    }
+
+    const task = currentTask.value;
+    task.title = data.title;
+    task.content = data.content;
+    task.coverImages = [...data.coverImages].slice(0, MAX_NOTE_IMAGES);
+
+    if (!data.silent) {
+        toast.success("内容已更新（仅本页；发布或定时发布时会写入笔记库）");
     }
 };
 
@@ -752,6 +821,8 @@ const regenerateNote = async (task: GenerationTask) => {
     task.title = "";
     task.content = "";
     task.error = undefined;
+    task.noteId = undefined;
+    task.isPublished = false;
     task.coverImages = buildInitialCoverImages(task.product);
 
     try {
@@ -789,15 +860,20 @@ const publishSingle = async (task: GenerationTask) => {
     publishProgress.value = 0;
 
     try {
+        const persisted = await persistTaskToDatabase(task);
+        if (!persisted) {
+            task.status = "success";
+            return;
+        }
+
         const images = getPublishImages(task);
 
-        // 发布笔记
         const result = await publishNote({
             title: task.title,
             content: task.content,
             images,
             productId: task.productId,
-            // 妙手/外部商品 ID，用于小红书挂载商品
+            dbNoteId: task.noteId,
             productSearchId: task.product.externalProductId?.trim() || undefined,
         });
 
@@ -806,7 +882,7 @@ const publishSingle = async (task: GenerationTask) => {
 
         if (result.success) {
             task.isPublished = true;
-            task.noteId = result.noteId;
+            // result.noteId 为小红书平台笔记 ID，不可覆盖库里的笔记 UUID（否则定时发布无法按 id 查库）
             task.status = "success";
             toast.success("发布成功！");
         } else {
@@ -864,6 +940,15 @@ const publishBatch = async () => {
 
         task.status = "publishing";
 
+        const persisted = await persistTaskToDatabase(task);
+        if (!persisted) {
+            task.status = "success";
+            failCount++;
+            publishCurrent.value++;
+            publishProgress.value = Math.round((publishCurrent.value / publishTotal.value) * 100);
+            continue;
+        }
+
         const images = getPublishImages(task);
 
         try {
@@ -872,12 +957,12 @@ const publishBatch = async () => {
                 content: task.content,
                 images,
                 productId: task.productId,
+                dbNoteId: task.noteId,
                 productSearchId: task.product.externalProductId?.trim() || undefined,
             });
 
             if (result.success) {
                 task.isPublished = true;
-                task.noteId = result.noteId;
                 task.status = "success";
                 successCount++;
             } else {
@@ -920,30 +1005,46 @@ const goBack = () => {
     router.push("/xhs/products");
 };
 
-// 打开定时发布弹窗
-const openScheduleModal = () => {
+// 定时发布：先将选中任务写入笔记库，再跳转创建计划
+const openScheduleModal = async () => {
     if (selectedTaskIds.value.length === 0) {
         toast.warning("请选择要定时发布的笔记");
         return;
     }
-    
-    // 获取选中的笔记ID列表
-    const selectedNoteIds = tasks.value
-        .filter((t) => selectedTaskIds.value.includes(t.productId) && t.noteId)
-        .map((t) => t.noteId as string);
-    
-    if (selectedNoteIds.length === 0) {
+
+    const selectedTasks = tasks.value.filter(
+        (t) => selectedTaskIds.value.includes(t.productId) && t.status === "success",
+    );
+
+    if (selectedTasks.length === 0) {
         toast.warning("选中的笔记中没有可发布的内容");
         return;
     }
-    
-    // 跳转到定时发布页面，传递笔记ID列表
-    router.push({
-        path: "/xhs/publish-schedule/create",
-        query: {
-            noteIds: selectedNoteIds.join(","),
-        },
-    });
+
+    isPersistingForSchedule.value = true;
+    try {
+        for (const task of selectedTasks) {
+            const ok = await persistTaskToDatabase(task);
+            if (!ok) {
+                return;
+            }
+        }
+
+        const selectedNoteIds = selectedTasks.map((t) => t.noteId as string).filter(Boolean);
+        if (selectedNoteIds.length !== selectedTasks.length) {
+            toast.error("写入笔记库失败，请重试");
+            return;
+        }
+
+        await router.push({
+            path: "/xhs/publish-schedule/create",
+            query: {
+                noteIds: selectedNoteIds.join(","),
+            },
+        });
+    } finally {
+        isPersistingForSchedule.value = false;
+    }
 };
 
 // 获取状态图标
@@ -997,7 +1098,7 @@ const getStatusColor = (status: string) => {
                     <UButton
                         variant="outline"
                         color="neutral"
-                        :disabled="isGenerating || isPublishing"
+                        :disabled="isGenerating || isPublishing || isPersistingForSchedule"
                         @click="publishBatch"
                     >
                         <UIcon name="i-heroicons-paper-airplane" class="mr-1" />
@@ -1006,7 +1107,13 @@ const getStatusColor = (status: string) => {
                     <UButton
                         variant="outline"
                         color="primary"
-                        :disabled="isGenerating || isPublishing || selectedTaskIds.length === 0"
+                        :loading="isPersistingForSchedule"
+                        :disabled="
+                            isGenerating ||
+                            isPublishing ||
+                            isPersistingForSchedule ||
+                            selectedTaskIds.length === 0
+                        "
                         @click="openScheduleModal"
                     >
                         <UIcon name="i-heroicons-clock" class="mr-1" />

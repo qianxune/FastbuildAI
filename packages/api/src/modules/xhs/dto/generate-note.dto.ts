@@ -74,4 +74,11 @@ export class GenerateNoteDto {
     @IsOptional()
     @IsString({ message: "标题数量必须是字符串" })
     titleCount?: string;
+
+    /**
+     * 可选：提示词模板 ID（启用时以模板内容为主指令，主题来自 content）
+     */
+    @IsOptional()
+    @IsString({ message: "提示词模板ID必须是字符串" })
+    promptTemplateId?: string;
 }

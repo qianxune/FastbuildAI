@@ -17,7 +17,7 @@ interface DownloadImageResult {
  * 小红书发布功能 Composable
  */
 export const useXhsPublish = () => {
-    const { post, get } = useAuthFetch();
+    const { post, get, put } = useAuthFetch();
     const toast = useMessage();
 
     /**
@@ -84,6 +84,10 @@ export const useXhsPublish = () => {
         content: string;
         images: string[];
         productId?: string;
+        /**
+         * 若已在库中存在笔记（如批量生成页先 POST 再发），发布成功后改为 PUT，避免重复插入
+         */
+        dbNoteId?: string;
         /**
          * 可选：妙手/外部商品 ID（对应 xhs_product.external_product_id），用于挂载店内商品
          */
@@ -162,18 +166,36 @@ export const useXhsPublish = () => {
                 };
             }
 
-            // 3. 如果发布成功，保存笔记到数据库
+            // 3. 如果发布成功，写入/更新数据库中的笔记记录
             if (data.success) {
                 console.log("✅ 发布成功，保存到数据库");
-                await saveNote({
-                    title: params.title,
-                    content: params.content,
-                    coverImages: localImages,
-                    mode: "ai-generate",
-                    productId: params.productId,
-                    xhsNoteId: data.noteId,
-                    xhsNoteUrl: data.noteUrl,
-                });
+                if (params.dbNoteId) {
+                    const { error } = await put(
+                        `/api/xhs/notes/${params.dbNoteId}`,
+                        {
+                            title: params.title,
+                            content: params.content,
+                            coverImages: localImages,
+                            isPublished: true,
+                            xhsNoteId: data.noteId,
+                            xhsNoteUrl: data.noteUrl,
+                        },
+                        { showError: false },
+                    );
+                    if (error) {
+                        toast.error("已发布到小红书，但更新笔记记录失败");
+                    }
+                } else {
+                    await saveNote({
+                        title: params.title,
+                        content: params.content,
+                        coverImages: localImages,
+                        mode: "ai-generate",
+                        productId: params.productId,
+                        xhsNoteId: data.noteId,
+                        xhsNoteUrl: data.noteUrl,
+                    });
+                }
             } else {
                 console.warn("⚠️ 发布返回失败:", data.message);
             }

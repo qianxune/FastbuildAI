@@ -95,8 +95,15 @@ export class XhsNoteService extends BaseService<XhsNote> {
             const { provider, modelName } = await this.getAIProviderAndModel(dto.aiModel);
             const client = new TextGenerator(provider);
 
-            // 构建消息内容
-            const messages = this.buildMessages(dto);
+            // 构建消息内容（可选：使用后台提示词模板）
+            let messages: ChatCompletionMessageParam[];
+            const templateId = dto.promptTemplateId?.trim();
+            if (templateId) {
+                const templateBody = await this.promptTemplateService.getTemplateContent(templateId);
+                messages = this.buildMessagesFromPromptTemplate(dto, templateBody);
+            } else {
+                messages = this.buildMessages(dto);
+            }
 
             // 设置30秒超时
             const timeoutPromise = new Promise<never>((_, reject) => {
@@ -348,6 +355,34 @@ export class XhsNoteService extends BaseService<XhsNote> {
 
         return [
             { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+        ];
+    }
+
+    /**
+     * 使用后台提示词模板构建消息（content 为主题/标题；支持 {topic}/{title} 及商品占位符）
+     */
+    private buildMessagesFromPromptTemplate(
+        dto: GenerateNoteDto,
+        templateBody: string,
+    ): ChatCompletionMessageParam[] {
+        const topic = dto.content.trim();
+        let userPrompt = templateBody
+            .replace(/\{topic\}/gi, topic)
+            .replace(/\{title\}/gi, topic)
+            .replace(/\{product_name\}/g, "")
+            .replace(/\{spec\}/g, "")
+            .replace(/\{description\}/g, "");
+        const usedTopicPlaceholder = /\{topic\}|\{title\}/i.test(templateBody);
+        if (!usedTopicPlaceholder) {
+            userPrompt = `${userPrompt.trim()}\n\n请围绕以下主题创作小红书笔记：${topic}`;
+        }
+        return [
+            {
+                role: "system",
+                content:
+                    "你是一个专业的小红书内容创作助手。请严格按以下格式输出：\n标题：[标题内容，不超过20个字符]\n正文：[正文内容]",
+            },
             { role: "user", content: userPrompt },
         ];
     }
