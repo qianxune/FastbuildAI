@@ -254,6 +254,253 @@ const openTaskImageUpload = (task: GenerationTask) => {
     nextTick(() => taskImageUploadInput.value?.click());
 };
 
+/** 万相：提示词 + 首张配图或商品主图 */
+const refEditingTaskId = ref<string | null>(null);
+const refEditPromptBatch = ref("保持商品清晰，调整为小红书种草风格配图");
+const refEditSubmitting = ref(false);
+const refEditImageEditFunctionBatch = ref<"description_edit" | "description_edit_with_mask">(
+    "description_edit",
+);
+const refEditStrengthBatch = ref(0.5);
+const refEditMaskPathBatch = ref<string | null>(null);
+const refEditMaskFileInputBatch = ref<HTMLInputElement | null>(null);
+const XHS_COVER_URL_DRAG_MIME_BATCH = "application/x-xhs-cover-url";
+const refEditMaskDropActiveBatch = ref(false);
+
+watch(refEditImageEditFunctionBatch, (fn) => {
+    if (fn !== "description_edit_with_mask") {
+        refEditMaskPathBatch.value = null;
+    }
+});
+
+const normalizeCoverUrlToMaskPathBatch = (raw: string): string | null => {
+    const t = raw?.trim();
+    if (!t) {
+        return null;
+    }
+    if (/^https?:\/\//i.test(t)) {
+        if (import.meta.client) {
+            try {
+                const u = new URL(t);
+                if (u.origin === window.location.origin) {
+                    return `${u.pathname}${u.search}` || null;
+                }
+            } catch {
+                return null;
+            }
+        }
+        return t;
+    }
+    return t.startsWith("/") ? t : `/${t}`;
+};
+
+const setRefEditMaskFromCoverUrlBatch = (raw: string) => {
+    const p = normalizeCoverUrlToMaskPathBatch(raw);
+    if (!p) {
+        toast.warning("无法识别该图片地址");
+        return;
+    }
+    refEditMaskPathBatch.value = p;
+    toast.success("已将该配图设为 mask");
+};
+
+const refEditMaskDisplaySrcBatch = computed(() => {
+    const p = refEditMaskPathBatch.value;
+    if (!p) {
+        return "";
+    }
+    if (/^https?:\/\//i.test(p)) {
+        return p;
+    }
+    if (import.meta.client) {
+        return `${window.location.origin}${p.startsWith("/") ? "" : "/"}${p}`;
+    }
+    return p;
+});
+
+const clearRefEditMaskBatch = () => {
+    refEditMaskPathBatch.value = null;
+};
+
+const onRefEditMaskDragOverBatch = (e: DragEvent) => {
+    e.preventDefault();
+    refEditMaskDropActiveBatch.value = true;
+    if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = "copy";
+    }
+};
+
+const onRefEditMaskDragLeaveBatch = (e: DragEvent) => {
+    const el = e.currentTarget as HTMLElement | null;
+    const rel = e.relatedTarget;
+    if (el && rel instanceof Node && el.contains(rel)) {
+        return;
+    }
+    refEditMaskDropActiveBatch.value = false;
+};
+
+const onRefEditMaskDropBatch = (e: DragEvent) => {
+    e.preventDefault();
+    refEditMaskDropActiveBatch.value = false;
+    const dt = e.dataTransfer;
+    if (!dt) {
+        return;
+    }
+    const file = dt.files?.[0];
+    if (file) {
+        void uploadMaskForRefEditBatch(file);
+        return;
+    }
+    const fromCover = dt.getData(XHS_COVER_URL_DRAG_MIME_BATCH)?.trim();
+    if (fromCover) {
+        setRefEditMaskFromCoverUrlBatch(fromCover);
+        return;
+    }
+    const uri = dt.getData("text/uri-list")?.split("\n")[0]?.trim();
+    if (uri) {
+        setRefEditMaskFromCoverUrlBatch(uri);
+    }
+};
+
+const uploadMaskForRefEditBatch = async (file: File) => {
+    const validTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    const maxSize = 5 * 1024 * 1024;
+    if (!validTypes.includes(file.type)) {
+        toast.error("mask 仅支持 JPG、PNG、GIF、WEBP");
+        return;
+    }
+    if (file.size > maxSize) {
+        toast.error("mask 图片不能超过 5MB");
+        return;
+    }
+    try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const userStore = useUserStore();
+        const authToken = userStore.token || userStore.temporaryToken;
+        if (!authToken) {
+            toast.error("请先登录");
+            return;
+        }
+        const response = await fetch("/api/xhs/images/upload", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${authToken}` },
+            body: formData,
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(
+                (errorData as { message?: string }).message || "mask 上传失败",
+            );
+        }
+        const result = (await response.json()) as { data?: { data?: { url?: string } } };
+        const imageUrl = result?.data?.data?.url;
+        if (!imageUrl) {
+            toast.error("上传成功但未返回图片地址");
+            return;
+        }
+        refEditMaskPathBatch.value = imageUrl.startsWith("/") ? imageUrl : `/${imageUrl}`;
+        toast.success("mask 已上传");
+    } catch (e) {
+        toast.error(e instanceof Error ? e.message : "mask 上传失败");
+    } finally {
+        if (refEditMaskFileInputBatch.value) {
+            refEditMaskFileInputBatch.value.value = "";
+        }
+    }
+};
+
+const onRefEditMaskFileChangeBatch = (event: Event) => {
+    const t = event.target as HTMLInputElement;
+    const f = t.files?.[0];
+    if (f) {
+        void uploadMaskForRefEditBatch(f);
+    }
+};
+
+const startBatchRefEdit = (task: GenerationTask) => {
+    refEditingTaskId.value = task.productId;
+    refEditPromptBatch.value = "保持商品清晰，调整为小红书种草风格配图";
+    refEditImageEditFunctionBatch.value = "description_edit";
+    refEditStrengthBatch.value = 0.5;
+    refEditMaskPathBatch.value = null;
+};
+
+const submitBatchRefEdit = async (task: GenerationTask) => {
+    if (!refEditPromptBatch.value.trim()) {
+        toast.warning("请输入编辑提示词");
+        return;
+    }
+    if (task.coverImages.length >= MAX_NOTE_IMAGES) {
+        toast.warning(`最多 ${MAX_NOTE_IMAGES} 张图片`);
+        return;
+    }
+    if (
+        refEditImageEditFunctionBatch.value === "description_edit_with_mask" &&
+        !refEditMaskPathBatch.value?.trim()
+    ) {
+        toast.warning("局部重绘请先上传 mask 图");
+        return;
+    }
+
+    const body: {
+        prompt: string;
+        productId?: string;
+        referenceImageUrl?: string;
+        imageEditFunction: "description_edit" | "description_edit_with_mask";
+        strength: number;
+        maskImageUrl?: string;
+    } = {
+        prompt: refEditPromptBatch.value.trim(),
+        imageEditFunction: refEditImageEditFunctionBatch.value,
+        strength: refEditStrengthBatch.value,
+    };
+    const first = task.coverImages[0];
+    if (first) {
+        body.referenceImageUrl = first.startsWith("http")
+            ? first
+            : first.startsWith("/")
+              ? first
+              : `/${first}`;
+    } else {
+        body.productId = task.productId;
+    }
+    if (
+        refEditImageEditFunctionBatch.value === "description_edit_with_mask" &&
+        refEditMaskPathBatch.value
+    ) {
+        const m = refEditMaskPathBatch.value.trim();
+        body.maskImageUrl = m.startsWith("/") ? m : `/${m}`;
+    }
+
+    refEditSubmitting.value = true;
+    try {
+        const { post } = useAuthFetch();
+        const { data, error } = await post<{ url?: string; data?: { url?: string } }>(
+            "/api/xhs/images/generate-from-reference",
+            body,
+            { errorMessage: "参考图编辑失败" },
+        );
+        if (error) {
+            return;
+        }
+        const raw = data as { url?: string; data?: { url?: string } } | null;
+        const url = raw?.url || raw?.data?.url;
+        if (!url) {
+            toast.warning("生成成功但未返回图片地址");
+            return;
+        }
+        const absoluteUrl = url.startsWith("http")
+            ? url
+            : `${window.location.origin}${url.startsWith("/") ? "" : "/"}${url}`;
+        task.coverImages.push(absoluteUrl);
+        refEditingTaskId.value = null;
+        toast.success("参考图已生成并加入配图列表");
+    } finally {
+        refEditSubmitting.value = false;
+    }
+};
+
 const removeTaskImage = (task: GenerationTask, index: number) => {
     task.coverImages.splice(index, 1);
 };
@@ -284,7 +531,11 @@ const taskImageDrag = ref<{ taskId: string; fromIndex: number } | null>(null);
 const onTaskImageDragStart = (e: DragEvent, task: GenerationTask, index: number) => {
     taskImageDrag.value = { taskId: task.productId, fromIndex: index };
     e.dataTransfer?.setData("text/plain", String(index));
-    if (e.dataTransfer) {
+    const url = task.coverImages[index];
+    if (url && e.dataTransfer) {
+        e.dataTransfer.setData(XHS_COVER_URL_DRAG_MIME_BATCH, url);
+        e.dataTransfer.effectAllowed = "copyMove";
+    } else if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = "move";
     }
 };
@@ -1271,8 +1522,134 @@ const getStatusColor = (status: string) => {
                                     <!-- 配图管理（发布到小红书将使用此处最终列表） -->
                                     <div class="mt-3 rounded-lg border border-stone-200 bg-stone-50/80 p-3 dark:border-gray-600 dark:bg-gray-800/50">
                                         <p class="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
-                                            笔记配图（最多 {{ MAX_NOTE_IMAGES }} 张；拖动缩略图排序；单击图片大图预览；悬停角标删除；「+」本地上传）
+                                            笔记配图（最多 {{ MAX_NOTE_IMAGES }} 张；拖动缩略图排序；局部重绘时可拖到上方
+                                            mask 区；单击大图预览；悬停删除；「+」上传）
                                         </p>
+                                        <div class="mb-3 flex flex-wrap items-center gap-2">
+                                            <UButton
+                                                v-if="refEditingTaskId !== task.productId"
+                                                size="xs"
+                                                variant="soft"
+                                                color="primary"
+                                                :disabled="refEditSubmitting || isGenerating"
+                                                @click="startBatchRefEdit(task)"
+                                            >
+                                                AI 参考图编辑
+                                            </UButton>
+                                            <template v-else>
+                                                <div class="flex w-full flex-col gap-2">
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <select
+                                                            v-model="refEditImageEditFunctionBatch"
+                                                            class="rounded border border-stone-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-900"
+                                                        >
+                                                            <option value="description_edit">指令编辑</option>
+                                                            <option value="description_edit_with_mask">
+                                                                局部重绘（需 mask）
+                                                            </option>
+                                                        </select>
+                                                        <label
+                                                            class="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-400"
+                                                        >
+                                                            <span>幅度</span>
+                                                            <input
+                                                                v-model.number="refEditStrengthBatch"
+                                                                type="range"
+                                                                min="0"
+                                                                max="1"
+                                                                step="0.05"
+                                                                class="h-2 w-24 accent-blue-500"
+                                                            />
+                                                            {{ refEditStrengthBatch.toFixed(2) }}
+                                                        </label>
+                                                    </div>
+                                                    <div
+                                                        v-if="
+                                                            refEditImageEditFunctionBatch ===
+                                                            'description_edit_with_mask'
+                                                        "
+                                                        class="flex flex-col gap-2"
+                                                    >
+                                                        <input
+                                                            ref="refEditMaskFileInputBatch"
+                                                            type="file"
+                                                            accept="image/jpeg,image/png,image/gif,image/webp"
+                                                            class="hidden"
+                                                            @change="onRefEditMaskFileChangeBatch"
+                                                        />
+                                                        <div
+                                                            class="flex flex-wrap items-center gap-2 rounded border border-dashed p-2 transition-colors"
+                                                            :class="
+                                                                refEditMaskDropActiveBatch
+                                                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40'
+                                                                    : 'border-stone-300 dark:border-gray-600'
+                                                            "
+                                                            @dragover="onRefEditMaskDragOverBatch"
+                                                            @dragleave="onRefEditMaskDragLeaveBatch"
+                                                            @drop="onRefEditMaskDropBatch"
+                                                        >
+                                                            <span class="text-[10px] text-gray-500 dark:text-gray-400"
+                                                                >拖入下方配图或</span
+                                                            >
+                                                            <UButton
+                                                                size="xs"
+                                                                variant="soft"
+                                                                @click="refEditMaskFileInputBatch?.click()"
+                                                            >
+                                                                本地上传
+                                                            </UButton>
+                                                            <div
+                                                                v-if="
+                                                                    refEditMaskPathBatch &&
+                                                                    refEditMaskDisplaySrcBatch
+                                                                "
+                                                                class="relative h-12 w-12 shrink-0 overflow-hidden rounded border border-gray-200 dark:border-gray-600"
+                                                            >
+                                                                <img
+                                                                    :src="refEditMaskDisplaySrcBatch"
+                                                                    alt=""
+                                                                    class="h-full w-full object-cover"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    class="absolute right-0 top-0 flex h-4 w-4 items-center justify-center rounded-bl bg-black/60 text-white"
+                                                                    title="清除"
+                                                                    @click.stop="clearRefEditMaskBatch"
+                                                                >
+                                                                    <span class="text-[10px] leading-none">×</span>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <UTextarea
+                                                        v-model="refEditPromptBatch"
+                                                        :rows="2"
+                                                        class="min-w-[200px] w-full flex-1"
+                                                        placeholder="描述画面调整（局部重绘写新背景内容）"
+                                                    />
+                                                    <div class="flex flex-wrap gap-2">
+                                                        <UButton
+                                                            size="xs"
+                                                            color="primary"
+                                                            :loading="refEditSubmitting"
+                                                            :disabled="refEditSubmitting"
+                                                            @click="submitBatchRefEdit(task)"
+                                                        >
+                                                            生成
+                                                        </UButton>
+                                                        <UButton
+                                                            size="xs"
+                                                            variant="ghost"
+                                                            color="neutral"
+                                                            :disabled="refEditSubmitting"
+                                                            @click="refEditingTaskId = null"
+                                                        >
+                                                            取消
+                                                        </UButton>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
                                         <div class="flex flex-wrap items-center gap-2">
                                             <div
                                                 v-for="(url, imgIdx) in task.coverImages"

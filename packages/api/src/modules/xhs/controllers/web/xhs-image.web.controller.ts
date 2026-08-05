@@ -16,6 +16,7 @@ import { type UserPlayground } from '@buildingai/db'
 import { HttpErrorFactory } from '@buildingai/errors'
 import { XhsImageService } from '../../services/xhs-image.service'
 import { DownloadImageDto } from '../../dto/download-image.dto'
+import { GenerateFromReferenceDto } from '../../dto/generate-from-reference.dto'
 
 /**
  * 小红书图片管理控制器
@@ -72,6 +73,24 @@ export class XhsImageWebController extends BaseController {
             success: true,
             data: image,
             message: "自动配图成功",
+        };
+    }
+
+    /**
+     * 提示词 + 参考图：万相通用图像编辑（wanx2.1-imageedit）
+     * POST /api/web/xhs/images/generate-from-reference
+     */
+    @Post("images/generate-from-reference")
+    async generateFromReference(
+        @Body() dto: GenerateFromReferenceDto,
+        @Playground() playground: UserPlayground,
+    ) {
+        const image = await this.xhsImageService.generateFromReference(dto, playground.id);
+
+        return {
+            success: true,
+            data: image,
+            message: "参考图编辑成功",
         };
     }
 

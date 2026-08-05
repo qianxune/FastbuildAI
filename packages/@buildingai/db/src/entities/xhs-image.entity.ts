@@ -27,7 +27,7 @@ export class XhsImage extends BaseEntity {
     @Column({
         type: "varchar",
         length: 50,
-        comment: "图片类型: auto-自动配图, template-图片模板, upload-本地上传",
+        comment: "图片类型: auto-自动配图, template-图片模板, upload-本地上传, reference_edit-万相参考图编辑",
     })
     type: string;
 

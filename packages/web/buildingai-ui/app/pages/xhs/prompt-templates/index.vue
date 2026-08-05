@@ -546,103 +546,102 @@ onMounted(async () => {
             </template>
         </UModal>
 
-        <!-- 模板新建/编辑弹窗 -->
-        <UModal v-model:open="showTemplateModal">
-            <template #content>
-                <div class="max-w-4xl p-6">
-                    <h3 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
-                        {{ isEditingTemplate ? "编辑模板" : "新增模板" }}
-                    </h3>
-                    <div class="space-y-4">
+        <!-- 模板新建/编辑：用 UModal 自带 body/footer，body 为 flex-1 + overflow-y-auto，底部按钮始终在视口内 -->
+        <UModal
+            v-model:open="showTemplateModal"
+            :title="isEditingTemplate ? '编辑模板' : '新增模板'"
+            :ui="{
+                content: 'w-[calc(100vw-2rem)] max-w-4xl sm:max-w-4xl',
+                footer: 'justify-end gap-3',
+            }"
+        >
+            <template #body>
+                <div class="space-y-4">
+                    <div>
+                        <label
+                            class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                        >
+                            模板名称 <span class="text-red-500">*</span>
+                        </label>
+                        <UInput v-model="templateForm.name" placeholder="如：万能种草型" />
+                    </div>
+                    <div>
+                        <label
+                            class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                        >
+                            所属分组
+                        </label>
+                        <USelectMenu
+                            :model-value="templateForm.groupId ?? ''"
+                            :items="[
+                                { label: '未分组', value: '' },
+                                ...groups.map((g) => ({ label: g.name, value: g.id })),
+                            ]"
+                            value-key="value"
+                            placeholder="选择分组（可选）"
+                            @update:model-value="(v) => (templateForm.groupId = v === '' ? undefined : (v as string))"
+                        />
+                    </div>
+                    <div>
+                        <label
+                            class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                        >
+                            模板内容 <span class="text-red-500">*</span>
+                        </label>
+                        <p class="mb-1 text-xs text-gray-400">
+                            支持变量：<code class="rounded bg-gray-100 px-1 dark:bg-gray-800"
+                                >{product_name}</code
+                            >（必有）、
+                            <code class="rounded bg-gray-100 px-1 dark:bg-gray-800">{spec}</code>、
+                            <code class="rounded bg-gray-100 px-1 dark:bg-gray-800">{description}</code
+                            >（可选）
+                        </p>
+                        <UTextarea
+                            v-model="templateForm.content"
+                            :rows="10"
+                            autoresize
+                            :maxrows="20"
+                            placeholder="请输入提示词内容，例如：请为商品「{product_name}」写一篇小红书笔记..."
+                            class="w-full min-h-[8rem] font-mono text-sm"
+                        />
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label
                                 class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                                >状态</label
                             >
-                                模板名称 <span class="text-red-500">*</span>
-                            </label>
-                            <UInput v-model="templateForm.name" placeholder="如：万能种草型" />
-                        </div>
-                        <div>
-                            <label
-                                class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                            >
-                                所属分组
-                            </label>
                             <USelectMenu
-                                :model-value="templateForm.groupId ?? ''"
+                                :model-value="templateForm.status"
                                 :items="[
-                                    { label: '未分组', value: '' },
-                                    ...groups.map((g) => ({ label: g.name, value: g.id })),
+                                    { label: '启用', value: 1 },
+                                    { label: '禁用', value: 0 },
                                 ]"
                                 value-key="value"
-                                placeholder="选择分组（可选）"
-                                @update:model-value="(v) => (templateForm.groupId = v === '' ? undefined : (v as string))"
+                                @update:model-value="(v) => (templateForm.status = Number(v))"
                             />
                         </div>
                         <div>
                             <label
                                 class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                                >排序</label
                             >
-                                模板内容 <span class="text-red-500">*</span>
-                            </label>
-                            <p class="mb-1 text-xs text-gray-400">
-                                支持变量：<code class="rounded bg-gray-100 px-1 dark:bg-gray-800"
-                                    >{product_name}</code
-                                >（必有）、
-                                <code class="rounded bg-gray-100 px-1 dark:bg-gray-800">{spec}</code
-                                >、
-                                <code class="rounded bg-gray-100 px-1 dark:bg-gray-800"
-                                    >{description}</code
-                                >（可选）
-                            </p>
-                            <UTextarea
-                                v-model="templateForm.content"
-                                :rows="16"
-                                placeholder="请输入提示词内容，例如：请为商品「{product_name}」写一篇小红书笔记..."
-                                class="w-full font-mono text-sm"
+                            <UInput
+                                v-model.number="templateForm.sortOrder"
+                                type="number"
+                                :min="0"
                             />
                         </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <label
-                                    class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                                    >状态</label
-                                >
-                                <USelectMenu
-                                    :model-value="templateForm.status"
-                                    :items="[
-                                        { label: '启用', value: 1 },
-                                        { label: '禁用', value: 0 },
-                                    ]"
-                                    value-key="value"
-                                    @update:model-value="(v) => (templateForm.status = Number(v))"
-                                />
-                            </div>
-                            <div>
-                                <label
-                                    class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                                    >排序</label
-                                >
-                                <UInput
-                                    v-model.number="templateForm.sortOrder"
-                                    type="number"
-                                    :min="0"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                    <div class="mt-6 flex justify-end gap-3">
-                        <UButton
-                            variant="outline"
-                            color="neutral"
-                            @click="showTemplateModal = false"
-                            >取消</UButton
-                        >
-                        <UButton :loading="isSavingTemplate" @click="saveTemplate">
-                            {{ isEditingTemplate ? "保存" : "创建" }}
-                        </UButton>
                     </div>
                 </div>
+            </template>
+            <template #footer>
+                <UButton variant="outline" color="neutral" @click="showTemplateModal = false">
+                    取消
+                </UButton>
+                <UButton :loading="isSavingTemplate" @click="saveTemplate">
+                    {{ isEditingTemplate ? "保存" : "创建" }}
+                </UButton>
             </template>
         </UModal>
 

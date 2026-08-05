@@ -92,7 +92,7 @@ const fromPage = ref<'products' | 'notes'>('notes');
 const coverImages = ref<string[]>([]);
 
 // 图片工具栏配置中的活动标签
-const activeImageTab = ref<"auto" | "template" | "history" | "upload">("auto");
+const activeImageTab = ref<"auto" | "refEdit" | "template" | "history" | "upload">("auto");
 
 // 编辑模式状态
 const isEditMode = ref(false);
@@ -125,6 +125,12 @@ const imageToolbarItems = [
         description: "根据正文自动配图",
         icon: "i-heroicons-sparkles",
         badge: "推荐",
+    },
+    {
+        key: "refEdit" as const,
+        label: "参考图编辑",
+        description: "提示词+商品/首图",
+        icon: "i-heroicons-paint-brush",
     },
     {
         key: "template" as const,
@@ -642,7 +648,11 @@ const coverImageDrag = ref<{ fromIndex: number } | null>(null);
 const onCoverImageDragStart = (e: DragEvent, index: number) => {
     coverImageDrag.value = { fromIndex: index };
     e.dataTransfer?.setData("text/plain", String(index));
-    if (e.dataTransfer) {
+    const url = coverImages.value[index];
+    if (url && e.dataTransfer) {
+        e.dataTransfer.setData(XHS_COVER_URL_DRAG_MIME, url);
+        e.dataTransfer.effectAllowed = "copyMove";
+    } else if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = "move";
     }
 };
@@ -679,6 +689,173 @@ const uploadProgress = ref(0);
 
 // 自动配图功能
 const isGeneratingImage = ref(false);
+
+// 万相参考图编辑（提示词 + 首张配图或商品主图）
+const refEditPrompt = ref("保持商品主体清晰，调整为小红书种草风格配图");
+const isGeneratingRefEdit = ref(false);
+/** 万相 function：指令编辑 | 局部重绘（换背景等需 mask） */
+const refEditImageEditFunction = ref<"description_edit" | "description_edit_with_mask">(
+    "description_edit",
+);
+/** 0～1，越小越接近原图（万相文档：部分能力支持 strength） */
+const refEditStrength = ref(0.5);
+const refEditMaskPath = ref<string | null>(null);
+const refEditMaskFileInput = ref<HTMLInputElement | null>(null);
+/** 从下方配图拖到 mask 区时 dataTransfer 携带的 MIME */
+const XHS_COVER_URL_DRAG_MIME = "application/x-xhs-cover-url";
+const refEditMaskDropActive = ref(false);
+
+watch(refEditImageEditFunction, (fn) => {
+    if (fn !== "description_edit_with_mask") {
+        refEditMaskPath.value = null;
+    }
+});
+
+/** 将已上传配图地址规范为传给后端的 mask 路径或公网 URL */
+const normalizeCoverUrlToMaskPath = (raw: string): string | null => {
+    const t = raw?.trim();
+    if (!t) {
+        return null;
+    }
+    if (/^https?:\/\//i.test(t)) {
+        if (import.meta.client) {
+            try {
+                const u = new URL(t);
+                if (u.origin === window.location.origin) {
+                    return `${u.pathname}${u.search}` || null;
+                }
+            } catch {
+                return null;
+            }
+        }
+        return t;
+    }
+    return t.startsWith("/") ? t : `/${t}`;
+};
+
+const setRefEditMaskFromCoverUrl = (raw: string) => {
+    const p = normalizeCoverUrlToMaskPath(raw);
+    if (!p) {
+        toast.warning("无法识别该图片地址");
+        return;
+    }
+    refEditMaskPath.value = p;
+    toast.success("已将该配图设为 mask");
+};
+
+const refEditMaskDisplaySrc = computed(() => {
+    const p = refEditMaskPath.value;
+    if (!p) {
+        return "";
+    }
+    if (/^https?:\/\//i.test(p)) {
+        return p;
+    }
+    if (import.meta.client) {
+        return `${window.location.origin}${p.startsWith("/") ? "" : "/"}${p}`;
+    }
+    return p;
+});
+
+const clearRefEditMask = () => {
+    refEditMaskPath.value = null;
+};
+
+const onRefEditMaskDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    refEditMaskDropActive.value = true;
+    if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = "copy";
+    }
+};
+
+const onRefEditMaskDragLeave = (e: DragEvent) => {
+    const el = e.currentTarget as HTMLElement | null;
+    const rel = e.relatedTarget;
+    if (el && rel instanceof Node && el.contains(rel)) {
+        return;
+    }
+    refEditMaskDropActive.value = false;
+};
+
+const onRefEditMaskDrop = (e: DragEvent) => {
+    e.preventDefault();
+    refEditMaskDropActive.value = false;
+    const dt = e.dataTransfer;
+    if (!dt) {
+        return;
+    }
+    const file = dt.files?.[0];
+    if (file) {
+        void uploadMaskForRefEdit(file);
+        return;
+    }
+    const fromCover = dt.getData(XHS_COVER_URL_DRAG_MIME)?.trim();
+    if (fromCover) {
+        setRefEditMaskFromCoverUrl(fromCover);
+        return;
+    }
+    const uri = dt.getData("text/uri-list")?.split("\n")[0]?.trim();
+    if (uri) {
+        setRefEditMaskFromCoverUrl(uri);
+    }
+};
+
+const uploadMaskForRefEdit = async (file: File) => {
+    const validTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    const maxSize = 5 * 1024 * 1024;
+    if (!validTypes.includes(file.type)) {
+        toast.error("mask 仅支持 JPG、PNG、GIF、WEBP");
+        return;
+    }
+    if (file.size > maxSize) {
+        toast.error("mask 图片不能超过 5MB");
+        return;
+    }
+    try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const userStore = useUserStore();
+        const authToken = userStore.token || userStore.temporaryToken;
+        if (!authToken) {
+            toast.error("请先登录");
+            return;
+        }
+        const response = await fetch("/api/xhs/images/upload", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${authToken}` },
+            body: formData,
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(
+                (errorData as { message?: string }).message || "mask 上传失败",
+            );
+        }
+        const result = (await response.json()) as { data?: { data?: { url?: string } } };
+        const imageUrl = result?.data?.data?.url;
+        if (!imageUrl) {
+            toast.error("上传成功但未返回图片地址");
+            return;
+        }
+        refEditMaskPath.value = imageUrl.startsWith("/") ? imageUrl : `/${imageUrl}`;
+        toast.success("mask 已上传（请与首张参考图同尺寸）");
+    } catch (e) {
+        toast.error(e instanceof Error ? e.message : "mask 上传失败");
+    } finally {
+        if (refEditMaskFileInput.value) {
+            refEditMaskFileInput.value.value = "";
+        }
+    }
+};
+
+const onRefEditMaskFileChange = (event: Event) => {
+    const t = event.target as HTMLInputElement;
+    const f = t.files?.[0];
+    if (f) {
+        void uploadMaskForRefEdit(f);
+    }
+};
 
 const handleAutoImageGenerate = async () => {
     if (!noteContent.value || !noteContent.value.trim()) {
@@ -790,13 +967,94 @@ const handleAutoImageGenerate = async () => {
     }
 };
 
+const handleReferenceEditGenerate = async () => {
+    if (!refEditPrompt.value || !refEditPrompt.value.trim()) {
+        toast.warning("请输入编辑提示词");
+        return;
+    }
+    if (coverImages.value.length >= 9) {
+        toast.warning("最多只能上传 9 张图片");
+        return;
+    }
+    if (
+        refEditImageEditFunction.value === "description_edit_with_mask" &&
+        !refEditMaskPath.value?.trim()
+    ) {
+        toast.warning("局部重绘请先上传 mask：白色为待编辑区域（如背景），黑色为保留主体");
+        return;
+    }
+
+    const body: {
+        prompt: string;
+        referenceImageUrl?: string;
+        productId?: string;
+        imageEditFunction: "description_edit" | "description_edit_with_mask";
+        strength: number;
+        maskImageUrl?: string;
+    } = {
+        prompt: refEditPrompt.value.trim(),
+        imageEditFunction: refEditImageEditFunction.value,
+        strength: refEditStrength.value,
+    };
+
+    const first = coverImages.value[0];
+    if (first) {
+        body.referenceImageUrl = first.startsWith("http")
+            ? first
+            : first.startsWith("/")
+              ? first
+              : `/${first}`;
+    } else if (primaryProductId.value) {
+        body.productId = primaryProductId.value;
+    } else {
+        toast.warning("请先添加首张配图，或从商品页带入商品以使用商品主图");
+        return;
+    }
+
+    if (refEditImageEditFunction.value === "description_edit_with_mask" && refEditMaskPath.value) {
+        const m = refEditMaskPath.value.trim();
+        body.maskImageUrl = m.startsWith("/") ? m : `/${m}`;
+    }
+
+    isGeneratingRefEdit.value = true;
+    try {
+        const { post } = useAuthFetch();
+        const { data, error: apiError } = await post<{ url?: string; data?: { url?: string } }>(
+            "/api/xhs/images/generate-from-reference",
+            body,
+            { errorMessage: "参考图编辑失败" },
+        );
+        if (apiError) {
+            return;
+        }
+        const raw = data as { url?: string; data?: { url?: string }; success?: boolean } | null;
+        const imageUrl = raw?.url || raw?.data?.url;
+        if (imageUrl) {
+            const absoluteUrl = imageUrl.startsWith("http")
+                ? imageUrl
+                : `${window.location.origin}${imageUrl.startsWith("/") ? "" : "/"}${imageUrl}`;
+            coverImages.value.push(absoluteUrl);
+            toast.success("参考图编辑成功");
+        } else {
+            toast.warning("生成成功但未返回图片地址");
+        }
+    } catch (error) {
+        console.error("Reference edit failed:", error);
+        toast.error("参考图编辑失败，请重试");
+    } finally {
+        isGeneratingRefEdit.value = false;
+    }
+};
+
 // 处理图片工具选择
-const handleImageToolSelect = async (key: "auto" | "template" | "history" | "upload") => {
+const handleImageToolSelect = async (key: "auto" | "refEdit" | "template" | "history" | "upload") => {
     activeImageTab.value = key;
 
     switch (key) {
         case "auto":
             await handleAutoImageGenerate();
+            break;
+        case "refEdit":
             break;
         case "template":
             // TODO: 实现图片模板功能
@@ -1407,7 +1665,7 @@ const doPublish = async () => {
                             class="text-[color:var(--xhs-text-soft)]"
                         />
                     </button>
-                    <div v-if="showImageToolbar" class="grid grid-cols-4 gap-4 px-5 pb-5">
+                    <div v-if="showImageToolbar" class="grid grid-cols-2 gap-3 px-5 sm:grid-cols-3 lg:grid-cols-5 lg:gap-4">
                         <button
                             v-for="item in imageToolbarItems"
                             :key="item.key"
@@ -1441,6 +1699,128 @@ const doPublish = async () => {
                             </div>
                         </button>
                     </div>
+                    <div
+                        v-if="showImageToolbar && activeImageTab === 'refEdit'"
+                        class="border-t border-[color:var(--xhs-border)] px-5 pb-5 pt-4 dark:border-[color:var(--xhs-border)]"
+                    >
+                        <p class="mb-2 text-xs leading-relaxed text-[color:var(--xhs-text-muted)]">
+                            参考图为<strong class="text-[color:var(--xhs-text)]">首张配图</strong>（可拖动排序把目标图放到第一位）；无配图时用已选商品主图。小红书等
+                            <strong class="text-[color:var(--xhs-text)]">公网 HTTPS</strong> 地址会直接用于万相拉图，一般无需 APP_PUBLIC_ORIGIN；仅当地址为本站
+                            <code class="rounded bg-[color:var(--xhs-muted-bg)] px-0.5 text-[11px]">/uploads/</code>
+                            路径时才要配对外站点根地址。需 DASHSCOPE_API_KEY，生成可能需数十秒。
+                        </p>
+                        <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                            <label class="flex items-center gap-2 text-xs text-[color:var(--xhs-text)]">
+                                <span class="shrink-0">编辑方式</span>
+                                <select
+                                    v-model="refEditImageEditFunction"
+                                    class="min-w-[200px] flex-1 rounded-lg border border-[color:var(--xhs-border)] bg-white px-2 py-1.5 text-xs text-[color:var(--xhs-text)] dark:border-[color:var(--xhs-border)] dark:bg-[color:var(--xhs-card)]"
+                                >
+                                    <option value="description_edit">指令编辑（一句话，适合小改动）</option>
+                                    <option value="description_edit_with_mask">
+                                        局部重绘（换背景推荐：需 mask，白=改、黑=留）
+                                    </option>
+                                </select>
+                            </label>
+                            <label class="flex min-w-[200px] flex-1 items-center gap-2 text-xs text-[color:var(--xhs-text)]">
+                                <span class="shrink-0">修改幅度</span>
+                                <input
+                                    v-model.number="refEditStrength"
+                                    type="range"
+                                    min="0"
+                                    max="1"
+                                    step="0.05"
+                                    class="h-2 flex-1 accent-[color:var(--xhs-brand)]"
+                                />
+                                <span class="w-8 tabular-nums text-[color:var(--xhs-text-muted)]">{{
+                                    refEditStrength.toFixed(2)
+                                }}</span>
+                            </label>
+                        </div>
+                        <div
+                            v-if="refEditImageEditFunction === 'description_edit_with_mask'"
+                            class="mb-3"
+                        >
+                            <p class="mb-1.5 text-[11px] leading-relaxed text-[color:var(--xhs-text-muted)]">
+                                可将下方<strong class="text-[color:var(--xhs-text)]">已上传配图</strong>拖入框内作为
+                                mask；或点击上传本地文件。mask 须与首张参考图<strong class="text-[color:var(--xhs-text)]">同尺寸</strong>，白=编辑区、黑=保留。
+                            </p>
+                            <input
+                                ref="refEditMaskFileInput"
+                                type="file"
+                                accept="image/jpeg,image/png,image/gif,image/webp"
+                                class="hidden"
+                                @change="onRefEditMaskFileChange"
+                            />
+                            <div
+                                class="flex flex-col gap-2 rounded-lg border-2 border-dashed p-3 transition-colors sm:flex-row sm:items-stretch"
+                                :class="
+                                    refEditMaskDropActive
+                                        ? 'border-[color:var(--xhs-brand)] bg-[color:var(--xhs-brand-soft)] dark:bg-[color:var(--xhs-brand-soft-dark)]'
+                                        : 'border-[color:var(--xhs-border)] bg-[color:var(--xhs-muted-bg)]/40 dark:border-[color:var(--xhs-border)]'
+                                "
+                                @dragover="onRefEditMaskDragOver"
+                                @dragleave="onRefEditMaskDragLeave"
+                                @drop="onRefEditMaskDrop"
+                            >
+                                <div
+                                    class="flex min-h-[72px] flex-1 flex-col items-center justify-center gap-1 text-center text-[11px] text-[color:var(--xhs-text-muted)] sm:min-w-[120px]"
+                                >
+                                    <span>拖入配图或文件到此处</span>
+                                    <UButton size="xs" variant="soft" @click="refEditMaskFileInput?.click()">
+                                        选择本地 mask
+                                    </UButton>
+                                </div>
+                                <div
+                                    v-if="refEditMaskPath && refEditMaskDisplaySrc"
+                                    class="relative flex h-[88px] w-[88px] shrink-0 overflow-hidden rounded-md border border-[color:var(--xhs-border)] bg-white dark:border-[color:var(--xhs-border)]"
+                                >
+                                    <img
+                                        :src="refEditMaskDisplaySrc"
+                                        alt="mask 预览"
+                                        class="h-full w-full object-cover"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white hover:bg-black/70"
+                                        title="清除 mask"
+                                        aria-label="清除 mask"
+                                        @click.stop="clearRefEditMask"
+                                    >
+                                        <UIcon name="i-heroicons-x-mark" class="text-sm" />
+                                    </button>
+                                </div>
+                                <div
+                                    v-else
+                                    class="flex h-[88px] w-[88px] shrink-0 items-center justify-center rounded-md border border-dashed border-[color:var(--xhs-border)] text-[10px] text-[color:var(--xhs-text-soft)] dark:border-[color:var(--xhs-border)]"
+                                >
+                                    无预览
+                                </div>
+                                <p
+                                    v-if="refEditMaskPath"
+                                    class="flex min-w-0 flex-1 items-center self-center text-[11px] text-[color:var(--xhs-text-muted)]"
+                                >
+                                    <span class="truncate" :title="refEditMaskPath">{{ refEditMaskPath }}</span>
+                                </p>
+                            </div>
+                        </div>
+                        <UTextarea
+                            v-model="refEditPrompt"
+                            :rows="3"
+                            autoresize
+                            class="w-full"
+                            placeholder="换背景示例：将背景修改为明亮简约的白墙场景，柔光；保持主体不变。局部重绘时请描述新背景内容。"
+                        />
+                        <UButton
+                            class="mt-3"
+                            color="primary"
+                            :loading="isGeneratingRefEdit"
+                            :disabled="isGeneratingRefEdit"
+                            @click="handleReferenceEditGenerate"
+                        >
+                            开始生成
+                        </UButton>
+                    </div>
                 </div>
 
                 <!-- 卡片2：已上传图片（grid布局） -->
@@ -1466,7 +1846,9 @@ const doPublish = async () => {
                         </div>
                     </button>
                     <div v-show="coverImagesStripExpanded" class="px-5 pb-5">
-                        <p class="mb-2 text-xs text-[color:var(--xhs-text-muted)]">拖动缩略图可调整顺序（首张为封面）</p>
+                        <p class="mb-2 text-xs text-[color:var(--xhs-text-muted)]">
+                            拖动缩略图可调整顺序（首张为封面）。局部重绘时，可将缩略图<strong class="text-[color:var(--xhs-text)]">拖入上方 mask 区域</strong>。
+                        </p>
                         <div class="flex flex-wrap gap-3">
                         <div
                             v-for="(image, index) in coverImages"

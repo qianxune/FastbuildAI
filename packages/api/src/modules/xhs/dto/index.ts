@@ -1,3 +1,4 @@
+export * from "./generate-from-reference.dto";
 export * from "./batch-delete-products.dto";
 export * from "./batch-set-product-category.dto";
 export * from "./clear-product-category.dto";

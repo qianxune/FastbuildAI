@@ -3,14 +3,34 @@ import { InjectRepository } from "@buildingai/db/@nestjs/typeorm";
 import { Repository } from "@buildingai/db/typeorm";
 import { XhsImage } from "@buildingai/db/entities";
 import { BaseService } from "@buildingai/base";
-import { HttpErrorFactory } from "@buildingai/errors";
+import { HttpError, HttpErrorFactory } from "@buildingai/errors";
 import { SecretService } from "@buildingai/core/modules";
 import { getProviderSecret } from "@buildingai/utils";
 import { AiModelService } from "@modules/ai/model/services/ai-model.service";
+import type { GenerateFromReferenceDto } from "../dto/generate-from-reference.dto";
+import { XhsProductService } from "./xhs-product.service";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
+
+const DASHSCOPE_API_V1_BASE =
+    process.env.DASHSCOPE_BASE_URL?.replace(/\/$/, "") ||
+    "https://dashscope.aliyuncs.com/api/v1";
+
+const WANX_IMAGE_EDIT_CREATE_PATH = "/services/aigc/image2image/image-synthesis";
+
+/** 官方文档中支持 parameters.strength 的 function 子集（其余能力不传 strength，避免接口报错） */
+const WANX_FUNCTIONS_WITH_STRENGTH = new Set([
+    "stylization_all",
+    "stylization_local",
+    "description_edit",
+    "description_edit_with_mask",
+]);
+
+/** 轮询：间隔与最大次数（约 3 分钟） */
+const DASHSCOPE_POLL_INTERVAL_MS = 2000;
+const DASHSCOPE_POLL_MAX_ATTEMPTS = 90;
 
 /**
  * 小红书图片服务
@@ -25,6 +45,7 @@ export class XhsImageService extends BaseService<XhsImage> {
         private readonly xhsImageRepository: Repository<XhsImage>,
         private readonly aiModelService: AiModelService,
         private readonly secretService: SecretService,
+        private readonly xhsProductService: XhsProductService,
     ) {
         super(xhsImageRepository);
     }
@@ -139,6 +160,247 @@ export class XhsImageService extends BaseService<XhsImage> {
             this.logger.error("自动配图失败:", error);
             throw HttpErrorFactory.internal("自动配图失败", { error: error.message });
         }
+    }
+
+    /**
+     * 提示词 + 参考图：调用阿里云百炼万相通用图像编辑（异步任务 + 轮询），结果落库为 xhs_images
+     */
+    async generateFromReference(
+        dto: GenerateFromReferenceDto,
+        userId: string,
+    ): Promise<XhsImage> {
+        const pid = dto.productId?.trim();
+        const refRaw = dto.referenceImageUrl?.trim();
+
+        if (pid && refRaw) {
+            throw HttpErrorFactory.badRequest("请勿同时传 productId 与 referenceImageUrl");
+        }
+        if (!pid && !refRaw) {
+            throw HttpErrorFactory.badRequest("请提供 productId（商品主图）或 referenceImageUrl（图片地址）");
+        }
+
+        let referenceSource: string;
+        if (pid) {
+            const product = await this.xhsProductService.findOneForUser(pid, userId);
+            const main = product.imageUrl?.trim();
+            if (!main) {
+                throw HttpErrorFactory.badRequest("该商品没有主图 imageUrl，无法作为参考图");
+            }
+            referenceSource = main;
+        } else {
+            referenceSource = refRaw!;
+        }
+
+        const apiKey = process.env.DASHSCOPE_API_KEY?.trim();
+        if (!apiKey) {
+            throw HttpErrorFactory.badRequest(
+                "未配置 DASHSCOPE_API_KEY，无法调用万相图像编辑（北京地域 API Key）",
+            );
+        }
+
+        const baseImageUrl = this.resolvePublicBaseImageUrl(referenceSource);
+        const editFn = dto.imageEditFunction ?? "description_edit";
+
+        let maskPublicUrl: string | undefined;
+        if (editFn === "description_edit_with_mask") {
+            const m = dto.maskImageUrl?.trim();
+            if (!m) {
+                throw HttpErrorFactory.badRequest(
+                    "局部重绘须提供 maskImageUrl：涂抹图与参考图同尺寸，白色为待编辑区域（如背景），黑色为保留区域（主体）",
+                );
+            }
+            maskPublicUrl = this.resolvePublicBaseImageUrl(m);
+        }
+
+        const strengthNum = dto.strength;
+        const strength =
+            strengthNum !== undefined &&
+            strengthNum !== null &&
+            !Number.isNaN(Number(strengthNum))
+                ? Math.min(1, Math.max(0, Number(strengthNum)))
+                : undefined;
+
+        try {
+            const taskId = await this.createWanxImageEditTask(baseImageUrl, dto.prompt.trim(), editFn, apiKey, {
+                ...(maskPublicUrl ? { maskImageUrl: maskPublicUrl } : {}),
+                ...(strength !== undefined ? { strength } : {}),
+            });
+            this.logger.log(`万相图像编辑任务已创建 task_id=${taskId}`);
+
+            const resultUrl = await this.pollDashScopeTaskUntilImageUrl(taskId, apiKey);
+            const localUrl = await this.downloadAndSaveImage(resultUrl, `reference-edit-${uuidv4()}.png`);
+            this.logger.log(`参考图编辑结果已保存: ${localUrl}`);
+
+            const image = this.xhsImageRepository.create({
+                url: localUrl,
+                type: "reference_edit",
+                userId,
+            });
+            return await this.xhsImageRepository.save(image);
+        } catch (error) {
+            if (error instanceof HttpError) {
+                throw error;
+            }
+            const msg = error instanceof Error ? error.message : String(error);
+            this.logger.error("参考图生图失败:", error);
+            throw HttpErrorFactory.internal("参考图生图失败", { error: msg });
+        }
+    }
+
+    /**
+     * 将参考地址解析为万相可拉取的公网 URL
+     */
+    resolvePublicBaseImageUrl(reference: string): string {
+        const t = reference.trim();
+        if (!t) {
+            throw HttpErrorFactory.badRequest("参考图地址为空");
+        }
+        if (/^https?:\/\//i.test(t)) {
+            return t;
+        }
+        if (t.startsWith("/")) {
+            const origin = (process.env.APP_PUBLIC_ORIGIN || process.env.SERVER_URL || "")
+                .trim()
+                .replace(/\/$/, "");
+            if (!origin) {
+                throw HttpErrorFactory.badRequest(
+                    "参考图为本站路径时，请配置环境变量 APP_PUBLIC_ORIGIN 或 SERVER_URL（对外可访问的根地址）",
+                );
+            }
+            if (/localhost|127\.0\.0\.1/i.test(origin)) {
+                throw HttpErrorFactory.badRequest(
+                    "本站图片地址使用了 localhost，万相服务无法拉取，请使用公网可访问的 APP_PUBLIC_ORIGIN 或直接传 HTTPS 图片链接",
+                );
+            }
+            return `${origin}${t}`;
+        }
+        throw HttpErrorFactory.badRequest("参考图地址须为 http(s) URL 或以 / 开头的本站路径");
+    }
+
+    private async createWanxImageEditTask(
+        baseImageUrl: string,
+        prompt: string,
+        editFunction: string,
+        apiKey: string,
+        options?: { maskImageUrl?: string; strength?: number },
+    ): Promise<string> {
+        const url = `${DASHSCOPE_API_V1_BASE}${WANX_IMAGE_EDIT_CREATE_PATH}`;
+        const input: Record<string, string> = {
+            function: editFunction,
+            prompt,
+            base_image_url: baseImageUrl,
+        };
+        if (options?.maskImageUrl) {
+            input.mask_image_url = options.maskImageUrl;
+        }
+        const parameters: Record<string, unknown> = { n: 1 };
+        if (
+            options?.strength !== undefined &&
+            WANX_FUNCTIONS_WITH_STRENGTH.has(editFunction)
+        ) {
+            parameters.strength = options.strength;
+        }
+        const body = {
+            model: "wanx2.1-imageedit",
+            input,
+            parameters,
+        };
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${apiKey}`,
+                "X-DashScope-Async": "enable",
+            },
+            body: JSON.stringify(body),
+        });
+
+        const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+        if (!response.ok) {
+            const errMsg =
+                (data.message as string) ||
+                (data.msg as string) ||
+                JSON.stringify(data).slice(0, 500);
+            this.logger.error(`万相创建任务失败 HTTP ${response.status}: ${errMsg}`);
+            throw new Error(`万相创建任务失败: ${response.status} ${errMsg}`);
+        }
+
+        const output = data.output as Record<string, unknown> | undefined;
+        const taskId = (output?.task_id as string) || (data.task_id as string);
+        if (!taskId) {
+            this.logger.error("万相创建任务响应无 task_id:", data);
+            throw new Error("万相创建任务响应异常，未返回 task_id");
+        }
+        return taskId;
+    }
+
+    private async pollDashScopeTaskUntilImageUrl(taskId: string, apiKey: string): Promise<string> {
+        const queryUrl = `${DASHSCOPE_API_V1_BASE}/tasks/${encodeURIComponent(taskId)}`;
+
+        for (let i = 0; i < DASHSCOPE_POLL_MAX_ATTEMPTS; i++) {
+            if (i > 0) {
+                await new Promise((r) => setTimeout(r, DASHSCOPE_POLL_INTERVAL_MS));
+            }
+
+            const response = await fetch(queryUrl, {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                },
+            });
+
+            const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+            if (!response.ok) {
+                const errMsg = (data.message as string) || JSON.stringify(data).slice(0, 300);
+                throw new Error(`查询万相任务失败: ${response.status} ${errMsg}`);
+            }
+
+            const output = data.output as Record<string, unknown> | undefined;
+            const status = (output?.task_status as string) || "";
+
+            if (status === "FAILED" || status === "UNKNOWN") {
+                const errMsg =
+                    (output?.message as string) ||
+                    (output?.code as string) ||
+                    JSON.stringify(output || data).slice(0, 500);
+                throw new Error(`万相任务失败: ${errMsg}`);
+            }
+
+            if (status === "SUCCEEDED") {
+                const imageUrl = this.extractWanxTaskResultImageUrl(output);
+                if (imageUrl) {
+                    return imageUrl;
+                }
+                throw new Error("万相任务已成功但未解析到结果图 URL");
+            }
+        }
+
+        throw new Error("万相任务轮询超时，请稍后重试");
+    }
+
+    private extractWanxTaskResultImageUrl(output: Record<string, unknown> | undefined): string | null {
+        if (!output) {
+            return null;
+        }
+        const results = output.results as Array<{ url?: string }> | undefined;
+        if (results?.length && results[0]?.url) {
+            return results[0].url!;
+        }
+        const renderUrls = output.render_urls as string[] | undefined;
+        if (renderUrls?.length && renderUrls[0]) {
+            return renderUrls[0];
+        }
+        if (typeof output.url === "string") {
+            return output.url;
+        }
+        const submitOutputs = output.output_images as Array<{ url?: string }> | undefined;
+        if (submitOutputs?.[0]?.url) {
+            return submitOutputs[0].url!;
+        }
+        return null;
     }
 
     /**
@@ -398,7 +660,7 @@ export class XhsImageService extends BaseService<XhsImage> {
     /**
      * 下载并保存图片（私有方法，用于AI生成的图片）
      */
-    private async downloadAndSaveImage(remoteUrl: string): Promise<string> {
+    private async downloadAndSaveImage(remoteUrl: string, filename?: string): Promise<string> {
         try {
             this.logger.log(`⬇️ 开始下载图片: ${remoteUrl}`);
 
@@ -412,14 +674,14 @@ export class XhsImageService extends BaseService<XhsImage> {
             const buffer = Buffer.from(arrayBuffer);
 
             // 生成唯一文件名
-            const filename = `ai-generated-${uuidv4()}.png`;
+            const finalName = filename ?? `ai-generated-${uuidv4()}.png`;
 
             // 确定存储路径
             const projectRoot = process.cwd();
             const uploadDir = path.join(projectRoot, "storage", "uploads", "xhs-images");
             await fs.mkdir(uploadDir, { recursive: true });
 
-            const filePath = path.join(uploadDir, filename);
+            const filePath = path.join(uploadDir, finalName);
 
             // 保存文件
             await fs.writeFile(filePath, buffer);
