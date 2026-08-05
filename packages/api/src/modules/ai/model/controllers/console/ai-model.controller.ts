@@ -4,7 +4,6 @@ import {
 } from "@buildingai/ai-sdk";
 import { BaseController } from "@buildingai/base";
 import { AI_DEFAULT_MODEL } from "@buildingai/constants";
-import { BusinessCode } from "@buildingai/constants/shared/business-code.constant";
 import { AiModel } from "@buildingai/db/entities";
 import { DictService } from "@buildingai/dict";
 import { HttpErrorFactory } from "@buildingai/errors";
@@ -31,6 +30,7 @@ export class AiModelConsoleController extends BaseController {
     constructor(
         private readonly aiModelService: AiModelService,
         private readonly aiProviderService: AiProviderService,
+
         private readonly dictService: DictService,
     ) {
         super();
@@ -77,6 +77,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "list",
         name: "查看AI模型",
+        hidden: true,
     })
     async list(@Query() query: QueryAiModelDto) {
         return await this.aiModelService.getModelList(query, ["apiKey"]);
@@ -89,6 +90,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "detail",
         name: "查看AI模型",
+        hidden: true,
     })
     async findOne(@Param("id") id: string) {
         const result = (await this.aiModelService.findOneById(id, {
@@ -107,6 +109,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "type-father-list",
         name: "查看AI供应商类型",
+        hidden: true,
     })
     async getFatherProviderTypeList(@Query("providerId") providerId?: string) {
         if (!providerId) {
@@ -117,7 +120,7 @@ export class AiModelConsoleController extends BaseController {
             throw HttpErrorFactory.business("AI供应商不存在");
         }
         const typeList = getModelTypesWithDescriptions();
-        return typeList.filter((type) => provider.supportedModelTypes?.includes(type.value));
+        return typeList.filter((item) => provider.supportedModelTypes?.includes(item.type));
     }
 
     /**
@@ -127,6 +130,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "type-list",
         name: "查看AI供应商类型",
+        hidden: true,
     })
     async getProviderTypeList() {
         return getModelTypesWithDescriptions();
@@ -139,6 +143,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "features-list",
         name: "管理AI模型",
+        hidden: true,
     })
     async getFeaturesList() {
         return getModelFeaturesWithDescriptions();
@@ -151,6 +156,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "detail-full",
         name: "管理AI模型",
+        hidden: true,
     })
     async findOneFull(@Param("id") id: string) {
         return await this.aiModelService.findOneById(id);
@@ -163,6 +169,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "batch-toggle-active",
         name: "更新AI模型",
+        hidden: true,
     })
     async batchToggleActive(@Body("ids") ids: string[], @Body("isActive") isActive: boolean) {
         if (!Array.isArray(ids)) {
@@ -220,6 +227,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "update",
         name: "批量更新AI模型",
+        hidden: true,
     })
     async batchUpdate(@Body() dto: BatchUpdateAiModelDto) {
         const { models, skipErrors = false } = dto;
@@ -323,17 +331,9 @@ export class AiModelConsoleController extends BaseController {
         name: "删除AI模型",
     })
     async remove(@Param("id") id: string) {
-        // 检查是否为内置模型
         const model = await this.aiModelService.findOneById(id);
         if (!model) {
             throw HttpErrorFactory.business("AI模型不存在");
-        }
-
-        if (model.isBuiltIn) {
-            throw HttpErrorFactory.business(
-                "系统内置模型不允许删除",
-                BusinessCode.OPERATION_NOT_ALLOWED,
-            );
         }
 
         // 检查是否是默认模型
@@ -353,19 +353,10 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "batch-delete",
         name: "删除AI模型",
+        hidden: true,
     })
     async removeMany(@Body("ids") ids: string[]) {
-        // 批量检查是否包含内置模型
         const models = await Promise.all(ids.map((id) => this.aiModelService.findOneById(id)));
-
-        const builtInModels = models.filter((model) => model?.isBuiltIn);
-        if (builtInModels.length > 0) {
-            const builtInNames = builtInModels.map((m) => m.name).join("、");
-            throw HttpErrorFactory.business(
-                `以下系统内置模型不允许删除：${builtInNames}`,
-                BusinessCode.OPERATION_NOT_ALLOWED,
-            );
-        }
 
         // 过滤掉不存在的模型 ID
         const validIds = models
@@ -396,6 +387,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "available-all",
         name: "查看AI模型",
+        hidden: true,
     })
     async getAvailableModels() {
         return await this.aiModelService.getAvailableModels(["apiKey"]);
@@ -408,6 +400,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "default-current",
         name: "查看AI模型",
+        hidden: true,
     })
     async getDefaultModel() {
         const model_id = await this.dictService.get(AI_DEFAULT_MODEL);
@@ -442,6 +435,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "default-update",
         name: "设置默认AI模型",
+        hidden: true,
     })
     async setDefault(@Param("id") id: string) {
         await this.dictService.set(AI_DEFAULT_MODEL, id);
@@ -455,6 +449,7 @@ export class AiModelConsoleController extends BaseController {
     @Permissions({
         code: "batch-sort",
         name: "批量排序AI模型",
+        hidden: true,
     })
     async batchSort(@Body() dto: BatchSortAiModelDto) {
         await this.aiModelService.batchSortModels(dto);

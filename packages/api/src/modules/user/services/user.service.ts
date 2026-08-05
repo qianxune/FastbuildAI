@@ -10,13 +10,19 @@ import {
 import { AppBillingService } from "@buildingai/core/modules";
 import { type UserPlayground } from "@buildingai/db";
 import { InjectRepository } from "@buildingai/db/@nestjs/typeorm";
-import { MembershipLevels, User, UserSubscription } from "@buildingai/db/entities";
+import {
+    Department,
+    DepartmentUserIndex,
+    MembershipLevels,
+    User,
+    UserSubscription,
+} from "@buildingai/db/entities";
 import { Role } from "@buildingai/db/entities";
-import { Between, DeepPartial, In, Like, Repository } from "@buildingai/db/typeorm";
+import { Between, DeepPartial, In, Like, MoreThan, Repository } from "@buildingai/db/typeorm";
 import { HttpErrorFactory } from "@buildingai/errors";
-import { generateNo } from "@buildingai/utils";
-import { isEnabled } from "@buildingai/utils";
+import { generateNo, isDisabled, isEnabled } from "@buildingai/utils";
 import { RolePermissionService } from "@common/modules/auth/services/role-permission.service";
+import { UserTokenService } from "@common/modules/auth/services/user-token.service";
 import { Inject, Injectable } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 
@@ -63,8 +69,13 @@ export class UserService extends BaseService<User> {
         private readonly userSubscriptionRepository: Repository<UserSubscription>,
         @InjectRepository(MembershipLevels)
         private readonly membershipLevelsRepository: Repository<MembershipLevels>,
+        @InjectRepository(Department)
+        private readonly departmentRepository: Repository<Department>,
+        @InjectRepository(DepartmentUserIndex)
+        private readonly departmentUserIndexRepository: Repository<DepartmentUserIndex>,
         @Inject(RolePermissionService)
         private readonly rolePermissionService: RolePermissionService,
+        private readonly userTokenService: UserTokenService,
     ) {
         super(userRepository);
     }
@@ -78,12 +89,13 @@ export class UserService extends BaseService<User> {
     async list(dto: QueryUserDto, user: UserPlayground): Promise<any> {
         const where: any[] = [];
 
-        // 关键词模糊查询 - 搜索用户名、昵称、邮箱、手机号
+        // 关键词模糊查询 - 搜索用户编号/昵称/手机号搜索
         if (dto.keyword) {
             where.push([
-                { username: Like(`%${dto.keyword}%`), isRoot: 0 },
+                { userNo: Like(`%${dto.keyword}%`), isRoot: 0 },
                 { nickname: Like(`%${dto.keyword}%`), isRoot: 0 },
-                { email: Like(`%${dto.keyword}%`), isRoot: 0 },
+                // { username: Like(`%${dto.keyword}%`), isRoot: 0 },
+                // { email: Like(`%${dto.keyword}%`), isRoot: 0 },
                 { phone: Like(`%${dto.keyword}%`), isRoot: 0 },
             ]);
         }
@@ -169,9 +181,12 @@ export class UserService extends BaseService<User> {
         }
 
         // 批量查询所有用户订阅（包含开始和结束时间）
+        // 只查询未过期的订阅记录
+        const now = new Date();
         const subscriptions = await this.userSubscriptionRepository.find({
             where: {
                 userId: In(userIds),
+                endTime: MoreThan(now),
             },
             select: ["userId", "levelId", "startTime", "endTime"],
         });
@@ -283,6 +298,24 @@ export class UserService extends BaseService<User> {
     }
 
     /**
+     * 根据会员等级ID列表获取会员等级信息
+     *
+     * @param levelIds 会员等级ID列表
+     * @returns 会员等级列表
+     */
+    async getMembershipLevelsByIds(levelIds: string[]): Promise<MembershipLevels[]> {
+        if (levelIds.length === 0) {
+            return [];
+        }
+
+        return await this.membershipLevelsRepository.find({
+            where: { id: In(levelIds) },
+            select: ["id", "name", "icon", "level"],
+            order: { level: "ASC" },
+        });
+    }
+
+    /**
      * 创建用户
      *
      * @param createUserDto 创建用户DTO
@@ -364,7 +397,6 @@ export class UserService extends BaseService<User> {
                 levelId: createUserDto.level,
                 startTime,
                 endTime,
-                source: 0, // 0-系统
                 orderId: null,
             });
 
@@ -406,11 +438,16 @@ export class UserService extends BaseService<User> {
         // 加密新密码
         const hashedPassword = await this.hashPassword(newPassword);
 
-        return this.updateById(
+        const result = await this.updateById(
             id,
             { password: hashedPassword },
             { excludeFields: ["password", "openid"] },
         );
+
+        // 清除用户所有 token，强制重新登录
+        await this.userTokenService.revokeAllTokens(id);
+
+        return result;
     }
 
     /**
@@ -431,11 +468,16 @@ export class UserService extends BaseService<User> {
         // 加密新密码
         const hashedPassword = await this.hashPassword(newPassword);
 
-        return this.updateById(
+        const result = await this.updateById(
             id,
             { password: hashedPassword },
             { excludeFields: ["password", "openid"] },
         );
+
+        // 清除用户所有 token，强制重新登录
+        await this.userTokenService.revokeAllTokens(id);
+
+        return result;
     }
 
     /**
@@ -453,7 +495,16 @@ export class UserService extends BaseService<User> {
             throw HttpErrorFactory.notFound(`ID为 ${id} 的用户不存在`);
         }
 
-        return this.updateById(id, { status }, { excludeFields: ["password"] });
+        const updatedUser = await this.updateById(id, { status }, { excludeFields: ["password"] });
+
+        if (isDisabled(status)) {
+            await this.userTokenService.revokeAllTokens(id);
+            await this.rolePermissionService.clearUserCache(id).catch((error) => {
+                this.logger.warn(`清理用户权限缓存失败: ${error.message}`);
+            });
+        }
+
+        return updatedUser;
     }
 
     /**
@@ -547,8 +598,13 @@ export class UserService extends BaseService<User> {
             }
         }
 
-        // 移除 roleId，因为我们要单独处理角色关联
-        const { roleId: _roleId, ...restUpdateData } = updateData as UpdateUserDto;
+        // 移除 roleId / level / levelEndTime，因为我们要单独处理角色关联和会员订阅
+        const {
+            roleId: _roleId,
+            level: _level,
+            levelEndTime: _levelEndTime,
+            ...restUpdateData
+        } = updateData as UpdateUserDto;
 
         // 更新用户基本数据（使用 save 方法触发生命周期钩子）
         Object.assign(user, restUpdateData);
@@ -562,10 +618,11 @@ export class UserService extends BaseService<User> {
             .set(role ? role.id : null);
 
         // 处理会员订阅信息
-        if ("level" in updateData || "levelEndTime" in updateData) {
-            const levelId = "level" in updateData ? updateData.level : undefined;
-            const levelEndTime = "levelEndTime" in updateData ? updateData.levelEndTime : undefined;
-
+        // 处理会员订阅信息（仅当调用方显式提供了 level 或 levelEndTime 值时才处理，
+        // class-transformer 会将未传的字段设为 undefined，因此用 !== undefined 判断）
+        const levelId = (updateData as UpdateUserDto).level;
+        const levelEndTime = (updateData as UpdateUserDto).levelEndTime;
+        if (levelId !== undefined || levelEndTime !== undefined) {
             // 如果提供了会员等级信息，则创建或更新订阅记录
             if (levelId && levelEndTime) {
                 const level = await this.membershipLevelsRepository.findOne({
@@ -579,17 +636,16 @@ export class UserService extends BaseService<User> {
                 const endTime = new Date(levelEndTime);
                 const startTime = new Date();
 
-                // 查找用户是否已有系统来源的订阅记录
+                // 按 (userId, levelId) 查找唯一订阅记录
                 const existingSubscription = await this.userSubscriptionRepository.findOne({
                     where: {
                         userId: id,
-                        source: 0, // 0-系统
+                        levelId,
                     },
                 });
 
                 if (existingSubscription) {
                     // 更新现有订阅记录
-                    existingSubscription.levelId = levelId;
                     existingSubscription.startTime = startTime;
                     existingSubscription.endTime = endTime;
                     await this.userSubscriptionRepository.save(existingSubscription);
@@ -600,16 +656,25 @@ export class UserService extends BaseService<User> {
                         levelId,
                         startTime,
                         endTime,
-                        source: 0, // 0-系统
                         orderId: null,
                     });
                     await this.userSubscriptionRepository.save(subscription);
                 }
-            } else if (levelId === null || levelId === undefined) {
-                // 如果设置为普通用户，删除该用户的所有订阅记录（包括系统赠送和自己购买的）
-                await this.userSubscriptionRepository.delete({
-                    userId: id,
+            } else if (levelId === null) {
+                // 如果设置为普通用户，将所有有效订阅的 endTime 截断到当前时间（保留历史记录）
+                const now = new Date();
+                const activeSubscriptions = await this.userSubscriptionRepository.find({
+                    where: {
+                        userId: id,
+                        endTime: MoreThan(now),
+                    },
                 });
+                if (activeSubscriptions.length > 0) {
+                    for (const sub of activeSubscriptions) {
+                        sub.endTime = now;
+                    }
+                    await this.userSubscriptionRepository.save(activeSubscriptions);
+                }
             }
         }
 
@@ -807,5 +872,51 @@ export class UserService extends BaseService<User> {
         }
 
         return result;
+    }
+
+    /**
+     * 获取用户当前最高会员等级ID
+     *
+     * @param userId 用户ID
+     * @returns 最高会员等级ID，无有效会员则返回 null
+     */
+    async getUserHighestMembershipLevel(userId: string): Promise<{
+        id: string | null;
+        name: string | null;
+        icon: string | null;
+    }> {
+        const now = new Date();
+
+        // 查询用户所有有效订阅的等级ID
+        const subscriptions = await this.userSubscriptionRepository.find({
+            where: {
+                userId,
+                endTime: MoreThan(now),
+            },
+            select: ["levelId"],
+        });
+
+        const levelIds = subscriptions.filter((sub) => sub.levelId).map((sub) => sub.levelId!);
+
+        if (levelIds.length === 0) {
+            return {
+                id: null,
+                name: null,
+                icon: null,
+            };
+        }
+
+        // 查询这些等级中 level 值最高的
+        const highestLevel = await this.membershipLevelsRepository.findOne({
+            where: { id: In(levelIds) },
+            order: { level: "DESC" },
+            select: ["id", "name", "icon"],
+        });
+
+        return {
+            id: highestLevel?.id ?? null,
+            name: highestLevel?.name ?? null,
+            icon: highestLevel?.icon ?? null,
+        };
     }
 }

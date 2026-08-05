@@ -68,6 +68,13 @@ export class UpdateChatConfigDto {
     attachmentSizeLimit?: number;
 
     /**
+     * 是否显示 MCP 工具调用详情
+     */
+    @IsOptional()
+    @IsBoolean({ message: "MCP 工具调用详情显示状态必须是布尔值" })
+    showMcpToolDetails?: boolean;
+
+    /**
      * 欢迎信息
      */
     @IsOptional()
@@ -75,4 +82,20 @@ export class UpdateChatConfigDto {
     @ValidateNested()
     @Type(() => WelcomeInfoDto)
     welcomeInfo?: WelcomeInfoDto;
+
+    @IsOptional()
+    @IsString()
+    memoryModelId?: string;
+
+    @IsOptional()
+    @IsString()
+    titleModelId?: string;
+
+    /**
+     * LLM used to generate up to 3 follow-up question suggestions after each assistant reply.
+     * When omitted, no follow-up suggestions are generated.
+     */
+    @IsOptional()
+    @IsString()
+    followUpModelId?: string;
 }

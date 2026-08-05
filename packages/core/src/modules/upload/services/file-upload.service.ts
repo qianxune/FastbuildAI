@@ -290,7 +290,7 @@ export class FileUploadService extends BaseService<File> {
             options,
         );
 
-        const uploadResult = await this.cloudStorageService.upload({
+        await this.cloudStorageService.upload({
             file,
             description,
             storageConfig,
@@ -299,7 +299,7 @@ export class FileUploadService extends BaseService<File> {
 
         return {
             id: "",
-            url: uploadResult.url,
+            url: pathConfig.storage.fileUrl,
             originalName: pathConfig.metadata.originalName,
             size: pathConfig.metadata.size,
             mimeType: pathConfig.metadata.mimeType,
@@ -523,6 +523,7 @@ export class FileUploadService extends BaseService<File> {
      *
      * @param params OSS file information
      * @param request Express request object
+     * @param extensionId
      * @returns Upload result with file ID
      */
     async saveOSSFileRecord(

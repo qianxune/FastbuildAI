@@ -19,9 +19,10 @@ import {
 import { AlipayService } from "@common/modules/pay/services/alipay.service";
 import { PayfactoryService } from "@common/modules/pay/services/payfactory.service";
 import { WxPayService } from "@common/modules/pay/services/wxpay.service";
+import { calculateMembershipGiftExpireAt } from "@modules/membership/utils/membership-gift-cycle";
 import { PrepayDto } from "@modules/pay/dto/prepay.dto";
 import { Injectable } from "@nestjs/common";
-import { MoreThan, Repository } from "typeorm";
+import { Repository } from "typeorm";
 
 @Injectable()
 export class PayService extends BaseService<Payconfig> {
@@ -50,7 +51,7 @@ export class PayService extends BaseService<Payconfig> {
      * @returns
      */
     async prepay(prepayDto: PrepayDto, userId: string) {
-        const { orderId, payType, from } = prepayDto;
+        const { orderId, payType, from, returnUrl } = prepayDto;
         let order: RechargeOrder | MembershipOrder | null = null;
         switch (from) {
             case "recharge":
@@ -92,6 +93,7 @@ export class PayService extends BaseService<Payconfig> {
             payType,
             from,
             amount: orderAmount,
+            returnUrl,
         };
 
         switch (payType) {
@@ -336,19 +338,16 @@ export class PayService extends BaseService<Payconfig> {
             const durationConfig = planSnap?.durationConfig;
             const duration = planSnap?.duration;
 
-            // 查询用户当前该等级的最新有效订阅（用于时间叠加）
             const existingSubscription = await entityManager.findOne(UserSubscription, {
                 where: {
                     userId: order.userId,
                     levelId: order.levelId,
-                    endTime: MoreThan(now),
                 },
-                order: { endTime: "DESC" },
             });
 
-            // 如果存在有效订阅，新订阅从现有订阅结束时间开始（时间叠加）
-            // 否则从当前时间开始
-            const startTime = existingSubscription ? new Date(existingSubscription.endTime) : now;
+            const hasActiveSubscription =
+                !!existingSubscription && existingSubscription.endTime > now;
+            const startTime = hasActiveSubscription ? new Date(existingSubscription.endTime) : now;
             let endTime = new Date(startTime);
 
             // 优先使用 durationConfig 枚举值
@@ -402,30 +401,31 @@ export class PayService extends BaseService<Payconfig> {
                 endTime.setMonth(endTime.getMonth() + 1);
             }
 
-            // 如果存在有效订阅，更新结束时间（时长叠加）；否则创建新记录
+            let subscription: UserSubscription;
+
             if (existingSubscription) {
-                await entityManager.update(UserSubscription, existingSubscription.id, {
-                    endTime,
-                    orderId: order.id, // 更新为最新订单ID
-                });
+                if (!hasActiveSubscription) {
+                    existingSubscription.startTime = startTime;
+                }
+                existingSubscription.endTime = endTime;
+                existingSubscription.orderId = order.id;
+                subscription = await entityManager.save(UserSubscription, existingSubscription);
             } else {
-                await entityManager.save(UserSubscription, {
+                subscription = await entityManager.save(UserSubscription, {
                     userId: order.userId,
                     levelId: order.levelId,
                     orderId: order.id,
                     startTime,
                     endTime,
-                    source: 1,
                 });
             }
 
-            // 立即赠送临时积分(过期时间为 30 天后)
+            // 立即赠送临时积分(过期时间为下一个自然月会员周期或订阅结束时间)
             const levelSnap = order.levelSnap as any;
             const givePower = levelSnap?.givePower || 0;
 
             if (givePower > 0) {
-                // 计算 30 天后作为过期时间
-                const expireAt = this.getNext30Days(now);
+                const expireAt = calculateMembershipGiftExpireAt(startTime, subscription.endTime);
 
                 // 记录积分赠送日志(带过期时间)
                 await this.appBillingService.addUserPower(
@@ -438,8 +438,9 @@ export class PayService extends BaseService<Payconfig> {
                             source: "会员赠送",
                         },
                         remark: `购买会员赠送临时积分：${givePower}`,
-                        associationNo: order.orderNo,
+                        associationNo: this.generateMembershipGiftAssociationNo(order.orderNo, 0),
                         expireAt,
+                        subscriptionId: subscription.id,
                     },
                     entityManager,
                 );
@@ -447,15 +448,7 @@ export class PayService extends BaseService<Payconfig> {
         });
     }
 
-    /**
-     * 获取 30 天后的时间
-     * @param date 日期
-     * @returns 30 天后的 0 点时间
-     */
-    private getNext30Days(date: Date): Date {
-        const nextDate = new Date(date);
-        nextDate.setDate(nextDate.getDate() + 30);
-        nextDate.setHours(0, 0, 0, 0);
-        return nextDate;
+    private generateMembershipGiftAssociationNo(baseNo: string, cycle: number): string {
+        return `${baseNo}_${cycle}`;
     }
 }

@@ -135,6 +135,19 @@ export class AiMcpServerConsoleController extends BaseController {
     }
 
     /**
+     * 取消默认快捷菜单
+     */
+    @Delete("quick-menu")
+    @Permissions({
+        code: "quick-menu-set",
+        name: "取消默认快捷菜单",
+    })
+    async clearDefaultQuickMenu() {
+        await this.dictService.deleteByKey(AI_MCP_IS_QUICK_MENU);
+        return { message: "quick menu cleared successfully" };
+    }
+
+    /**
      * 删除MCP服务
      */
     @Delete(":id")
@@ -159,6 +172,7 @@ export class AiMcpServerConsoleController extends BaseController {
     @Permissions({
         code: "batch-delete",
         name: "批量删除MCP服务",
+        hidden: true,
     })
     async batchRemove(@Body() batchDeleteDto: BatchDeleteAiMcpServerDto) {
         await this.aiMcpServerService.deleteMany(batchDeleteDto.ids);
@@ -221,8 +235,8 @@ export class AiMcpServerConsoleController extends BaseController {
      */
     @Post("batch-check-connection")
     @Permissions({
-        code: "batch-check-connection",
-        name: "批量检测MCP服务连接",
+        code: "import",
+        name: "导入MCP服务",
     })
     async batchCheckConnection(@Body() batchCheckDto: BatchCheckMcpConnectionDto) {
         const results = [];
@@ -301,13 +315,6 @@ export class AiMcpServerConsoleController extends BaseController {
                         },
                         additionalProperties: false,
                     },
-                    customHeaders: {
-                        type: "object",
-                        patternProperties: {
-                            "^.*$": { type: "string" },
-                        },
-                        additionalProperties: false,
-                    },
                 },
                 required: ["url", "type"],
                 additionalProperties: false,
@@ -337,15 +344,6 @@ export class AiMcpServerConsoleController extends BaseController {
             let parsedData;
             try {
                 parsedData = JSON.parse(importJsonDto.jsonString);
-                if (parsedData.mcpServers) {
-                    for (const key in parsedData.mcpServers) {
-                        const server = parsedData.mcpServers[key];
-                        if (server.headers) {
-                            server.customHeaders = server.headers;
-                            delete server.headers;
-                        }
-                    }
-                }
             } catch (parseError) {
                 throw HttpErrorFactory.badRequest(
                     "JSON格式不正确，无法解析：" + parseError.message,

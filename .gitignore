@@ -28,17 +28,19 @@ coverage
 .vercel
 .cursor
 .windsurf
+.trae
+.agent
+.agents
+.kiro
+.claude
+.gemini
 
 # Build Outputs
 .next/
 out/
 build
 packages/**/dist
-/public/.output
 /public/package.json
-!/public/web/extensions/buildingai-simple-blog
-/public/web/extensions/*
-/public/web/spa-loading.png
 /public/*
 !/public/web/
 !/public/index.html
@@ -63,9 +65,9 @@ yarn-error.log*
 
 # extensions
 extensions/*
-!extensions/buildingai-simple-blog
-!extensions/buildingai-simple-blog/*
-!extensions/buildingai-simple-blog/build
-!extensions/buildingai-simple-blog/.output
-extensions/buildingai-simple-blog/dist
+!extensions/simple-blog
+!extensions/simple-blog/*
+!extensions/simple-blog/build
+!extensions/simple-blog/.output
+extensions/simple-blog/dist
 releases

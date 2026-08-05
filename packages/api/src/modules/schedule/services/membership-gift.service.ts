@@ -7,17 +7,23 @@ import { AppBillingService } from "@buildingai/core/modules";
 import { InjectDataSource, InjectRepository } from "@buildingai/db/@nestjs/typeorm";
 import { AccountLog, User, UserSubscription } from "@buildingai/db/entities";
 import { DataSource } from "@buildingai/db/typeorm";
+import {
+    calculateDueMembershipGiftCycle,
+    calculateMembershipGiftExpireAt,
+} from "@modules/membership/utils/membership-gift-cycle";
 import { Injectable, Logger } from "@nestjs/common";
 import type { EntityManager } from "typeorm";
-import { LessThanOrEqual, MoreThan, MoreThanOrEqual, Repository } from "typeorm";
+import { Repository } from "typeorm";
+
+const EXPIRED_GIFT_BATCH_SIZE = 1000;
 
 /**
  * 会员积分赠送定时任务服务
  *
  * 积分发放和清零逻辑:
- * - 用户购买会员后立即赠送积分,过期时间为 30 天后
+ * - 用户购买会员后立即赠送积分,过期时间为下一个自然月会员周期或订阅结束时间
  * - 每天检查当天需要清零的过期积分
- * - 每天检查当天需要发放新积分的订阅(距离订阅开始日期是 30 的倍数天)
+ * - 每天检查当天需要发放新积分的订阅(到达订阅开始日期的自然月周年日)
  */
 @Injectable()
 export class MembershipGiftService {
@@ -86,26 +92,50 @@ export class MembershipGiftService {
 
             try {
                 const now = new Date();
+                let totalProcessed = 0;
+                const failedLogIds = new Set<string>();
 
-                // 查询所有已过期且还有剩余可用数量的会员赠送积分记录
-                const expiredLogs = await this.accountLogRepository.find({
-                    where: {
-                        expireAt: LessThanOrEqual(now),
-                        availableAmount: MoreThan(0),
-                    } as any,
-                });
+                while (true) {
+                    const queryBuilder = this.accountLogRepository
+                        .createQueryBuilder("log")
+                        .select(["log.id"])
+                        .where("log.expireAt <= :now", { now })
+                        .andWhere("log.availableAmount > 0")
+                        .andWhere("log.accountType = :accountType", {
+                            accountType: ACCOUNT_LOG_TYPE.MEMBERSHIP_GIFT_INC,
+                        })
+                        .orderBy("log.expireAt", "ASC")
+                        .addOrderBy("log.createdAt", "ASC")
+                        .take(EXPIRED_GIFT_BATCH_SIZE);
 
-                this.logger.log(`找到 ${expiredLogs.length} 条过期的会员赠送积分记录`);
+                    if (failedLogIds.size > 0) {
+                        queryBuilder.andWhere("log.id NOT IN (:...failedLogIds)", {
+                            failedLogIds: Array.from(failedLogIds),
+                        });
+                    }
 
-                for (const log of expiredLogs) {
-                    try {
-                        await this.processExpiredGiftPower(log.id);
-                    } catch (error) {
-                        this.logger.error(`处理过期积分记录 ${log.id} 失败: ${error.message}`);
+                    const expiredLogs = await queryBuilder.getMany();
+
+                    if (expiredLogs.length === 0) {
+                        break;
+                    }
+
+                    totalProcessed += expiredLogs.length;
+                    this.logger.log(
+                        `本批找到 ${expiredLogs.length} 条过期会员赠送积分记录，累计 ${totalProcessed} 条`,
+                    );
+
+                    for (const log of expiredLogs) {
+                        try {
+                            await this.processExpiredGiftPower(log.id);
+                        } catch (error) {
+                            failedLogIds.add(log.id);
+                            this.logger.error(`处理过期积分记录 ${log.id} 失败: ${error.message}`);
+                        }
                     }
                 }
 
-                this.logger.log("过期会员赠送积分清零任务执行完成");
+                this.logger.log(`过期会员赠送积分清零任务执行完成，共处理 ${totalProcessed} 条`);
             } catch (error) {
                 this.logger.error(`过期积分清零任务执行失败: ${error.message}`);
             }
@@ -126,38 +156,19 @@ export class MembershipGiftService {
 
             if (!lockedLog) return;
             if (!lockedLog.expireAt || lockedLog.expireAt > now) return;
+            if (((lockedLog as any).availableAmount ?? 0) <= 0) return;
 
-            const expiredAmount = (lockedLog as any).availableAmount;
-            if (expiredAmount <= 0) return;
-
-            // 1. 将过期积分记录的可用数量清零
-            await entityManager.update(AccountLog, { id: lockedLog.id }, {
-                availableAmount: 0,
-            } as any);
-
-            // 2. 从用户总积分中扣除过期的积分，并记录账户变动日志
-            await this.appBillingService.deductUserPower(
-                {
-                    userId: lockedLog.userId,
-                    amount: expiredAmount,
-                    accountType: ACCOUNT_LOG_TYPE.MEMBERSHIP_GIFT_EXPIRED,
-                    source: {
-                        type: ACCOUNT_LOG_SOURCE.MEMBERSHIP_GIFT,
-                        source: "订阅积分到期",
-                    },
-                    remark: `会员赠送积分到期清零：${expiredAmount}`,
-                    associationNo: lockedLog.accountNo || "",
-                },
+            await this.appBillingService.reconcileExpiredTemporaryPower(
+                lockedLog.userId,
                 entityManager,
+                [lockedLog.id],
             );
-
-            this.logger.log(`用户 ${lockedLog.userId} 过期积分 ${expiredAmount} 已清零`);
         });
     }
 
     /**
      * 每天凌晨0点5分执行:为当天需要发放积分的会员发放新积分
-     * 发放条件:距离订阅开始日期是 30 的倍数天,且订阅仍在有效期内
+     * 发放条件:到达订阅开始日期的自然月周年日,且订阅仍覆盖下一个周期
      */
     @Cron("5 0 * * *", {
         name: "daily-gift-power-grant",
@@ -170,35 +181,37 @@ export class MembershipGiftService {
             try {
                 const grantDate = new Date();
                 grantDate.setHours(0, 0, 0, 0); // 归一化到当天 0 点
+                const grantDayEnd = new Date(grantDate);
+                grantDayEnd.setDate(grantDayEnd.getDate() + 1);
 
-                // 查询所有有效的会员订阅
-                const activeSubscriptions = await this.userSubscriptionRepository.find({
-                    where: {
-                        startTime: LessThanOrEqual(grantDate),
-                        endTime: MoreThanOrEqual(grantDate),
-                    },
-                    relations: ["level"],
-                });
+                const activeSubscriptions = await this.userSubscriptionRepository
+                    .createQueryBuilder("subscription")
+                    .leftJoinAndSelect("subscription.level", "level")
+                    .where("subscription.startTime < :grantDayEnd", { grantDayEnd })
+                    .andWhere("subscription.endTime > :grantDate", { grantDate })
+                    .getMany();
 
-                // 筛选出今天需要发放积分的订阅(距离订阅开始日期是 30 的倍数天)
-                const subscriptionsToGrant = activeSubscriptions.filter((sub) => {
-                    const startTime = new Date(sub.startTime);
-                    startTime.setHours(0, 0, 0, 0); // 归一化到 0 点
-                    const diffDays = Math.floor(
-                        (grantDate.getTime() - startTime.getTime()) / (1000 * 60 * 60 * 24),
-                    );
-                    // 距离订阅开始日期是 30 的倍数天(不包括第 0 天,因为购买时已发放)
-                    return diffDays > 0 && diffDays % 30 === 0;
-                });
+                const subscriptionsToGrant: Array<{ subscriptionId: string; cycle: number }> = [];
+
+                for (const subscription of activeSubscriptions) {
+                    const cycle = await this.calculateCurrentGrantCycle(subscription, grantDate);
+
+                    if (cycle !== null) {
+                        subscriptionsToGrant.push({
+                            subscriptionId: subscription.id,
+                            cycle,
+                        });
+                    }
+                }
 
                 this.logger.log(`找到 ${subscriptionsToGrant.length} 个今日需要发放积分的会员订阅`);
 
-                for (const subscription of subscriptionsToGrant) {
+                for (const { subscriptionId, cycle } of subscriptionsToGrant) {
                     try {
-                        await this.processUserGiftPower(subscription.id, grantDate);
+                        await this.processUserGiftPower(subscriptionId, grantDate, cycle);
                     } catch (error) {
                         this.logger.error(
-                            `处理用户 ${subscription.userId} 的积分发放失败: ${error.message}`,
+                            `处理订阅 ${subscriptionId} 的积分发放失败: ${error.message}`,
                         );
                     }
                 }
@@ -214,34 +227,39 @@ export class MembershipGiftService {
      * 处理单个用户的积分赠送
      * @param subscription 用户订阅记录
      */
-    private async processUserGiftPower(subscriptionId: string, grantDate: Date) {
+    private async processUserGiftPower(subscriptionId: string, grantDate: Date, cycle: number) {
         const dayStart = new Date(grantDate);
         dayStart.setHours(0, 0, 0, 0);
-        const dayEnd = new Date(dayStart);
-        dayEnd.setDate(dayEnd.getDate() + 1);
 
         await this.userRepository.manager.transaction(async (entityManager) => {
-            const subscription = await entityManager.findOne(UserSubscription, {
+            const lockedSubscription = await entityManager.findOne(UserSubscription, {
                 where: { id: subscriptionId },
-                relations: ["level", "order"],
                 lock: { mode: "pessimistic_write" },
             });
 
+            if (!lockedSubscription) return;
+            if (lockedSubscription.startTime > dayStart || lockedSubscription.endTime < dayStart)
+                return;
+
+            const subscription = await entityManager.findOne(UserSubscription, {
+                where: { id: subscriptionId },
+                relations: ["level", "order"],
+            });
+
             if (!subscription) return;
-            if (subscription.startTime > dayStart || subscription.endTime < dayStart) return;
 
             const givePower = (subscription.level as any)?.givePower || 0;
             if (givePower <= 0) return;
 
-            const associationNo = subscription.order?.orderNo;
-            if (!associationNo) {
-                this.logger.warn(
-                    `用户 ${subscription.userId} 的订阅缺少 orderNo，无法保证幂等，跳过本次会员周期积分发放：${subscription.id}`,
-                );
-                return;
-            }
+            const baseAssociationNo = await this.getMembershipGiftBaseAssociationNo(
+                subscription,
+                entityManager,
+            );
+            const associationNo = this.generateMembershipGiftAssociationNo(
+                baseAssociationNo,
+                cycle,
+            );
 
-            // 幂等：同一订阅同一天只允许发放一次
             const existed = await entityManager
                 .createQueryBuilder(AccountLog, "log")
                 .where("log.userId = :userId", { userId: subscription.userId })
@@ -249,20 +267,20 @@ export class MembershipGiftService {
                     accountType: ACCOUNT_LOG_TYPE.MEMBERSHIP_GIFT_INC,
                 })
                 .andWhere("log.associationNo = :associationNo", { associationNo })
-                .andWhere("log.createdAt >= :dayStart AND log.createdAt < :dayEnd", {
-                    dayStart,
-                    dayEnd,
-                })
                 .getOne();
 
             if (existed) {
                 this.logger.warn(
-                    `用户 ${subscription.userId} 今日已发放过会员周期积分，跳过：${associationNo}`,
+                    `用户 ${subscription.userId} 周期 ${cycle} 已发放过会员积分，跳过：${associationNo}`,
                 );
                 return;
             }
 
-            const expireAt = this.getNext30Days(dayStart);
+            const expireAt = calculateMembershipGiftExpireAt(
+                subscription.startTime,
+                subscription.endTime,
+                cycle,
+            );
 
             await this.appBillingService.addUserPower(
                 {
@@ -276,25 +294,83 @@ export class MembershipGiftService {
                     remark: `会员周期赠送临时积分：${givePower}`,
                     associationNo,
                     expireAt,
+                    subscriptionId: subscription.id,
                 },
                 entityManager,
             );
 
             this.logger.log(
-                `用户 ${subscription.userId} 积分发放完成,赠送 ${givePower} 积分,过期时间 ${expireAt.toISOString()}`,
+                `用户 ${subscription.userId} 周期 ${cycle} 积分发放完成,赠送 ${givePower} 积分,过期时间 ${expireAt.toISOString()}`,
             );
         });
     }
 
-    /**
-     * 获取 30 天后的时间
-     * @param date 日期
-     * @returns 30 天后的 0 点时间
-     */
-    private getNext30Days(date: Date): Date {
-        const nextDate = new Date(date);
-        nextDate.setDate(nextDate.getDate() + 30);
-        nextDate.setHours(0, 0, 0, 0);
-        return nextDate;
+    private async calculateCurrentGrantCycle(subscription: UserSubscription, currentDate: Date) {
+        const lastGrantedCycle = await this.getLastGrantedCycle(subscription.id);
+
+        return calculateDueMembershipGiftCycle({
+            subscriptionStartTime: subscription.startTime,
+            subscriptionEndTime: subscription.endTime,
+            grantDate: currentDate,
+            lastGrantedCycle,
+        });
+    }
+
+    private async getLastGrantedCycle(subscriptionId: string) {
+        const lastLog = await this.accountLogRepository.findOne({
+            where: {
+                subscriptionId,
+                accountType: ACCOUNT_LOG_TYPE.MEMBERSHIP_GIFT_INC,
+            } as any,
+            select: ["associationNo"],
+            order: {
+                createdAt: "DESC",
+            },
+        });
+
+        if (!lastLog?.associationNo) {
+            return -1;
+        }
+
+        return this.parseMembershipGiftCycle(lastLog.associationNo);
+    }
+
+    private async getMembershipGiftBaseAssociationNo(
+        subscription: UserSubscription,
+        entityManager: EntityManager,
+    ) {
+        const firstGiftLog = await entityManager.findOne(AccountLog, {
+            where: {
+                subscriptionId: subscription.id,
+                accountType: ACCOUNT_LOG_TYPE.MEMBERSHIP_GIFT_INC,
+            } as any,
+            order: { createdAt: "ASC" },
+        });
+
+        if (firstGiftLog?.associationNo) {
+            return this.getMembershipGiftBaseNo(firstGiftLog.associationNo);
+        }
+
+        if (subscription.order?.orderNo) {
+            return subscription.order.orderNo;
+        }
+
+        return subscription.id;
+    }
+
+    private getMembershipGiftBaseNo(associationNo: string) {
+        const matched = associationNo.match(/^(.*)_(\d+)$/);
+
+        return matched?.[1] || associationNo;
+    }
+
+    private parseMembershipGiftCycle(associationNo: string) {
+        const matched = associationNo.match(/_(\d+)$/);
+
+        return matched ? Number(matched[1]) : 0;
+    }
+
+    private generateMembershipGiftAssociationNo(baseNo: string, cycle: number) {
+        return `${baseNo}_${cycle}`;
     }
 }

@@ -9,10 +9,10 @@ import { generateNo } from "@buildingai/utils";
 import { SYSTEM_CONFIG } from "@common/constants";
 import { AuthService } from "@common/modules/auth/services/auth.service";
 import { RolePermissionService } from "@common/modules/auth/services/role-permission.service";
+import { getOrCreateSystemId } from "@common/utils/system-id";
 import { UserService } from "@modules/user/services/user.service";
 import { Injectable, Logger } from "@nestjs/common";
 import { exec } from "child_process";
-import { machineIdSync } from "node-machine-id";
 import { promisify } from "util";
 
 import { initializeDto } from "../dto/system.dto";
@@ -52,7 +52,7 @@ export class SystemService {
      * 获取运行时系统信息（用于控制台展示）
      */
     async getRuntimeInfo(): Promise<{ version: string; systemId: string }> {
-        const systemId = await machineIdSync(true);
+        const systemId = await getOrCreateSystemId(this.dictService);
         return {
             version: AppConfig.version,
             systemId,
@@ -71,6 +71,15 @@ export class SystemService {
      */
     async initialize(dto: initializeDto, ipAddress?: string, userAgent?: string) {
         try {
+            const existingUser = await this.userService.findOne({
+                where: {
+                    username: dto.username,
+                },
+            });
+
+            if (existingUser) {
+                throw HttpErrorFactory.badRequest("User already exists");
+            }
             const hashedPassword = await this.userService.hashPassword(dto.password);
 
             // 创建超级管理员账户
@@ -91,6 +100,11 @@ export class SystemService {
             if (dto.websiteName) {
                 await this.dictService.set("name", dto.websiteName, { group: "webinfo" });
             }
+
+            if (dto.websiteTheme) {
+                await this.dictService.set("theme", dto.websiteTheme, { group: "webinfo" });
+            }
+
             if (dto.websiteDescription) {
                 await this.dictService.set("description", dto.websiteDescription, {
                     group: "webinfo",

@@ -1,7 +1,9 @@
+import { getProvider } from "@buildingai/ai-sdk";
 import { BaseController } from "@buildingai/base";
-import { BusinessCode } from "@buildingai/constants/shared/business-code.constant";
+import { SecretService } from "@buildingai/core/modules";
 import { BuildFileUrl } from "@buildingai/decorators/file-url.decorator";
 import { HttpErrorFactory } from "@buildingai/errors";
+import { getProviderSecret } from "@buildingai/utils";
 import { ConsoleController } from "@common/decorators/controller.decorator";
 import { Permissions } from "@common/decorators/permissions.decorator";
 import {
@@ -19,7 +21,10 @@ import { Body, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
  */
 @ConsoleController("ai-providers", "AI供应商管理")
 export class AiProviderConsoleController extends BaseController {
-    constructor(private readonly aiProviderService: AiProviderService) {
+    constructor(
+        private readonly aiProviderService: AiProviderService,
+        private readonly secretService: SecretService,
+    ) {
         super();
     }
 
@@ -63,6 +68,7 @@ export class AiProviderConsoleController extends BaseController {
     @Permissions({
         code: "detail",
         name: "查看AI供应商",
+        hidden: true,
     })
     async findOne(@Param("id") id: string) {
         return await this.aiProviderService.getProviderDetail(id, []);
@@ -76,6 +82,7 @@ export class AiProviderConsoleController extends BaseController {
     @Permissions({
         code: "full-detail",
         name: "管理AI供应商",
+        hidden: true,
     })
     async findOneFull(@Param("id") id: string) {
         return await this.aiProviderService.getProviderDetail(id);
@@ -118,17 +125,9 @@ export class AiProviderConsoleController extends BaseController {
         name: "删除AI供应商",
     })
     async remove(@Param("id") id: string) {
-        // 检查是否为内置供应商
         const provider = await this.aiProviderService.findOneById(id);
         if (!provider) {
             throw HttpErrorFactory.business("AI供应商不存在");
-        }
-
-        if (provider.isBuiltIn) {
-            throw HttpErrorFactory.business(
-                "系统内置供应商不允许删除",
-                BusinessCode.OPERATION_NOT_ALLOWED,
-            );
         }
 
         await this.aiProviderService.deleteProvider(id);
@@ -142,21 +141,12 @@ export class AiProviderConsoleController extends BaseController {
     @Permissions({
         code: "batch-delete",
         name: "删除AI供应商",
+        hidden: true,
     })
     async removeMany(@Body("ids") ids: string[]) {
-        // 批量检查是否包含内置供应商
         const providers = await Promise.all(
             ids.map((id) => this.aiProviderService.findOneById(id)),
         );
-
-        const builtInProviders = providers.filter((provider) => provider?.isBuiltIn);
-        if (builtInProviders.length > 0) {
-            const builtInNames = builtInProviders.map((p) => p.name).join("、");
-            throw HttpErrorFactory.business(
-                `以下系统内置供应商不允许删除：${builtInNames}`,
-                BusinessCode.OPERATION_NOT_ALLOWED,
-            );
-        }
 
         // 过滤掉不存在的供应商 ID
         const validIds = providers
@@ -183,6 +173,7 @@ export class AiProviderConsoleController extends BaseController {
     @Permissions({
         code: "active-all",
         name: "查看AI供应商",
+        hidden: true,
     })
     async getActiveProviders() {
         return await this.aiProviderService.getActiveProviders(["apiKey"]);
@@ -195,7 +186,8 @@ export class AiProviderConsoleController extends BaseController {
     @BuildFileUrl(["**.iconUrl"])
     @Permissions({
         code: "by-code",
-        name: "查看AI供应商",
+        name: "根据供应商标识查看AI供应商",
+        hidden: true,
     })
     async getProviderByCode(@Param("provider") provider: string) {
         const result = await this.aiProviderService.getProviderByCode(provider, ["apiKey"]);
@@ -234,5 +226,41 @@ export class AiProviderConsoleController extends BaseController {
                 excludeFields: ["apiKey"],
             },
         );
+    }
+
+    /**
+     * 获取供应商远程模型列表
+     * @description 通过供应商的 /v1/models 接口获取可用模型列表
+     */
+    @Get("remote/:providerId")
+    @Permissions({
+        code: "remote-models",
+        name: "查看远程模型列表",
+    })
+    async getRemoteModels(@Param("providerId") providerId: string) {
+        const providerEntity = await this.aiProviderService.findOneById(providerId);
+        if (!providerEntity) {
+            throw HttpErrorFactory.business("AI供应商不存在");
+        }
+
+        if (!providerEntity.bindSecretId) {
+            return [];
+        }
+
+        try {
+            const providerSecret = await this.secretService.getConfigKeyValuePairs(
+                providerEntity.bindSecretId,
+            );
+
+            const provider = getProvider(providerEntity.provider, {
+                apiKey: getProviderSecret("apiKey", providerSecret),
+                baseURL: getProviderSecret("baseUrl", providerSecret) || undefined,
+            });
+
+            return await provider.listModels();
+        } catch (error) {
+            console.error(error);
+            return [];
+        }
     }
 }
