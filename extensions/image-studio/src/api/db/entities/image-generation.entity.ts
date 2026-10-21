@@ -8,6 +8,8 @@ import {
 } from "@buildingai/db/typeorm";
 
 export enum ImageGenerationStatus {
+    QUEUED = "queued",
+    CANCELLED = "cancelled",
     PROCESSING = "processing",
     COMPLETED = "completed",
     FAILED = "failed",

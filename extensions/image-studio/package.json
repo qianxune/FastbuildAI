@@ -29,6 +29,8 @@
         "build:api": "cross-env NODE_ENV=production tsup",
         "build:web": "vite build",
         "build:publish": "pnpm build:clean && pnpm run build:web && pnpm run build:api",
+        "test": "jest",
+        "test:watch": "jest --watch",
         "check-types": "tsc -b --pretty false",
         "format": "prettier --write src",
         "lint": "eslint src --quiet",
@@ -48,8 +50,10 @@
         "@buildingai/utils": "workspace:*",
         "@buildingai/web-core": "workspace:*",
         "@buildingai/web-types": "workspace:*",
+        "@nestjs/bullmq": "catalog:api",
         "@tanstack/react-query": "^5.90.21",
         "ai": "^6.0.138",
+        "bullmq": "catalog:api",
         "class-transformer": "catalog:api",
         "class-validator": "catalog:api",
         "lucide-react": "catalog:web",
@@ -62,11 +66,26 @@
         "@buildingai/eslint-config": "workspace:*",
         "@buildingai/typescript-config": "workspace:*",
         "@buildingai/web-types": "workspace:*",
+        "@types/jest": "^30.0.0",
         "@types/react": "catalog:web",
         "@types/react-dom": "catalog:web",
-        "eslint-plugin-react-refresh": "^0.4.26"
+        "eslint-plugin-react-refresh": "^0.4.26",
+        "jest": "^30.0.0",
+        "ts-jest": "^29.2.5"
     },
     "engine": {
         "buildingai": ">=26.0.0"
+    },
+    "jest": {
+        "moduleFileExtensions": ["js", "json", "ts"],
+        "rootDir": ".",
+        "roots": ["<rootDir>/test"],
+        "testRegex": ".*\\.spec\\.ts$",
+        "transform": {
+            "^.+\\.(t|j)s$": ["ts-jest", { "tsconfig": "tsconfig.test.json" }]
+        },
+        "collectCoverageFrom": ["src/api/**/*.ts"],
+        "coverageDirectory": "coverage",
+        "testEnvironment": "node"
     }
 }

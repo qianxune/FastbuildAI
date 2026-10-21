@@ -12,7 +12,7 @@ export interface GeneratedImage {
     mediaType: string;
 }
 
-export type GenerationStatus = "processing" | "completed" | "failed";
+export type GenerationStatus = "queued" | "processing" | "completed" | "failed" | "cancelled";
 
 export interface ImageGeneration {
     id: string;

@@ -416,6 +416,9 @@ importers:
       cli-table3:
         specifier: 'catalog:'
         version: 0.6.5
+      cos-nodejs-sdk-v5:
+        specifier: 'catalog:'
+        version: 2.15.4
       cpy-cli:
         specifier: ^6.0.0
         version: 6.0.0
@@ -603,6 +606,161 @@ importers:
       vue-tsc:
         specifier: catalog:dev
         version: 2.2.12(typescript@5.9.3)
+
+  extensions/buildingai-jimmy:
+    dependencies:
+      '@buildingai/base':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/base
+      '@buildingai/constants':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/constants
+      '@buildingai/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@buildingai/db':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/db
+      '@buildingai/decorators':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/decorators
+      '@buildingai/dto':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/dto
+      '@buildingai/errors':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/errors
+      '@buildingai/extension-sdk':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/extension-sdk
+      '@buildingai/hooks':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/hooks
+      '@buildingai/http':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/http
+      '@buildingai/pipe':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/pipe
+      '@buildingai/services':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/services
+      '@buildingai/stores':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/stores
+      '@buildingai/ui':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/ui
+      '@buildingai/utils':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/utils
+    devDependencies:
+      '@buildingai/eslint-config':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/eslint-config
+      '@buildingai/typescript-config':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/typescript-config
+
+  extensions/image-studio:
+    dependencies:
+      '@buildingai/ai-sdk':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/ai-sdk
+      '@buildingai/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@buildingai/db':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/db
+      '@buildingai/decorators':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/decorators
+      '@buildingai/errors':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/errors
+      '@buildingai/extension-sdk':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/extension-sdk
+      '@buildingai/hooks':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/hooks
+      '@buildingai/i18n':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/i18n
+      '@buildingai/services':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/services
+      '@buildingai/ui':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/ui
+      '@buildingai/utils':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/utils
+      '@buildingai/web-core':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/core
+      '@buildingai/web-types':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/types
+      '@nestjs/bullmq':
+        specifier: catalog:api
+        version: 11.0.4(@nestjs/common@11.1.17(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.17)(bullmq@5.71.0)
+      '@tanstack/react-query':
+        specifier: ^5.90.21
+        version: 5.90.21(react@19.2.4)
+      ai:
+        specifier: ^6.0.138
+        version: 6.0.138(zod@4.3.6)
+      bullmq:
+        specifier: catalog:api
+        version: 5.71.0
+      class-transformer:
+        specifier: catalog:api
+        version: 0.5.1
+      class-validator:
+        specifier: catalog:api
+        version: 0.14.4
+      lucide-react:
+        specifier: catalog:web
+        version: 0.561.0(react@19.2.4)
+      react:
+        specifier: catalog:web
+        version: 19.2.4
+      react-dom:
+        specifier: catalog:web
+        version: 19.2.4(react@19.2.4)
+      react-router-dom:
+        specifier: catalog:web
+        version: 7.13.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      vite-tsconfig-paths:
+        specifier: catalog:web
+        version: 5.1.4(typescript@5.9.3)(vite@8.0.0(@types/node@24.12.0)(esbuild@0.27.4)(jiti@2.6.1)(sass@1.78.0)(terser@5.46.0))
+    devDependencies:
+      '@buildingai/eslint-config':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/eslint-config
+      '@buildingai/typescript-config':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/typescript-config
+      '@types/jest':
+        specifier: ^30.0.0
+        version: 30.0.0
+      '@types/react':
+        specifier: catalog:web
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: catalog:web
+        version: 19.2.3(@types/react@19.2.14)
+      eslint-plugin-react-refresh:
+        specifier: ^0.4.26
+        version: 0.4.26(eslint@9.39.4(jiti@2.6.1))
+      jest:
+        specifier: ^30.0.0
+        version: 30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3))
+      ts-jest:
+        specifier: ^29.2.5
+        version: 29.4.6(@babel/core@7.29.0)(@jest/transform@30.2.0)(@jest/types@30.2.0)(babel-jest@30.2.0(@babel/core@7.29.0))(esbuild@0.27.4)(jest-util@30.2.0)(jest@30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3)))(typescript@5.9.3)
 
   extensions/simple-blog:
     dependencies:
@@ -2084,6 +2242,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.4)
+      '@fancyapps/ui':
+        specifier: 6.1.7
+        version: 6.1.7
       '@hookform/resolvers':
         specifier: ^5.2.2
         version: 5.2.2(react-hook-form@7.71.2(react@19.2.4))
@@ -2097,8 +2258,8 @@ importers:
         specifier: catalog:web
         version: 3.13.19(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@tauri-apps/api':
-        specifier: ^2.10.1
-        version: 2.10.1
+        specifier: ~2.11.0
+        version: 2.11.1
       '@tauri-apps/plugin-opener':
         specifier: ^2.5.3
         version: 2.5.3
@@ -2167,8 +2328,8 @@ importers:
         specifier: catalog:web
         version: 0.2.1(@babel/core@7.29.0)(@babel/runtime@7.28.6)(rolldown@1.0.0-rc.9)(vite@8.0.0(@types/node@24.10.13)(esbuild@0.27.4)(jiti@2.6.1)(sass@1.78.0)(terser@5.46.0))
       '@tauri-apps/cli':
-        specifier: ^2.10.0
-        version: 2.10.0
+        specifier: ~2.11.2
+        version: 2.11.5
       '@types/babel__core':
         specifier: ^7.20.5
         version: 7.20.5
@@ -3115,6 +3276,9 @@ packages:
   '@faker-js/faker@10.3.0':
     resolution: {integrity: sha512-It0Sne6P3szg7JIi6CgKbvTZoMjxBZhcv91ZrqrNuaZQfB5WoqYYbzCUOq89YR+VY8juY9M1vDWmDDa2TzfXCw==}
     engines: {node: ^20.19.0 || ^22.13.0 || ^23.5.0 || >=24.0.0, npm: '>=10'}
+
+  '@fancyapps/ui@6.1.7':
+    resolution: {integrity: sha512-KHOvuy90JBFDgbNa2V1N9Jg7PE/lSQMXN9VbhR+WQSIxIEi4PV7kndeao7ezir5WeJ8OZRyDelNKJVLicXfBIg==}
 
   '@fidm/asn1@1.0.4':
     resolution: {integrity: sha512-esd1jyNvRb2HVaQGq2Gg8Z0kbQPXzV9Tq5Z14KNIov6KfFD6PTaRIO8UpcsYiTNzOqJpmyzWgVTrUwFV3UF4TQ==}
@@ -5921,82 +6085,82 @@ packages:
     peerDependencies:
       vue: ^2.7.0 || ^3.0.0
 
-  '@tauri-apps/api@2.10.1':
-    resolution: {integrity: sha512-hKL/jWf293UDSUN09rR69hrToyIXBb8CjGaWC7gfinvnQrBVvnLr08FeFi38gxtugAVyVcTa5/FD/Xnkb1siBw==}
+  '@tauri-apps/api@2.11.1':
+    resolution: {integrity: sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA==}
 
-  '@tauri-apps/cli-darwin-arm64@2.10.0':
-    resolution: {integrity: sha512-avqHD4HRjrMamE/7R/kzJPcAJnZs0IIS+1nkDP5b+TNBn3py7N2aIo9LIpy+VQq0AkN8G5dDpZtOOBkmWt/zjA==}
+  '@tauri-apps/cli-darwin-arm64@2.11.5':
+    resolution: {integrity: sha512-tggOiVOohjIHdiElbjeBfB41s6cmfsq+ZQ0PX0fEtCdsDdZ9cCi54e5gNK7tdPbR6JbdDe7RA4kbQdyyBUUk/Q==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [darwin]
 
-  '@tauri-apps/cli-darwin-x64@2.10.0':
-    resolution: {integrity: sha512-keDmlvJRStzVFjZTd0xYkBONLtgBC9eMTpmXnBXzsHuawV2q9PvDo2x6D5mhuoMVrJ9QWjgaPKBBCFks4dK71Q==}
+  '@tauri-apps/cli-darwin-x64@2.11.5':
+    resolution: {integrity: sha512-SrO+KCbqvG1IvVPdlzQX4GEGZRQDISrmDY9bGcW68DLVFBCC06H+Loz6oyUZETUxsSMR6B4oDfvbQVgD4hxsqQ==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [darwin]
 
-  '@tauri-apps/cli-linux-arm-gnueabihf@2.10.0':
-    resolution: {integrity: sha512-e5u0VfLZsMAC9iHaOEANumgl6lfnJx0Dtjkd8IJpysZ8jp0tJ6wrIkto2OzQgzcYyRCKgX72aKE0PFgZputA8g==}
+  '@tauri-apps/cli-linux-arm-gnueabihf@2.11.5':
+    resolution: {integrity: sha512-qLrOaCa8hLD5QVPQRjAgOXvhlTFKXmTliVF773GgvADYcWZSdmncnF5zBFAkdu1uQK8KfQbDlBUwqQYZqBfBRQ==}
     engines: {node: '>= 10'}
     cpu: [arm]
     os: [linux]
 
-  '@tauri-apps/cli-linux-arm64-gnu@2.10.0':
-    resolution: {integrity: sha512-YrYYk2dfmBs5m+OIMCrb+JH/oo+4FtlpcrTCgiFYc7vcs6m3QDd1TTyWu0u01ewsCtK2kOdluhr/zKku+KP7HA==}
+  '@tauri-apps/cli-linux-arm64-gnu@2.11.5':
+    resolution: {integrity: sha512-Tq32xpQjiQEdIrvwDq7lwHhXemn070CXWdbCvr9rdi9rsv9NFTbQ6izVSIfNE+59QaerxuwtUtZ5IxDNWaoYBw==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@tauri-apps/cli-linux-arm64-musl@2.10.0':
-    resolution: {integrity: sha512-GUoPdVJmrJRIXFfW3Rkt+eGK9ygOdyISACZfC/bCSfOnGt8kNdQIQr5WRH9QUaTVFIwxMlQyV3m+yXYP+xhSVA==}
+  '@tauri-apps/cli-linux-arm64-musl@2.11.5':
+    resolution: {integrity: sha512-+OdWKj5Aq+C8HXypQ4t926V8cpVnc0ZcJIdhTXWjVAJHkaNuo8EuQR6KRZKHWIbJJgKdMPCDosvwzIFaBBqHKQ==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  '@tauri-apps/cli-linux-riscv64-gnu@2.10.0':
-    resolution: {integrity: sha512-JO7s3TlSxshwsoKNCDkyvsx5gw2QAs/Y2GbR5UE2d5kkU138ATKoPOtxn8G1fFT1aDW4LH0rYAAfBpGkDyJJnw==}
+  '@tauri-apps/cli-linux-riscv64-gnu@2.11.5':
+    resolution: {integrity: sha512-Q0V2hjpllyDW8dWQZSsITuQDfcY9BpBZuhXkMa2T5AFLZAn+FJPXQSyvnxWNVxRowdQ59Xn0QVtGm6HEHNUEvw==}
     engines: {node: '>= 10'}
     cpu: [riscv64]
     os: [linux]
     libc: [glibc]
 
-  '@tauri-apps/cli-linux-x64-gnu@2.10.0':
-    resolution: {integrity: sha512-Uvh4SUUp4A6DVRSMWjelww0GnZI3PlVy7VS+DRF5napKuIehVjGl9XD0uKoCoxwAQBLctvipyEK+pDXpJeoHng==}
+  '@tauri-apps/cli-linux-x64-gnu@2.11.5':
+    resolution: {integrity: sha512-Xz1s87gFjZJZMQKAhLa77YeiCJM6yVog3f9OxDgVd/KxDIoB1dA5V2xOnMM+SRkOGk9juwIBqesVAjV0kUB0DA==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@tauri-apps/cli-linux-x64-musl@2.10.0':
-    resolution: {integrity: sha512-AP0KRK6bJuTpQ8kMNWvhIpKUkQJfcPFeba7QshOQZjJ8wOS6emwTN4K5g/d3AbCMo0RRdnZWwu67MlmtJyxC1Q==}
+  '@tauri-apps/cli-linux-x64-musl@2.11.5':
+    resolution: {integrity: sha512-6A88wqAZXZHgMaBrGiy/Bpa4GgUnftXM7uquKOeOXCuK78/XdBxEECicK/1oHgrT179XBFOaA6lQEHysjRmGig==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  '@tauri-apps/cli-win32-arm64-msvc@2.10.0':
-    resolution: {integrity: sha512-97DXVU3dJystrq7W41IX+82JEorLNY+3+ECYxvXWqkq7DBN6FsA08x/EFGE8N/b0LTOui9X2dvpGGoeZKKV08g==}
+  '@tauri-apps/cli-win32-arm64-msvc@2.11.5':
+    resolution: {integrity: sha512-sRGgF/ObRfLcS3PtUdyTbJtkGq3E+PNZTknvAURwMNUtHw9DU/BF6S5si43y9lS5yEO9bWJCA+GGYvnn6cphQw==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [win32]
 
-  '@tauri-apps/cli-win32-ia32-msvc@2.10.0':
-    resolution: {integrity: sha512-EHyQ1iwrWy1CwMalEm9z2a6L5isQ121pe7FcA2xe4VWMJp+GHSDDGvbTv/OPdkt2Lyr7DAZBpZHM6nvlHXEc4A==}
+  '@tauri-apps/cli-win32-ia32-msvc@2.11.5':
+    resolution: {integrity: sha512-bHOv/yxqfKpI7ioIFQi5wOfZ7jkbPzJD/UhXY52I/hrmE3qNh71cohIPyqZB5GQn3LZeJWdCUOqmIg/w6XX+Wg==}
     engines: {node: '>= 10'}
     cpu: [ia32]
     os: [win32]
 
-  '@tauri-apps/cli-win32-x64-msvc@2.10.0':
-    resolution: {integrity: sha512-NTpyQxkpzGmU6ceWBTY2xRIEaS0ZLbVx1HE1zTA3TY/pV3+cPoPPOs+7YScr4IMzXMtOw7tLw5LEXo5oIG3qaQ==}
+  '@tauri-apps/cli-win32-x64-msvc@2.11.5':
+    resolution: {integrity: sha512-vaaOmavqdCeS7oMib2banBZemgrC5v54tSkwoBV+bxrXQZhQZrOwE2EO2i4x+CHNtvQUM/6bSs3iymZMAsycWg==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [win32]
 
-  '@tauri-apps/cli@2.10.0':
-    resolution: {integrity: sha512-ZwT0T+7bw4+DPCSWzmviwq5XbXlM0cNoleDKOYPFYqcZqeKY31KlpoMW/MOON/tOFBPgi31a2v3w9gliqwL2+Q==}
+  '@tauri-apps/cli@2.11.5':
+    resolution: {integrity: sha512-YbeJ6tctNoo40purO4u3Eeo3RVqmsjJr0NoKQRu+4pvO4gMLzkjta7x0k96SxSLmx+rQ+8um1ThOlw+HLpgFug==}
     engines: {node: '>= 10'}
     hasBin: true
 
@@ -8051,6 +8215,7 @@ packages:
 
   crypto-js@4.2.0:
     resolution: {integrity: sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==}
+    deprecated: Active development of CryptoJS has been discontinued. This library is no longer maintained.
 
   css-line-break@2.1.0:
     resolution: {integrity: sha512-FHcKFCZcAha3LwfVBhCQbW2nCNbkZXn7KVUJcsT5/P8YmfsVja0FMPJr0B903j/E69HUphKiV9iQArX8SDYA4w==}
@@ -13957,6 +14122,7 @@ packages:
   whatwg-encoding@3.1.1:
     resolution: {integrity: sha512-6qN4hJdMwfYBtE3YBTTHhoeuUrDBPZmbQaxWAqSALV/MeEnR5z1xd8UKud2RAkFoPkmB+hli1TZSnyi84xz1vQ==}
     engines: {node: '>=18'}
+    deprecated: Use @exodus/bytes instead for a more spec-conformant and faster implementation
 
   whatwg-fetch@3.6.20:
     resolution: {integrity: sha512-EqhiFU6daOA8kpjOWTL0olhVOF3i7OrFzSYiGsEMB8GcXS+RrzauAERX65xMeNWVqxA6HXH2m69Z9LaKKdisfg==}
@@ -15183,6 +15349,8 @@ snapshots:
 
   '@faker-js/faker@10.3.0': {}
 
+  '@fancyapps/ui@6.1.7': {}
+
   '@fidm/asn1@1.0.4': {}
 
   '@fidm/x509@1.2.1':
@@ -15614,6 +15782,42 @@ snapshots:
       jest-util: 30.2.0
       slash: 3.0.0
 
+  '@jest/core@30.2.0(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3))':
+    dependencies:
+      '@jest/console': 30.2.0
+      '@jest/pattern': 30.0.1
+      '@jest/reporters': 30.2.0
+      '@jest/test-result': 30.2.0
+      '@jest/transform': 30.2.0
+      '@jest/types': 30.2.0
+      '@types/node': 24.12.0
+      ansi-escapes: 4.3.2
+      chalk: 4.1.2
+      ci-info: 4.4.0
+      exit-x: 0.2.2
+      graceful-fs: 4.2.11
+      jest-changed-files: 30.2.0
+      jest-config: 30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3))
+      jest-haste-map: 30.2.0
+      jest-message-util: 30.2.0
+      jest-regex-util: 30.0.1
+      jest-resolve: 30.2.0
+      jest-resolve-dependencies: 30.2.0
+      jest-runner: 30.2.0
+      jest-runtime: 30.2.0
+      jest-snapshot: 30.2.0
+      jest-util: 30.2.0
+      jest-validate: 30.2.0
+      jest-watcher: 30.2.0
+      micromatch: 4.0.8
+      pretty-format: 30.2.0
+      slash: 3.0.0
+    transitivePeerDependencies:
+      - babel-plugin-macros
+      - esbuild-register
+      - supports-color
+      - ts-node
+
   '@jest/core@30.2.0(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@25.5.0)(typescript@5.9.3))':
     dependencies:
       '@jest/console': 30.2.0
@@ -15622,14 +15826,14 @@ snapshots:
       '@jest/test-result': 30.2.0
       '@jest/transform': 30.2.0
       '@jest/types': 30.2.0
-      '@types/node': 25.5.0
+      '@types/node': 24.12.0
       ansi-escapes: 4.3.2
       chalk: 4.1.2
       ci-info: 4.4.0
       exit-x: 0.2.2
       graceful-fs: 4.2.11
       jest-changed-files: 30.2.0
-      jest-config: 30.2.0(@types/node@25.5.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@25.5.0)(typescript@5.9.3))
+      jest-config: 30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@25.5.0)(typescript@5.9.3))
       jest-haste-map: 30.2.0
       jest-message-util: 30.2.0
       jest-regex-util: 30.0.1
@@ -15780,7 +15984,7 @@ snapshots:
       '@jest/schemas': 30.0.5
       '@types/istanbul-lib-coverage': 2.0.6
       '@types/istanbul-reports': 3.0.4
-      '@types/node': 25.5.0
+      '@types/node': 24.12.0
       '@types/yargs': 17.0.35
       chalk: 4.1.2
 
@@ -18306,58 +18510,58 @@ snapshots:
       '@tanstack/virtual-core': 3.13.22
       vue: 3.5.30(typescript@5.9.3)
 
-  '@tauri-apps/api@2.10.1': {}
+  '@tauri-apps/api@2.11.1': {}
 
-  '@tauri-apps/cli-darwin-arm64@2.10.0':
+  '@tauri-apps/cli-darwin-arm64@2.11.5':
     optional: true
 
-  '@tauri-apps/cli-darwin-x64@2.10.0':
+  '@tauri-apps/cli-darwin-x64@2.11.5':
     optional: true
 
-  '@tauri-apps/cli-linux-arm-gnueabihf@2.10.0':
+  '@tauri-apps/cli-linux-arm-gnueabihf@2.11.5':
     optional: true
 
-  '@tauri-apps/cli-linux-arm64-gnu@2.10.0':
+  '@tauri-apps/cli-linux-arm64-gnu@2.11.5':
     optional: true
 
-  '@tauri-apps/cli-linux-arm64-musl@2.10.0':
+  '@tauri-apps/cli-linux-arm64-musl@2.11.5':
     optional: true
 
-  '@tauri-apps/cli-linux-riscv64-gnu@2.10.0':
+  '@tauri-apps/cli-linux-riscv64-gnu@2.11.5':
     optional: true
 
-  '@tauri-apps/cli-linux-x64-gnu@2.10.0':
+  '@tauri-apps/cli-linux-x64-gnu@2.11.5':
     optional: true
 
-  '@tauri-apps/cli-linux-x64-musl@2.10.0':
+  '@tauri-apps/cli-linux-x64-musl@2.11.5':
     optional: true
 
-  '@tauri-apps/cli-win32-arm64-msvc@2.10.0':
+  '@tauri-apps/cli-win32-arm64-msvc@2.11.5':
     optional: true
 
-  '@tauri-apps/cli-win32-ia32-msvc@2.10.0':
+  '@tauri-apps/cli-win32-ia32-msvc@2.11.5':
     optional: true
 
-  '@tauri-apps/cli-win32-x64-msvc@2.10.0':
+  '@tauri-apps/cli-win32-x64-msvc@2.11.5':
     optional: true
 
-  '@tauri-apps/cli@2.10.0':
+  '@tauri-apps/cli@2.11.5':
     optionalDependencies:
-      '@tauri-apps/cli-darwin-arm64': 2.10.0
-      '@tauri-apps/cli-darwin-x64': 2.10.0
-      '@tauri-apps/cli-linux-arm-gnueabihf': 2.10.0
-      '@tauri-apps/cli-linux-arm64-gnu': 2.10.0
-      '@tauri-apps/cli-linux-arm64-musl': 2.10.0
-      '@tauri-apps/cli-linux-riscv64-gnu': 2.10.0
-      '@tauri-apps/cli-linux-x64-gnu': 2.10.0
-      '@tauri-apps/cli-linux-x64-musl': 2.10.0
-      '@tauri-apps/cli-win32-arm64-msvc': 2.10.0
-      '@tauri-apps/cli-win32-ia32-msvc': 2.10.0
-      '@tauri-apps/cli-win32-x64-msvc': 2.10.0
+      '@tauri-apps/cli-darwin-arm64': 2.11.5
+      '@tauri-apps/cli-darwin-x64': 2.11.5
+      '@tauri-apps/cli-linux-arm-gnueabihf': 2.11.5
+      '@tauri-apps/cli-linux-arm64-gnu': 2.11.5
+      '@tauri-apps/cli-linux-arm64-musl': 2.11.5
+      '@tauri-apps/cli-linux-riscv64-gnu': 2.11.5
+      '@tauri-apps/cli-linux-x64-gnu': 2.11.5
+      '@tauri-apps/cli-linux-x64-musl': 2.11.5
+      '@tauri-apps/cli-win32-arm64-msvc': 2.11.5
+      '@tauri-apps/cli-win32-ia32-msvc': 2.11.5
+      '@tauri-apps/cli-win32-x64-msvc': 2.11.5
 
   '@tauri-apps/plugin-opener@2.5.3':
     dependencies:
-      '@tauri-apps/api': 2.10.1
+      '@tauri-apps/api': 2.11.1
 
   '@tiptap/core@2.27.2(@tiptap/pm@2.27.2)':
     dependencies:
@@ -22813,6 +23017,25 @@ snapshots:
       - babel-plugin-macros
       - supports-color
 
+  jest-cli@30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3)):
+    dependencies:
+      '@jest/core': 30.2.0(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3))
+      '@jest/test-result': 30.2.0
+      '@jest/types': 30.2.0
+      chalk: 4.1.2
+      exit-x: 0.2.2
+      import-local: 3.2.0
+      jest-config: 30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3))
+      jest-util: 30.2.0
+      jest-validate: 30.2.0
+      yargs: 17.7.2
+    transitivePeerDependencies:
+      - '@types/node'
+      - babel-plugin-macros
+      - esbuild-register
+      - supports-color
+      - ts-node
+
   jest-cli@30.2.0(@types/node@25.5.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@25.5.0)(typescript@5.9.3)):
     dependencies:
       '@jest/core': 30.2.0(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@25.5.0)(typescript@5.9.3))
@@ -22831,6 +23054,72 @@ snapshots:
       - esbuild-register
       - supports-color
       - ts-node
+
+  jest-config@30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3)):
+    dependencies:
+      '@babel/core': 7.29.0
+      '@jest/get-type': 30.1.0
+      '@jest/pattern': 30.0.1
+      '@jest/test-sequencer': 30.2.0
+      '@jest/types': 30.2.0
+      babel-jest: 30.2.0(@babel/core@7.29.0)
+      chalk: 4.1.2
+      ci-info: 4.4.0
+      deepmerge: 4.3.1
+      glob: 11.1.0
+      graceful-fs: 4.2.11
+      jest-circus: 30.2.0(babel-plugin-macros@3.1.0)
+      jest-docblock: 30.2.0
+      jest-environment-node: 30.2.0
+      jest-regex-util: 30.0.1
+      jest-resolve: 30.2.0
+      jest-runner: 30.2.0
+      jest-util: 30.2.0
+      jest-validate: 30.2.0
+      micromatch: 4.0.8
+      parse-json: 5.2.0
+      pretty-format: 30.2.0
+      slash: 3.0.0
+      strip-json-comments: 3.1.1
+    optionalDependencies:
+      '@types/node': 24.12.0
+      ts-node: 10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3)
+    transitivePeerDependencies:
+      - babel-plugin-macros
+      - supports-color
+
+  jest-config@30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@25.5.0)(typescript@5.9.3)):
+    dependencies:
+      '@babel/core': 7.29.0
+      '@jest/get-type': 30.1.0
+      '@jest/pattern': 30.0.1
+      '@jest/test-sequencer': 30.2.0
+      '@jest/types': 30.2.0
+      babel-jest: 30.2.0(@babel/core@7.29.0)
+      chalk: 4.1.2
+      ci-info: 4.4.0
+      deepmerge: 4.3.1
+      glob: 11.1.0
+      graceful-fs: 4.2.11
+      jest-circus: 30.2.0(babel-plugin-macros@3.1.0)
+      jest-docblock: 30.2.0
+      jest-environment-node: 30.2.0
+      jest-regex-util: 30.0.1
+      jest-resolve: 30.2.0
+      jest-runner: 30.2.0
+      jest-util: 30.2.0
+      jest-validate: 30.2.0
+      micromatch: 4.0.8
+      parse-json: 5.2.0
+      pretty-format: 30.2.0
+      slash: 3.0.0
+      strip-json-comments: 3.1.1
+    optionalDependencies:
+      '@types/node': 24.12.0
+      ts-node: 10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@25.5.0)(typescript@5.9.3)
+    transitivePeerDependencies:
+      - babel-plugin-macros
+      - supports-color
 
   jest-config@30.2.0(@types/node@25.5.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@25.5.0)(typescript@5.9.3)):
     dependencies:
@@ -23085,6 +23374,19 @@ snapshots:
       jest-util: 30.2.0
       merge-stream: 2.0.0
       supports-color: 8.1.1
+
+  jest@30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3)):
+    dependencies:
+      '@jest/core': 30.2.0(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3))
+      '@jest/types': 30.2.0
+      import-local: 3.2.0
+      jest-cli: 30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3))
+    transitivePeerDependencies:
+      - '@types/node'
+      - babel-plugin-macros
+      - esbuild-register
+      - supports-color
+      - ts-node
 
   jest@30.2.0(@types/node@25.5.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@25.5.0)(typescript@5.9.3)):
     dependencies:
@@ -26837,6 +27139,27 @@ snapshots:
 
   ts-interface-checker@0.1.13: {}
 
+  ts-jest@29.4.6(@babel/core@7.29.0)(@jest/transform@30.2.0)(@jest/types@30.2.0)(babel-jest@30.2.0(@babel/core@7.29.0))(esbuild@0.27.4)(jest-util@30.2.0)(jest@30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3)))(typescript@5.9.3):
+    dependencies:
+      bs-logger: 0.2.6
+      fast-json-stable-stringify: 2.1.0
+      handlebars: 4.7.8
+      jest: 30.2.0(@types/node@24.12.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@24.12.0)(typescript@5.9.3))
+      json5: 2.2.3
+      lodash.memoize: 4.1.2
+      make-error: 1.3.6
+      semver: 7.7.4
+      type-fest: 4.41.0
+      typescript: 5.9.3
+      yargs-parser: 21.1.1
+    optionalDependencies:
+      '@babel/core': 7.29.0
+      '@jest/transform': 30.2.0
+      '@jest/types': 30.2.0
+      babel-jest: 30.2.0(@babel/core@7.29.0)
+      esbuild: 0.27.4
+      jest-util: 30.2.0
+
   ts-jest@29.4.6(@babel/core@7.29.0)(@jest/transform@30.2.0)(@jest/types@30.2.0)(babel-jest@30.2.0(@babel/core@7.29.0))(esbuild@0.27.4)(jest-util@30.2.0)(jest@30.2.0(@types/node@25.5.0)(babel-plugin-macros@3.1.0)(ts-node@10.9.2(@swc/core@1.15.13(@swc/helpers@0.5.19))(@types/node@25.5.0)(typescript@5.9.3)))(typescript@5.9.3):
     dependencies:
       bs-logger: 0.2.6
@@ -27562,6 +27885,17 @@ snapshots:
       tsconfck: 3.1.6(typescript@5.9.3)
     optionalDependencies:
       vite: 8.0.0(@types/node@24.10.13)(esbuild@0.27.4)(jiti@2.6.1)(sass@1.78.0)(terser@5.46.0)
+    transitivePeerDependencies:
+      - supports-color
+      - typescript
+
+  vite-tsconfig-paths@5.1.4(typescript@5.9.3)(vite@8.0.0(@types/node@24.12.0)(esbuild@0.27.4)(jiti@2.6.1)(sass@1.78.0)(terser@5.46.0)):
+    dependencies:
+      debug: 4.4.3(supports-color@5.5.0)
+      globrex: 0.1.2
+      tsconfck: 3.1.6(typescript@5.9.3)
+    optionalDependencies:
+      vite: 8.0.0(@types/node@24.12.0)(esbuild@0.27.4)(jiti@2.6.1)(sass@1.78.0)(terser@5.46.0)
     transitivePeerDependencies:
       - supports-color
       - typescript

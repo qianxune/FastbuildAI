@@ -9,12 +9,14 @@ import { RouterProvider } from "react-router-dom";
 import { defaultLocale, messages } from "./locales";
 import { routeOption } from "./routes";
 
+const normalizedPath = window.location.pathname.replace(/\/+$/, "");
+const isPublicLanding = normalizedPath === "/extension/image-studio";
+const router = <RouterProvider router={routeOption} />;
+
 createRoot(document.getElementById("root")!).render(
     <StrictMode>
         <I18nProvider messages={messages} defaultLocale={defaultLocale}>
-            <RootLayout>
-                <RouterProvider router={routeOption} />
-            </RootLayout>
+            {isPublicLanding ? router : <RootLayout>{router}</RootLayout>}
         </I18nProvider>
     </StrictMode>,
 );

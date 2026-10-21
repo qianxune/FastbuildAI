@@ -1,40 +1,23 @@
 {
-    "extends": [
-        "@buildingai/typescript-config/react-library.json"
-    ],
+    "extends": "@buildingai/typescript-config/react-library.json",
     "compilerOptions": {
         "tsBuildInfoFile": "./.temp/tsconfig.web.tsbuildinfo",
         "target": "ES2022",
-        "useDefineForClassFields": true,
         "lib": [
             "ES2022",
             "DOM",
             "DOM.Iterable"
         ],
         "module": "ESNext",
+        "moduleResolution": "bundler",
         "types": [
             "vite/client"
         ],
         "skipLibCheck": true,
-        /* Bundler mode */
-        "moduleResolution": "bundler",
-        "verbatimModuleSyntax": true,
-        "moduleDetection": "force",
-        "allowImportingTsExtensions": true,
-        "noEmit": true,
-        "jsx": "react-jsx",
-        /* Linting */
-        "strict": true,
-        "noUnusedLocals": true,
-        "noUnusedParameters": true,
-        "erasableSyntaxOnly": true,
-        "noFallthroughCasesInSwitch": true,
-        "noUncheckedSideEffectImports": true,
+        "noEmit": true
     },
     "include": [
-        "src/web/**/*"
-    ],
-    "exclude": [
-        "src/api/**/*"
+        "src/web",
+        "src/api/shared"
     ]
 }

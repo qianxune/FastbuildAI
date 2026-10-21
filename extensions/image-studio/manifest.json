@@ -1,9 +1,9 @@
 {
     "identifier": "image-studio",
-    "name": "Image Studio",
+    "name": "出图AI",
     "type": "application",
     "version": "0.1.0",
-    "description": "AI 图片创作工作台，支持模型选择、批量生成、历史记录与下载。",
+    "description": "面向电商场景的 AI 商品图生成工作台，支持模型选择、批量生成、历史记录与下载。",
     "homepage": "",
     "author": {
         "avatar": "/static/avatars/buildingai.png",
