@@ -1,6 +1,6 @@
 {
     "name": "image-studio",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "AI image generation workspace for BuildingAI",
     "author": "BuildingAI Teams",
     "private": true,
@@ -51,6 +51,7 @@
         "@buildingai/web-core": "workspace:*",
         "@buildingai/web-types": "workspace:*",
         "@nestjs/bullmq": "catalog:api",
+        "@nestjs/platform-express": "catalog:api",
         "@tanstack/react-query": "^5.90.21",
         "ai": "^6.0.138",
         "bullmq": "catalog:api",
@@ -60,6 +61,7 @@
         "react": "catalog:web",
         "react-dom": "catalog:web",
         "react-router-dom": "catalog:web",
+        "sharp": "^0.34.5",
         "vite-tsconfig-paths": "catalog:web"
     },
     "devDependencies": {

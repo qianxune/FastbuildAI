@@ -1,7 +1,8 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import type { Job } from "bullmq";
 
-import { GENERATION_QUEUE, type GenerationJobData, GenerationService } from "./services/generation.service";
+import { GENERATION_QUEUE, type GenerationJobData } from "./constants/generation.constants";
+import { GenerationService } from "./services/generation.service";
 
 @Processor(GENERATION_QUEUE, { maxStalledCount: 0, lockDuration: 120000 })
 export class GenerationProcessor extends WorkerHost {

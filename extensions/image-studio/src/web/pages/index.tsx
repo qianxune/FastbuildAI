@@ -27,6 +27,8 @@ import {
 import { useDocumentHead } from "@buildingai/hooks";
 import { useEffect, useState } from "react";
 import type { ToolKey } from "../../api/shared/tools";
+import { MAIN_IMAGE_TYPES, mainImageVariants, type MainImageInput } from "../../api/shared/main-image";
+import MainImageForm from "./main-image-form";
 import {
   loadGenerationImage,
   isGenerationActive,
@@ -34,6 +36,7 @@ import {
   useGenerationQuery,
   useGenerationHistoryQuery,
   useGenerateImageMutation,
+  useGenerateMainImageMutation,
   useRetryGenerationMutation,
   useCancelGenerationMutation,
   useDeleteGenerationMutation,
@@ -48,6 +51,11 @@ function errorMessage(error: unknown) {
 
 function generationStatus(item: ImageGeneration) {
   return { queued: "排队中", processing: "正在生成", completed: "已完成", failed: "失败", cancelled: "已取消" }[item.status];
+}
+
+function imageCaption(item: ImageGeneration, index: number) {
+  const type = item.toolKey === "main" && item.mainInput ? mainImageVariants(item.mainInput)[index] : undefined;
+  return type ? `${MAIN_IMAGE_TYPES[type]} ${index + 1}` : `${index + 1}`;
 }
 
 interface ToolDef {
@@ -103,11 +111,12 @@ const GROUPS = {
 export default function ImageStudioPage() {
   useDocumentHead({ title: "创作工作台 — 出图AI" });
 
-  const [tool, setTool] = useState<ToolKey>("creative");
+  const [tool, setTool] = useState<ToolKey>("main");
   const capabilities = useGenerationCapabilitiesQuery();
   const [page, setPage] = useState(1);
   const history = useGenerationHistoryQuery(page, 8);
   const generate = useGenerateImageMutation();
+  const generateMain = useGenerateMainImageMutation();
   const retry = useRetryGenerationMutation();
   const cancel = useCancelGenerationMutation();
   const remove = useDeleteGenerationMutation();
@@ -122,7 +131,8 @@ export default function ImageStudioPage() {
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const task = useGenerationQuery(result?.id);
   const currentResult = task.data ?? history.data?.items.find((item) => item.id === result?.id) ?? result;
-  const busy = generate.isPending || retry.isPending || isGenerationActive(currentResult);
+  const submitting = generate.isPending || generateMain.isPending || retry.isPending;
+  const busy = submitting || isGenerationActive(currentResult);
   const locked = busy || remove.isPending || cancel.isPending;
   const creative = capabilities.data?.tools.find((item) => item.key === "creative");
   const models = capabilities.data?.models.filter((model) =>
@@ -136,6 +146,11 @@ export default function ImageStudioPage() {
   const selectedSize = sizes.includes(size) ? size : (sizes[0] ?? "");
   const creativeAvailable = capabilities.isSuccess && !capabilities.isFetching &&
     creative?.status === "available" && models.length > 0 && sizes.length > 0;
+  const main = capabilities.data?.tools.find((item) => item.key === "main");
+  const mainModels = capabilities.data?.models.filter((model) =>
+    model.capabilities.includes("reference-image") && main?.modelIdsByCapability["reference-image"]?.includes(model.id),
+  ) ?? [];
+  const mainAvailable = capabilities.isSuccess && !capabilities.isFetching && main?.status === "available" && mainModels.length > 0;
   const pageCount = Math.max(1, Math.ceil((history.data?.total ?? 0) / 8));
 
   useEffect(() => {
@@ -147,6 +162,7 @@ export default function ImageStudioPage() {
     if (key === "suggest") return "建议接口尚未开放";
     if (capabilities.isError) return "能力加载失败，暂不可生成";
     if (!capabilities.isSuccess || capabilities.isFetching) return "正在检查可用能力";
+    if (key === "main") return mainAvailable ? "" : "暂无支持商品参考图的生图模型，请检查公共模型配置";
     if (key !== "creative") return "图片上传与编辑尚未开放";
     return creativeAvailable ? "" : "暂无支持创意生图的模型或尺寸";
   };
@@ -194,8 +210,19 @@ export default function ImageStudioPage() {
     }
   };
 
-  const canRetry = (item: ImageGeneration) => creativeAvailable && (item.status === "failed" || item.status === "cancelled") &&
-    models.some((model) => model.id === item.modelId) && sizes.includes(item.size);
+  const startMain = async (input: MainImageInput) => {
+    if (locked || !mainAvailable) return;
+    setWorkflowError(null);
+    setShowHistory(false);
+    try {
+      setResult(await generateMain.mutateAsync(input));
+      setPage(1);
+    } catch (error) { setWorkflowError(errorMessage(error)); }
+  };
+
+  const canRetry = (item: ImageGeneration) => (item.status === "failed" || item.status === "cancelled") &&
+    (item.toolKey === "main" ? mainAvailable && mainModels.some((model) => model.id === item.modelId) :
+      creativeAvailable && models.some((model) => model.id === item.modelId) && sizes.includes(item.size));
 
   const retryGeneration = async (item: ImageGeneration) => {
     if (locked || !canRetry(item)) return;
@@ -336,7 +363,7 @@ export default function ImageStudioPage() {
         <section className="form">
           {unavailableReason(tool) && <div className="workflow-message" role="status">{unavailableReason(tool)}</div>}
           {capabilities.isError && <button className="btn btn-ghost btn-sm" disabled={capabilities.isFetching} onClick={() => void capabilities.refetch()}><RefreshCw size={14} />重新检查</button>}
-          {tool === "creative" ? (
+          {tool === "main" ? <MainImageForm models={mainModels} available={mainAvailable} locked={locked} onSubmit={startMain} /> : tool === "creative" ? (
             <form className="ftpl show" onSubmit={(event) => { event.preventDefault(); void startGen(); }}>
               <div className="form-head"><h2>{t.name}</h2><p>{t.desc}</p></div>
               <fieldset className="creative-fields" disabled={locked}>
@@ -402,7 +429,7 @@ export default function ImageStudioPage() {
           {showHistory ? (
             <div className="history-view">
               <div className="res-bar"><h3>生成历史</h3><div className="res-actions"><button className="btn btn-ghost btn-sm" disabled={history.isFetching} onClick={() => void history.refetch()}><RefreshCw size={14} />刷新</button><button className="icon-btn" title="返回画布" aria-label="返回画布" onClick={() => setShowHistory(false)}><X size={16} /></button></div></div>
-              {(generate.isPending || retry.isPending) && <p className="workflow-message" role="status">正在提交任务...</p>}
+              {submitting && <p className="workflow-message" role="status">正在提交任务...</p>}
               {history.isPending ? <p role="status">正在加载历史...</p> : history.isError ? <p role="alert">历史加载失败：{errorMessage(history.error)}</p> : (
                 <>
                   {!history.data.items.length && <p className="workflow-message">暂无生成记录</p>}
@@ -410,7 +437,7 @@ export default function ImageStudioPage() {
                     <article className="history-entry" key={item.id}>
                       <div className="history-summary"><button className="history-open" onClick={() => { setResult(item); setShowHistory(false); }}><strong>{item.prompt}</strong><span>{item.modelName} · {item.size} · {item.count} 张 · {new Date(item.createdAt).toLocaleString()}</span></button><span>{generationStatus(item)}</span></div>
                       {item.error && <p className="workflow-message error">{item.error}</p>}
-                      <div className="res-grid">{item.images.map((_image, index) => <ResultTile key={`${item.id}-${index}`} generationId={item.id} imageIndex={index} caption={`${index + 1}`} onDownload={(blob, url) => downloadImage(blob, url, item.id, index)} />)}</div>
+                      <div className="res-grid">{item.images.map((_image, index) => <ResultTile key={`${item.id}-${index}`} generationId={item.id} imageIndex={index} caption={imageCaption(item, index)} onDownload={(blob, url) => downloadImage(blob, url, item.id, index)} />)}</div>
                       <div className="history-actions">{isGenerationActive(item) && <button className="btn btn-ghost btn-sm" disabled={cancel.isPending} onClick={() => void cancelGeneration(item)}><X size={14} />取消</button>}{(item.status === "failed" || item.status === "cancelled") && <button className="btn btn-ghost btn-sm" disabled={locked || !canRetry(item)} title={canRetry(item) ? "重试生成" : "当前能力不支持此记录重试"} onClick={() => void retryGeneration(item)}><RefreshCw size={14} />重试</button>}<button className="icon-btn" title="删除记录" aria-label="删除记录" disabled={locked || isGenerationActive(item)} onClick={() => void deleteGeneration(item)}><Trash2 size={15} /></button></div>
                     </article>
                   ))}
@@ -419,7 +446,7 @@ export default function ImageStudioPage() {
               )}
             </div>
           ) : busy ? (
-            <div className="cstate show"><div className="canvas-inner"><div className="gen-head"><span className="spin" /><span role="status">{generate.isPending || retry.isPending ? "正在提交任务" : currentResult ? generationStatus(currentResult) : "正在生成"} · 创意生图</span></div><div className="res-actions">{currentResult && isGenerationActive(currentResult) && <button className="btn btn-ghost btn-sm" disabled={cancel.isPending} onClick={() => void cancelGeneration(currentResult)}><X size={14} />{cancel.isPending ? "正在取消..." : "取消生成"}</button>}<button className="btn btn-ghost btn-sm" onClick={() => setShowHistory(true)}><History size={14} />查看历史</button></div></div></div>
+            <div className="cstate show"><div className="canvas-inner"><div className="gen-head"><span className="spin" /><span role="status">{submitting ? "正在提交任务" : currentResult ? generationStatus(currentResult) : "正在生成"} · {submitting ? t.name : currentResult?.toolKey === "main" ? "商品主图" : "创意生图"}</span></div><div className="res-actions">{currentResult && isGenerationActive(currentResult) && <button className="btn btn-ghost btn-sm" disabled={cancel.isPending} onClick={() => void cancelGeneration(currentResult)}><X size={14} />{cancel.isPending ? "正在取消..." : "取消生成"}</button>}<button className="btn btn-ghost btn-sm" onClick={() => setShowHistory(true)}><History size={14} />查看历史</button></div></div></div>
           ) : currentResult ? (
             <div className="cstate show"><div className="canvas-inner">
               <div className="res-bar"><h3>{generationStatus(currentResult)}</h3><div className="res-actions"><button className="btn btn-ghost btn-sm" onClick={() => setResult(null)}>返回创作</button><button className="icon-btn" title="删除记录" aria-label="删除记录" disabled={locked || isGenerationActive(currentResult)} onClick={() => void deleteGeneration(currentResult)}><Trash2 size={15} /></button></div></div>
@@ -428,7 +455,7 @@ export default function ImageStudioPage() {
               {currentResult.status === "failed" && <div className="workflow-message error" role="alert"><TriangleAlert size={18} /><span>{currentResult.error || "生成失败"}</span><button className="btn btn-ghost btn-sm" disabled={locked || !canRetry(currentResult)} onClick={() => void retryGeneration(currentResult)}><RefreshCw size={14} />重试</button></div>}
               {currentResult.status === "cancelled" && <div className="workflow-message" role="status">已取消<button className="btn btn-ghost btn-sm" disabled={locked || !canRetry(currentResult)} onClick={() => void retryGeneration(currentResult)}><RefreshCw size={14} />重新生成</button></div>}
               {currentResult.status === "completed" && !currentResult.images.length && <p className="workflow-message">该记录没有可下载的图片。</p>}
-              <div className="res-grid">{currentResult.images.map((_image, index) => <ResultTile key={`${currentResult.id}-${index}`} generationId={currentResult.id} imageIndex={index} caption={`${index + 1}`} onDownload={(blob, url) => downloadImage(blob, url, currentResult.id, index)} />)}</div>
+              <div className="res-grid">{currentResult.images.map((_image, index) => <ResultTile key={`${currentResult.id}-${index}`} generationId={currentResult.id} imageIndex={index} caption={imageCaption(currentResult, index)} onDownload={(blob, url) => downloadImage(blob, url, currentResult.id, index)} />)}</div>
             </div></div>
           ) : (
             <div className="cstate show">

@@ -1,5 +1,5 @@
 {
-    "extends": "@buildingai/typescript-config/nestjs.extension.json",
+    "extends": "../../packages/@buildingai/typescript-config/nestjs.extension.json",
     "compilerOptions": {
         "outDir": "./.temp/api",
         "rootDir": "./src/api",

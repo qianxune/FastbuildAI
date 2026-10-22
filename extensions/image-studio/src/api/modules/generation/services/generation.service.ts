@@ -1,148 +1,53 @@
-import { getProvider, MODEL_FEATURES, MODEL_TYPES } from "@buildingai/ai-sdk";
 import { InjectRepository } from "@buildingai/db/@nestjs/typeorm";
-import { AiModel } from "@buildingai/db/entities";
 import { Repository } from "@buildingai/db/typeorm";
 import { HttpErrorFactory } from "@buildingai/errors";
-import { PublicAiModelService } from "@buildingai/extension-sdk";
-import { getProviderSecret } from "@buildingai/utils";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Injectable } from "@nestjs/common";
 import { generateImage } from "ai";
 import type { Queue } from "bullmq";
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from "fs/promises";
-import path from "path";
-
 import {
-    type CapabilityModel,
-    type GenerationCapabilities,
-    TOOL_KEYS,
-    TOOL_REGISTRY,
-    type ToolCapability,
-    type ToolDefinition,
-} from "../../../shared/tools";
+    mainImagePrompt,
+    mainImageSize,
+    mainImageVariants,
+    type MainImageInput,
+} from "../../../shared/main-image";
+import {
+    GENERATION_FAILED,
+    GENERATION_QUEUE,
+    type GenerationJobData,
+    MODEL_UNAVAILABLE,
+} from "../constants/generation.constants";
+import { GenerationModelService } from "./generation-model.service";
+import { GenerationImageService } from "./generation-image.service";
+import { ProductImageService, type ProductImageUpload } from "./product-image.service";
+
 import {
     GeneratedImage,
     ImageGeneration,
     ImageGenerationStatus,
 } from "../../../db/entities/image-generation.entity";
-import { GenerateImageDto, QueryGenerationDto } from "../dto";
+import { GenerateImageDto, MainImageDto, QueryGenerationDto } from "../dto";
 
-const APP_IDENTIFIER = "image-studio";
-export const GENERATION_QUEUE = "image-studio-generation";
-export interface GenerationJobData {
-    id: string;
-    userId: string;
-}
-const GENERATION_FAILED = "图片生成失败，请稍后重试";
-const MODEL_UNAVAILABLE = "所选图片模型不可用，请在模型管理中启用图片模型";
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
-const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const IMAGE_EXTENSIONS: Record<string, string> = {
-    "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
-};
+export { GENERATION_QUEUE, type GenerationJobData } from "../constants/generation.constants";
 
 @Injectable()
 export class GenerationService {
     constructor(
         @InjectRepository(ImageGeneration)
         private readonly generationRepository: Repository<ImageGeneration>,
-        @InjectRepository(AiModel)
-        private readonly modelRepository: Repository<AiModel>,
-        private readonly publicAiModelService: PublicAiModelService,
+        private readonly generationModelService: GenerationModelService,
+        private readonly generationImageService: GenerationImageService,
         @InjectQueue(GENERATION_QUEUE)
-        private readonly generationQueue?: Queue<GenerationJobData>,
+        private readonly generationQueue: Queue<GenerationJobData>,
+        private readonly productImageService: ProductImageService,
     ) {}
 
-    async capabilities(): Promise<GenerationCapabilities> {
-        const configuredModels = await this.modelRepository.find({
-            where: [
-                { modelType: MODEL_TYPES.TEXT_TO_IMAGE, isActive: true, provider: { isActive: true } },
-                { modelType: MODEL_TYPES.LLM, isActive: true, provider: { isActive: true } },
-            ],
-            relations: ["provider"],
-            order: { sortOrder: "DESC", createdAt: "DESC" },
-        });
-        const models: CapabilityModel[] = [];
-
-        for (const model of configuredModels) {
-            if (!model.isActive || !model.provider?.isActive) continue;
-            const capabilities: ToolCapability[] = [];
-            try {
-                const provider = getProvider(model.provider.provider, {
-                    apiKey: "capability-probe-not-a-credential",
-                });
-                if (model.modelType === MODEL_TYPES.TEXT_TO_IMAGE) {
-                    this.requireImageModel(provider, model.model);
-                    capabilities.push("text-to-image");
-                }
-                if (model.modelType === MODEL_TYPES.LLM &&
-                    model.features?.includes(MODEL_FEATURES.VISION) && provider.supports("language")) {
-                    const languageModel = provider.languageModel(model.model);
-                    if (languageModel?.specificationVersion === "v3" &&
-                        typeof languageModel.doGenerate === "function" &&
-                        typeof languageModel.doStream === "function") {
-                        capabilities.push("vision");
-                    }
-                }
-            } catch {
-                continue;
-            }
-            if (capabilities.length === 0) continue;
-            models.push({
-                id: model.id,
-                name: model.name,
-                model: model.model,
-                provider: model.provider.name,
-                providerCode: model.provider.provider,
-                capabilities,
-            });
-        }
-
-        return {
-            models,
-            tools: TOOL_KEYS.map((key) => {
-                const definition: ToolDefinition = TOOL_REGISTRY[key];
-                const modelIdsByCapability: Partial<Record<ToolCapability, string[]>> = {};
-                for (const capability of definition.requiredCapabilities) {
-                    modelIdsByCapability[capability] = models
-                        .filter((model) => model.capabilities.includes(capability))
-                        .map((model) => model.id);
-                }
-                const disabled = definition.status === "disabled";
-                const supported = !disabled && definition.requiredCapabilities.every(
-                    (capability) => modelIdsByCapability[capability]!.length > 0,
-                );
-                return {
-                    key,
-                    status: supported ? "available" : "unavailable",
-                    requiredCapabilities: definition.requiredCapabilities,
-                    modelIdsByCapability,
-                    reason: disabled ? "tool_disabled" : supported ? null : "unsupported_capabilities",
-                    limits: { sizes: null, maxInputImages: null },
-                };
-            }),
-        };
+    async capabilities() {
+        return this.generationModelService.capabilities();
     }
 
     async listModels() {
-        const models = await this.modelRepository.find({
-            where: {
-                modelType: MODEL_TYPES.TEXT_TO_IMAGE,
-                isActive: true,
-                provider: { isActive: true },
-            },
-            relations: ["provider"],
-            order: { sortOrder: "DESC", createdAt: "DESC" },
-        });
-
-        return models.map((model) => ({
-            id: model.id,
-            name: model.name,
-            model: model.model,
-            provider: model.provider.name,
-            providerCode: model.provider.provider,
-            description: model.description,
-        }));
+        return this.generationModelService.listModels();
     }
 
     async list(userId: string, query: QueryGenerationDto) {
@@ -153,69 +58,55 @@ export class GenerationService {
             take: query.limit,
         });
 
-        return { items: items.map((item) => this.publicRecord(item)), total, page: query.page, limit: query.limit };
-    }
-
-    private async prepare(input: GenerateImageDto) {
-        const model = await this.publicAiModelService.getModelInfo(input.modelId).catch(() => {
-            throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
-        });
-        if (
-            !model.isActive ||
-            !model.provider?.isActive ||
-            model.modelType !== MODEL_TYPES.TEXT_TO_IMAGE
-        ) {
-            throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
-        }
-
-        const imageModel = await (async () => {
-            try {
-                const secretConfig = await this.publicAiModelService.getProviderConfig(model.id);
-                const provider = await this.publicAiModelService.getProviderAdapter(model.id, {
-                    apiKey: getProviderSecret("apiKey", secretConfig),
-                    baseURL: getProviderSecret("baseUrl", secretConfig) || undefined,
-                });
-                return this.requireImageModel(provider, model.model);
-            } catch {
-                throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
-            }
-        })();
-
-        return { model, imageModel };
+        return {
+            items: items.map((item) => this.publicRecord(item)),
+            total,
+            page: query.page,
+            limit: query.limit,
+        };
     }
 
     async generate(userId: string, input: GenerateImageDto) {
-        const { model, imageModel } = await this.prepare(input);
-        const generation = await this.generationRepository.save(
-            this.generationRepository.create({
-                userId,
-                prompt: input.prompt.trim(),
-                modelId: model.id,
-                modelName: model.name,
-                size: input.size,
-                quality: input.quality,
-                style: input.style,
-                count: input.count,
-                status: ImageGenerationStatus.PROCESSING,
-                images: [],
-            }),
-        ).catch(() => { throw HttpErrorFactory.badRequest(GENERATION_FAILED); });
+        const { model, imageModel } = await this.generationModelService.prepare(input.modelId);
+        const generation = await this.generationRepository
+            .save(
+                this.generationRepository.create({
+                    userId,
+                    prompt: input.prompt.trim(),
+                    modelId: model.id,
+                    modelName: model.name,
+                    size: input.size,
+                    quality: input.quality,
+                    style: input.style,
+                    count: input.count,
+                    status: ImageGenerationStatus.PROCESSING,
+                    images: [],
+                }),
+            )
+            .catch(() => {
+                throw HttpErrorFactory.badRequest(GENERATION_FAILED);
+            });
 
         try {
             const result = await this.infer(generation, { model, imageModel });
 
-            generation.images = await this.persistImages(
+            generation.images = await this.generationImageService.persist(
                 generation.id,
                 result.images.map((image) => ({
                     base64: image.base64,
                     mediaType: image.mediaType,
                 })),
             );
-            const completed = await this.generationRepository.update({
-                id: generation.id, userId, status: ImageGenerationStatus.PROCESSING,
-            }, { status: ImageGenerationStatus.COMPLETED, images: generation.images, error: null });
+            const completed = await this.generationRepository.update(
+                {
+                    id: generation.id,
+                    userId,
+                    status: ImageGenerationStatus.PROCESSING,
+                },
+                { status: ImageGenerationStatus.COMPLETED, images: generation.images, error: null },
+            );
             if (!completed.affected) {
-                await this.cleanupTaskImages(generation.id, generation.images);
+                await this.generationImageService.cleanup(generation.id, generation.images);
                 generation.images = [];
                 return this.get(userId, generation.id);
             }
@@ -224,7 +115,7 @@ export class GenerationService {
             generation.updatedAt = new Date();
             return this.publicRecord(generation);
         } catch {
-            await this.cleanupTaskImages(generation.id, generation.images);
+            await this.generationImageService.cleanup(generation.id, generation.images);
             await this.failTask({ id: generation.id, userId }).catch(() => undefined);
             throw HttpErrorFactory.badRequest(GENERATION_FAILED);
         }
@@ -232,6 +123,8 @@ export class GenerationService {
 
     async retry(userId: string, id: string) {
         const generation = await this.findOwned(userId, id);
+        if (generation.toolKey === "main" && generation.mainInput)
+            return this.submitMain(userId, generation.mainInput);
         return this.generate(userId, this.generationInput(generation));
     }
 
@@ -246,7 +139,46 @@ export class GenerationService {
         };
     }
 
-    private infer(generation: ImageGeneration, prepared: Awaited<ReturnType<GenerationService["prepare"]>>) {
+    private async infer(
+        generation: ImageGeneration,
+        prepared: Awaited<ReturnType<GenerationModelService["prepare"]>>,
+    ) {
+        if (generation.toolKey === "main" && generation.mainInput) {
+            if (
+                !("supportsReferenceImages" in prepared.imageModel) ||
+                prepared.imageModel.supportsReferenceImages !== true
+            ) {
+                throw new Error(MODEL_UNAVAILABLE);
+            }
+            const references = await this.readProductImages(
+                generation.userId,
+                generation.mainInput.assetIds,
+            );
+            const images: Array<{ base64: string; mediaType: string }> = [];
+            const deadline = AbortSignal.timeout(5 * 60 * 1000);
+            for (const type of mainImageVariants(generation.mainInput)) {
+                const current = await this.findOwned(generation.userId, generation.id);
+                if (current.status !== ImageGenerationStatus.PROCESSING)
+                    throw new Error("Task cancelled");
+                const result = await generateImage({
+                    model: prepared.imageModel,
+                    prompt: {
+                        text: mainImagePrompt(generation.mainInput, type),
+                        images: references,
+                    },
+                    size: mainImageSize(generation.mainInput),
+                    n: 1,
+                    maxRetries: 0,
+                    abortSignal: deadline,
+                });
+                if (result.images.length !== 1) throw new Error(GENERATION_FAILED);
+                images.push({
+                    base64: result.images[0].base64,
+                    mediaType: result.images[0].mediaType,
+                });
+            }
+            return { images };
+        }
         return generateImage({
             model: prepared.imageModel,
             prompt: generation.prompt,
@@ -254,9 +186,10 @@ export class GenerationService {
             n: generation.count,
             maxRetries: 0,
             abortSignal: AbortSignal.timeout(5 * 60 * 1000),
-            providerOptions: prepared.model.provider.provider === "openai"
-                ? { openai: { quality: generation.quality, style: generation.style } }
-                : undefined,
+            providerOptions:
+                prepared.model.provider.provider === "openai"
+                    ? { openai: { quality: generation.quality, style: generation.style } }
+                    : undefined,
         });
     }
 
@@ -265,17 +198,37 @@ export class GenerationService {
     }
 
     async submit(userId: string, input: GenerateImageDto) {
-        const { model } = await this.prepare(input);
-        const generation = await this.generationRepository.save(this.generationRepository.create({
-            userId, prompt: input.prompt.trim(), modelId: model.id, modelName: model.name,
-            size: input.size, quality: input.quality, style: input.style, count: input.count,
-            status: ImageGenerationStatus.QUEUED, images: [], error: null,
-        })).catch(() => { throw HttpErrorFactory.badRequest(GENERATION_FAILED); });
-        try {
-            if (!this.generationQueue) throw new Error(GENERATION_FAILED);
-            await this.generationQueue.add("generate", { id: generation.id, userId }, {
-                jobId: generation.id, attempts: 1, removeOnComplete: true, removeOnFail: true,
+        const { model } = await this.generationModelService.prepare(input.modelId);
+        const generation = await this.generationRepository
+            .save(
+                this.generationRepository.create({
+                    userId,
+                    prompt: input.prompt.trim(),
+                    modelId: model.id,
+                    modelName: model.name,
+                    size: input.size,
+                    quality: input.quality,
+                    style: input.style,
+                    count: input.count,
+                    status: ImageGenerationStatus.QUEUED,
+                    images: [],
+                    error: null,
+                }),
+            )
+            .catch(() => {
+                throw HttpErrorFactory.badRequest(GENERATION_FAILED);
             });
+        try {
+            await this.generationQueue.add(
+                "generate",
+                { id: generation.id, userId },
+                {
+                    jobId: generation.id,
+                    attempts: 1,
+                    removeOnComplete: true,
+                    removeOnFail: true,
+                },
+            );
         } catch {
             await this.failTask({ id: generation.id, userId }).catch(() => undefined);
             throw HttpErrorFactory.badRequest(GENERATION_FAILED);
@@ -285,22 +238,131 @@ export class GenerationService {
 
     async retryTask(userId: string, id: string) {
         const generation = await this.findOwned(userId, id);
+        if (generation.toolKey === "main" && generation.mainInput)
+            return this.submitMain(userId, generation.mainInput);
         return this.submit(userId, this.generationInput(generation));
+    }
+
+    async readProductImage(userId: string, id: string) {
+        return this.productImageService.read(userId, id);
+    }
+
+    async listProductImages(userId: string) {
+        return this.productImageService.list(userId);
+    }
+
+    private async readProductImages(userId: string, ids: string[]) {
+        return Promise.all(ids.map((id) => this.readProductImage(userId, id)));
+    }
+
+    async submitMain(userId: string, input: MainImageDto | MainImageInput) {
+        const total = Object.values(input.counts).reduce((sum, count) => sum + count, 0);
+        if (!Number.isInteger(total) || total < 1 || total > 4)
+            throw HttpErrorFactory.badRequest("请选择 1–4 张配图");
+        const { imageModel, model } = await this.generationModelService.prepare(input.modelId);
+        if (
+            !("supportsReferenceImages" in imageModel) ||
+            imageModel.supportsReferenceImages !== true
+        ) {
+            throw HttpErrorFactory.badRequest("所选模型不支持商品参考图，请选择火山引擎图片模型");
+        }
+        const generation = await this.withProductLock(userId, async (repository) => {
+            await this.readProductImages(userId, input.assetIds);
+            return repository
+                .save(
+                    repository.create({
+                        userId,
+                        toolKey: "main",
+                        mainInput: input,
+                        prompt: input.productName,
+                        modelId: model.id,
+                        modelName: model.name,
+                        size: mainImageSize(input),
+                        quality: input.resolution,
+                        style: "product",
+                        count: total,
+                        status: ImageGenerationStatus.QUEUED,
+                        images: [],
+                        error: null,
+                    }),
+                )
+                .catch(() => {
+                    throw HttpErrorFactory.badRequest(GENERATION_FAILED);
+                });
+        });
+        try {
+            await this.generationQueue.add(
+                "generate",
+                { id: generation.id, userId },
+                {
+                    jobId: generation.id,
+                    attempts: 1,
+                    removeOnComplete: true,
+                    removeOnFail: true,
+                },
+            );
+        } catch {
+            await this.failTask({ id: generation.id, userId }).catch(() => undefined);
+            throw HttpErrorFactory.badRequest(GENERATION_FAILED);
+        }
+        return this.publicRecord(generation);
+    }
+
+    async removeProductImage(userId: string, id: string) {
+        return this.withProductLock(userId, async (repository) => {
+            const used = await repository
+                .createQueryBuilder("generation")
+                .where("generation.userId = :userId", { userId })
+                .andWhere("generation.mainInput @> CAST(:input AS jsonb)", {
+                    input: JSON.stringify({ assetIds: [id] }),
+                })
+                .getExists();
+            if (used) throw HttpErrorFactory.badRequest("商品图已用于生成记录，请先删除相关记录");
+            return this.productImageService.remove(userId, id);
+        });
+    }
+
+    async uploadProductImage(userId: string, file?: ProductImageUpload) {
+        return this.withProductLock(userId, async () => {
+            return this.productImageService.upload(userId, file);
+        });
+    }
+
+    private withProductLock<T>(
+        userId: string,
+        operation: (repository: Repository<ImageGeneration>) => Promise<T>,
+    ) {
+        return this.generationRepository.manager.transaction(async (manager) => {
+            await manager.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+                `image-studio-products:${userId}`,
+            ]);
+            return operation(manager.getRepository(ImageGeneration));
+        });
     }
 
     async cancel(userId: string, id: string) {
         const generation = await this.findOwned(userId, id);
-        if (![ImageGenerationStatus.QUEUED, ImageGenerationStatus.PROCESSING].includes(generation.status)) {
+        if (
+            ![ImageGenerationStatus.QUEUED, ImageGenerationStatus.PROCESSING].includes(
+                generation.status,
+            )
+        ) {
             return this.publicRecord(generation);
         }
-        const result = await this.generationRepository.update([
-            { id, userId, status: ImageGenerationStatus.QUEUED },
-            { id, userId, status: ImageGenerationStatus.PROCESSING },
-        ], { status: ImageGenerationStatus.CANCELLED, images: [], error: null })
-            .catch(() => { throw HttpErrorFactory.badRequest(GENERATION_FAILED); });
+        const result = await this.generationRepository
+            .update(
+                [
+                    { id, userId, status: ImageGenerationStatus.QUEUED },
+                    { id, userId, status: ImageGenerationStatus.PROCESSING },
+                ],
+                { status: ImageGenerationStatus.CANCELLED, images: [], error: null },
+            )
+            .catch(() => {
+                throw HttpErrorFactory.badRequest(GENERATION_FAILED);
+            });
         if (result.affected) {
             try {
-                const job = await this.generationQueue?.getJob(id);
+                const job = await this.generationQueue.getJob(id);
                 await job?.remove();
             } catch {}
         }
@@ -308,79 +370,80 @@ export class GenerationService {
     }
 
     async processTask(data: GenerationJobData) {
-        const claimed = await this.generationRepository.update({
-            ...data, status: ImageGenerationStatus.QUEUED,
-        }, { status: ImageGenerationStatus.PROCESSING })
-            .catch(() => { throw new Error(GENERATION_FAILED); });
+        const claimed = await this.generationRepository
+            .update(
+                {
+                    ...data,
+                    status: ImageGenerationStatus.QUEUED,
+                },
+                { status: ImageGenerationStatus.PROCESSING },
+            )
+            .catch(() => {
+                throw new Error(GENERATION_FAILED);
+            });
         if (!claimed.affected) return;
         let images: GeneratedImage[] = [];
         try {
             const generation = await this.findOwned(data.userId, data.id);
             if (generation.status !== ImageGenerationStatus.PROCESSING) return;
-            const prepared = await this.prepare(this.generationInput(generation));
+            const prepared = await this.generationModelService.prepare(generation.modelId);
             const current = await this.findOwned(data.userId, data.id);
             if (current.status !== ImageGenerationStatus.PROCESSING) return;
             const result = await this.infer(generation, prepared);
-            images = await this.persistImages(data.id, result.images.map((image) => ({
-                base64: image.base64, mediaType: image.mediaType,
-            })));
-            const completed = await this.generationRepository.update({
-                ...data, status: ImageGenerationStatus.PROCESSING,
-            }, { status: ImageGenerationStatus.COMPLETED, images, error: null });
+            images = await this.generationImageService.persist(
+                data.id,
+                result.images.map((image) => ({
+                    base64: image.base64,
+                    mediaType: image.mediaType,
+                })),
+            );
+            const completed = await this.generationRepository.update(
+                {
+                    ...data,
+                    status: ImageGenerationStatus.PROCESSING,
+                },
+                { status: ImageGenerationStatus.COMPLETED, images, error: null },
+            );
             if (completed.affected) return;
         } catch {
-            await this.cleanupTaskImages(data.id, images);
+            await this.generationImageService.cleanup(data.id, images);
             await this.failTask(data);
             throw new Error(GENERATION_FAILED);
         }
-        await this.cleanupTaskImages(data.id, images);
+        await this.generationImageService.cleanup(data.id, images);
     }
 
     async failTask(data: GenerationJobData) {
-        await this.generationRepository.update([
-            { ...data, status: ImageGenerationStatus.QUEUED },
-            { ...data, status: ImageGenerationStatus.PROCESSING },
-        ], { status: ImageGenerationStatus.FAILED, images: [], error: GENERATION_FAILED })
-            .catch(() => { throw new Error(GENERATION_FAILED); });
+        await this.generationRepository
+            .update(
+                [
+                    { ...data, status: ImageGenerationStatus.QUEUED },
+                    { ...data, status: ImageGenerationStatus.PROCESSING },
+                ],
+                { status: ImageGenerationStatus.FAILED, images: [], error: GENERATION_FAILED },
+            )
+            .catch(() => {
+                throw new Error(GENERATION_FAILED);
+            });
     }
 
     async failStalledTask(id: string) {
-        const job = await this.generationQueue?.getJob(id);
+        const job = await this.generationQueue.getJob(id);
         if (job) await this.failTask(job.data);
-    }
-
-    private cleanupTaskImages(id: string, images: GeneratedImage[]) {
-        return this.cleanupFiles(images.map((image, index) =>
-            path.join(this.storageDirectory(), `${id}-${index}.${IMAGE_EXTENSIONS[image.mediaType]}`),
-        ));
     }
 
     async remove(userId: string, id: string) {
         const generation = await this.findOwned(userId, id);
-        if ([ImageGenerationStatus.QUEUED, ImageGenerationStatus.PROCESSING].includes(generation.status)) {
+        if (
+            [ImageGenerationStatus.QUEUED, ImageGenerationStatus.PROCESSING].includes(
+                generation.status,
+            )
+        ) {
             throw HttpErrorFactory.badRequest("生成中的记录不可删除");
         }
-        await Promise.all(generation.images.map(async (image, index) => {
-            const location = this.imageLocation(generation.id, index, image);
-            try {
-                await rm(await this.checkedPath(location.directory, location.filename), { force: true });
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                    throw HttpErrorFactory.badRequest("图片删除失败，请稍后重试");
-                }
-            }
-        }));
+        await this.generationImageService.remove(generation.id, generation.images);
         await this.generationRepository.remove(generation);
         return { success: true };
-    }
-
-    private requireImageModel(provider: ReturnType<typeof getProvider>, model: string) {
-        if (!provider.supports("image")) throw new Error(MODEL_UNAVAILABLE);
-        const imageModel = provider.image(model).model;
-        if (imageModel?.specificationVersion !== "v3" || typeof imageModel.doGenerate !== "function") {
-            throw new Error(MODEL_UNAVAILABLE);
-        }
-        return imageModel;
     }
 
     private async findOwned(userId: string, id: string) {
@@ -396,25 +459,7 @@ export class GenerationService {
         if (!Number.isInteger(index) || index < 0 || index >= generation.images.length) {
             throw HttpErrorFactory.notFound("图片不存在");
         }
-        const image = generation.images[index];
-        const location = this.imageLocation(generation.id, index, image);
-        try {
-            const filename = await this.checkedPath(location.directory, location.filename);
-            const info = await lstat(filename);
-            if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_IMAGE_BYTES) {
-                throw new Error("invalid image file");
-            }
-            const buffer = await readFile(filename);
-            this.validateImage(buffer, image.mediaType);
-            return { buffer, mediaType: image.mediaType };
-        } catch {
-            throw HttpErrorFactory.notFound("图片不存在或格式不受支持");
-        }
-    }
-
-    private imageUrl(id: string, index: number) {
-        const prefix = (process.env.VITE_APP_WEB_API_PREFIX || "api").replace(/^\/+|\/+$/g, "");
-        return `/${APP_IDENTIFIER}/${prefix}/generations/${id}/images/${index}`;
+        return this.generationImageService.read(generation.id, index, generation.images[index]);
     }
 
     private publicRecord(generation: ImageGeneration) {
@@ -422,102 +467,9 @@ export class GenerationService {
             ...generation,
             error: generation.error ? GENERATION_FAILED : null,
             images: generation.images.map((image, index) => ({
-                mediaType: image.mediaType, url: this.imageUrl(generation.id, index),
+                mediaType: image.mediaType,
+                url: this.generationImageService.url(generation.id, index),
             })),
         };
     }
-
-    private storageDirectory(legacy = false) {
-        return path.join(process.cwd(), "..", "..", "extensions", APP_IDENTIFIER, "storage",
-            legacy ? "uploads" : "private", "generated");
-    }
-
-    private imageLocation(id: string, index: number, image: GeneratedImage) {
-        if (!new RegExp(`^${UUID_PATTERN}$`, "i").test(id) ||
-            !Number.isInteger(index) || index < 0 || index >= 4 ||
-            !Object.hasOwn(IMAGE_EXTENSIONS, image.mediaType)) {
-            throw HttpErrorFactory.notFound("图片不存在或格式不受支持");
-        }
-        if (image.url === this.imageUrl(id, index)) {
-            return { directory: this.storageDirectory(), filename: `${id}-${index}.${IMAGE_EXTENSIONS[image.mediaType]}` };
-        }
-        const legacyPrefix = `/${APP_IDENTIFIER}/uploads/generated/`;
-        const filename = image.url.startsWith(legacyPrefix) ? image.url.slice(legacyPrefix.length) : "";
-        const legacyExtension = image.mediaType === "image/jpeg" ? "jpg" : "png";
-        if (!new RegExp(`^${id}-${index + 1}-${UUID_PATTERN}\\.${legacyExtension}$`, "i").test(filename)) {
-            throw HttpErrorFactory.notFound("图片不存在或格式不受支持");
-        }
-        return { directory: this.storageDirectory(true), filename };
-    }
-
-    private async checkedPath(directory: string, filename: string) {
-        const root = await realpath(directory);
-        const candidate = path.join(root, filename);
-        const resolved = await realpath(candidate);
-        if (resolved !== candidate) throw HttpErrorFactory.notFound("图片不存在");
-        return candidate;
-    }
-
-    private validateImage(buffer: Buffer, mediaType: string) {
-        const valid = mediaType === "image/png"
-            ? buffer.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))
-            : mediaType === "image/jpeg"
-                ? buffer.subarray(0, 3).equals(Buffer.from("ffd8ff", "hex")) &&
-                    buffer.subarray(-2).equals(Buffer.from("ffd9", "hex"))
-                : mediaType === "image/webp" && buffer.length >= 12 &&
-                    buffer.toString("ascii", 0, 4) === "RIFF" &&
-                    buffer.toString("ascii", 8, 12) === "WEBP" && buffer.readUInt32LE(4) === buffer.length - 8;
-        if (!valid || buffer.length > MAX_IMAGE_BYTES) throw new Error(GENERATION_FAILED);
-    }
-
-    private async persistImages(
-        generationId: string,
-        images: Array<{ base64: string; mediaType: string }>,
-    ): Promise<GeneratedImage[]> {
-        if (!new RegExp(`^${UUID_PATTERN}$`, "i").test(generationId) || images.length < 1 || images.length > 4) {
-            throw new Error(GENERATION_FAILED);
-        }
-        const decoded = images.map((image) => {
-            if (!Object.hasOwn(IMAGE_EXTENSIONS, image.mediaType) || typeof image.base64 !== "string" ||
-                image.base64.length > 4 * Math.ceil(MAX_IMAGE_BYTES / 3) ||
-                !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(image.base64)) {
-                throw new Error(GENERATION_FAILED);
-            }
-            const buffer = Buffer.from(image.base64, "base64");
-            if (buffer.toString("base64") !== image.base64) throw new Error(GENERATION_FAILED);
-            this.validateImage(buffer, image.mediaType);
-            return buffer;
-        });
-        const outputDir = this.storageDirectory();
-        await mkdir(outputDir, { recursive: true });
-
-        const writtenFiles: string[] = [];
-        const persisted: GeneratedImage[] = [];
-        try {
-            for (const [index, image] of images.entries()) {
-                const filename = `${generationId}-${index}.${IMAGE_EXTENSIONS[image.mediaType]}`;
-                const destination = path.join(outputDir, filename);
-                try {
-                    await writeFile(destination, decoded[index], { flag: "wx", mode: 0o600 });
-                } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code !== "EEXIST") writtenFiles.push(destination);
-                    throw error;
-                }
-                writtenFiles.push(destination);
-                persisted.push({
-                    url: this.imageUrl(generationId, index),
-                    mediaType: image.mediaType,
-                });
-            }
-            return persisted;
-        } catch (error) {
-            await this.cleanupFiles(writtenFiles);
-            throw error;
-        }
-    }
-
-    private async cleanupFiles(filenames: string[]) {
-        await Promise.allSettled(filenames.map((filename) => rm(filename, { force: true })));
-    }
-
 }

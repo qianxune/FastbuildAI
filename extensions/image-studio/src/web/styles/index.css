@@ -538,6 +538,31 @@ details.adv summary:hover{color:var(--text1)}
 .studio-app button:disabled{opacity:.45; cursor:not-allowed; transform:none}
 .studio-app .titem .t-def{white-space:nowrap; color:var(--text3); border-color:var(--line-strong)}
 .creative-fields,.future-form{min-width:0; border:0; margin:0; padding:0; display:flex; flex-direction:column; flex:1}
+.main-fields{min-width:0; border:0; margin:0; padding:0}
+.main-upload{display:flex; flex-direction:column; align-items:center; width:100%; border-radius:8px}
+.main-upload.dragging{border-color:var(--lime); background:var(--lime-dim)}
+.main-upload-spinner{animation:rot 1s linear infinite}
+.product-images{display:grid; grid-template-columns:repeat(auto-fill,minmax(72px,1fr)); gap:8px; margin-top:12px; max-height:272px; overflow-y:auto; padding:3px}
+.product-thumb{position:relative; min-width:0; aspect-ratio:1; border:1px solid var(--line-strong); border-radius:8px; overflow:hidden; background:var(--surface)}
+.product-thumb.selected{border-color:var(--lime)}
+.product-thumb label{display:flex; align-items:center; justify-content:center; height:100%; cursor:pointer}
+.product-thumb img{width:100%; height:100%; object-fit:contain}
+.product-thumb label>span{font-size:11px; color:var(--text2); overflow-wrap:anywhere}
+.product-thumb input{position:absolute; bottom:5px; left:5px; width:16px; height:16px; accent-color:var(--lime)}
+.product-delete{position:absolute; top:3px; right:3px; display:flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:4px; background:rgba(10,10,11,.85); color:var(--text1)}
+.product-delete:hover{color:var(--err)}
+.main-count{width:36px; height:28px; padding:0; border:0; background:transparent; color:var(--text1); font-family:var(--font-mono); font-size:13px; text-align:center; appearance:textfield}
+.main-count::-webkit-inner-spin-button,.main-count::-webkit-outer-spin-button{appearance:none; margin:0}
+.main-segmented{display:flex; border:1px solid var(--line-strong); border-radius:8px; overflow:hidden}
+.main-segmented label{position:relative; flex:1; min-width:0; cursor:pointer}
+.main-segmented label+label{border-left:1px solid var(--line-strong)}
+.main-segmented input{position:absolute; opacity:0; width:100%; height:100%}
+.main-segmented span{display:block; padding:8px; text-align:center; font-size:12px; color:var(--text2)}
+.main-segmented input:checked+span{color:var(--lime); background:var(--lime-dim)}
+.main-segmented input:focus-visible+span{outline:2px solid var(--lime); outline-offset:-3px}
+.main-fields:disabled .main-segmented label{cursor:not-allowed; opacity:.55}
+.main-fields+.form-foot{flex-wrap:wrap}
+.main-fields .sel{padding-right:30px; text-overflow:ellipsis}
 .future-form .chipset,.future-form .posgrid,.future-form .dz{pointer-events:none}
 .workflow-message{padding:12px 16px; color:var(--text2); font-size:12.5px; overflow-wrap:anywhere}
 .workflow-message.error{color:var(--err); display:flex; flex-wrap:wrap; align-items:center; gap:10px}

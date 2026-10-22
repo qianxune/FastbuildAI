@@ -1,7 +1,13 @@
 import { Transform } from "class-transformer";
 import { IsIn, IsInt, IsString, IsUUID, Length, Max, Min } from "class-validator";
 
-export const IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536", "1792x1024", "1024x1792"] as const;
+export const IMAGE_SIZES = [
+    "1024x1024",
+    "1536x1024",
+    "1024x1536",
+    "1792x1024",
+    "1024x1792",
+] as const;
 export const IMAGE_QUALITIES = ["standard", "hd"] as const;
 export const IMAGE_STYLES = ["vivid", "natural"] as const;
 

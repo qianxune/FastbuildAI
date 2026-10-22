@@ -1,0 +1,18 @@
+{
+    "extends": "./tsconfig.api.json",
+    "compilerOptions": {
+        "rootDir": ".",
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "resolvePackageJsonExports": true,
+        "types": [
+            "node",
+            "jest"
+        ],
+        "noEmit": true
+    },
+    "include": [
+        "src/api/**/*.ts",
+        "test/**/*.ts"
+    ]
+}

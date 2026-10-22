@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { GenerationCapabilities } from "../../api/shared/tools";
+import type { MainImageInput } from "../../api/shared/main-image";
 
 import { apiHttpClient } from "./base";
 import type {
@@ -7,9 +8,60 @@ import type {
     GenerationList,
     ImageGeneration,
     ImageModel,
+    ProductImage,
 } from "./types";
 
 const historyKey = ["image-studio", "generations"] as const;
+const productsKey = ["image-studio", "product-images"] as const;
+
+export function useProductImagesQuery() {
+    return useQuery({ queryKey: productsKey, queryFn: () => apiHttpClient.get<ProductImage[]>("/generations/product-images") });
+}
+
+export function useUploadProductImageMutation() {
+    const client = useQueryClient();
+    return useMutation({
+        mutationFn: (file: File) => {
+            const data = new FormData();
+            data.append("file", file);
+            return apiHttpClient.post<ProductImage>("/generations/product-images", data);
+        },
+        onSettled: () => client.invalidateQueries({ queryKey: productsKey }),
+    });
+}
+
+export function useDeleteProductImageMutation() {
+    const client = useQueryClient();
+    return useMutation({
+        mutationFn: (id: string) => apiHttpClient.delete(`/generations/product-images/${id}`),
+        onSuccess: () => client.invalidateQueries({ queryKey: productsKey }),
+    });
+}
+
+export function loadProductImage(id: string, onLoad: (url: string) => void, onError: () => void) {
+    const controller = new AbortController();
+    let disposed = false;
+    let url: string | undefined;
+    const prefix = (import.meta.env.VITE_APP_WEB_API_PREFIX || "api").replace(/^\/+|\/+$/g, "");
+    void apiHttpClient.instance.get<Blob>(`/image-studio/${prefix}/generations/product-images/${id}`, {
+        responseType: "blob", signal: controller.signal, withCredentials: false,
+    }).then((response) => {
+        if (disposed) return;
+        if (!(response.data instanceof Blob) || response.data.type !== "image/png" ||
+            response.data.size > 10 * 1024 * 1024 || response.data.size === 0) throw new Error();
+        url = URL.createObjectURL(response.data);
+        onLoad(url);
+    }).catch(() => { if (!disposed) onError(); });
+    return () => { disposed = true; controller.abort(); if (url) URL.revokeObjectURL(url); };
+}
+
+export function useGenerateMainImageMutation() {
+    const client = useQueryClient();
+    return useMutation({
+        mutationFn: (input: MainImageInput) => apiHttpClient.post<ImageGeneration>("/generations/main/tasks", input),
+        onSettled: () => client.invalidateQueries({ queryKey: historyKey }),
+    });
+}
 
 export async function fetchGenerationImage(
     id: string,

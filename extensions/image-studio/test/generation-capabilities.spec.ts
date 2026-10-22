@@ -10,10 +10,20 @@ import { generateImage } from "ai";
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "fs/promises";
 import path from "path";
 
-import { type ImageGeneration, ImageGenerationStatus } from "../src/api/db/entities/image-generation.entity";
+import {
+    type ImageGeneration,
+    ImageGenerationStatus,
+} from "../src/api/db/entities/image-generation.entity";
 import { GenerationController } from "../src/api/modules/generation/controllers/web/generation.controller";
 import { GenerationProcessor } from "../src/api/modules/generation/generation.processor";
-import { GENERATION_QUEUE, type GenerationJobData, GenerationService } from "../src/api/modules/generation/services/generation.service";
+import { GenerationImageService } from "../src/api/modules/generation/services/generation-image.service";
+import { GenerationModelService } from "../src/api/modules/generation/services/generation-model.service";
+import type { ProductImageService } from "../src/api/modules/generation/services/product-image.service";
+import {
+    GENERATION_QUEUE,
+    type GenerationJobData,
+    GenerationService,
+} from "../src/api/modules/generation/services/generation.service";
 
 jest.mock("@buildingai/ai-sdk", () => ({
     MODEL_TYPES: { TEXT_TO_IMAGE: "text-to-image", LLM: "llm" },
@@ -24,39 +34,62 @@ jest.mock("@buildingai/db/@nestjs/typeorm", () => ({ InjectRepository: () => () 
 jest.mock("@buildingai/db/entities", () => ({ AiModel: class {} }));
 jest.mock("@buildingai/db/typeorm", () => ({ Repository: class {} }));
 jest.mock("@buildingai/extension-sdk", () => ({ PublicAiModelService: class {} }));
-jest.mock("@buildingai/errors", () => ({ HttpErrorFactory: {
-    badRequest: (message: string) => new Error(message),
-    notFound: (message: string) => new Error(message),
-} }));
+jest.mock("@buildingai/errors", () => ({
+    HttpErrorFactory: {
+        badRequest: (message: string) => new Error(message),
+        notFound: (message: string) => new Error(message),
+    },
+}));
 jest.mock("@buildingai/utils", () => ({ getProviderSecret: jest.fn() }));
 jest.mock("ai", () => ({ generateImage: jest.fn() }));
 jest.mock("fs/promises", () => ({
-    lstat: jest.fn(), mkdir: jest.fn(), readFile: jest.fn(), realpath: jest.fn(),
-    rm: jest.fn(), writeFile: jest.fn(),
+    lstat: jest.fn(),
+    mkdir: jest.fn(),
+    readFile: jest.fn(),
+    realpath: jest.fn(),
+    rm: jest.fn(),
+    writeFile: jest.fn(),
 }));
 jest.mock("../src/api/db/entities/image-generation.entity", () => ({
     ImageGeneration: class {},
     ImageGenerationStatus: {
-        QUEUED: "queued", CANCELLED: "cancelled", PROCESSING: "processing", FAILED: "failed", COMPLETED: "completed",
+        QUEUED: "queued",
+        CANCELLED: "cancelled",
+        PROCESSING: "processing",
+        FAILED: "failed",
+        COMPLETED: "completed",
     },
 }));
 jest.mock("@buildingai/core/decorators", () =>
-    jest.requireActual("../../../packages/core/src/decorators/extension-controller.decorator"));
+    jest.requireActual("../../../packages/core/src/decorators/extension-controller.decorator"),
+);
 jest.mock("../../../packages/core/src/modules/extension/utils/extension.utils", () => ({
     getExtensionPackNameFromControllerSync: () => "image-studio",
 }));
-jest.mock("@buildingai/constants", () => ({
-    DECORATOR_KEYS: {
-        PLUGIN_PACK_NAME_KEY: "decorator:plugin-pack-name",
-        PLUGIN_WEB_CONTROLLER_KEY: "decorator:plugin-web-controller",
-        IS_PUBLIC_KEY: "decorator:is-public-controller",
-    },
-}), { virtual: true });
-jest.mock("@buildingai/utils/helper", () => ({
-    joinRouterPaths: (...segments: string[]) => segments.filter(Boolean).join("/"),
-}), { virtual: true });
-jest.mock("@buildingai/utils/path-validator", () => ({ validatePath: jest.fn() }), { virtual: true });
-jest.mock("@buildingai/decorators/playground.decorator", () => ({ Playground: () => () => undefined }));
+jest.mock(
+    "@buildingai/constants",
+    () => ({
+        DECORATOR_KEYS: {
+            PLUGIN_PACK_NAME_KEY: "decorator:plugin-pack-name",
+            PLUGIN_WEB_CONTROLLER_KEY: "decorator:plugin-web-controller",
+            IS_PUBLIC_KEY: "decorator:is-public-controller",
+        },
+    }),
+    { virtual: true },
+);
+jest.mock(
+    "@buildingai/utils/helper",
+    () => ({
+        joinRouterPaths: (...segments: string[]) => segments.filter(Boolean).join("/"),
+    }),
+    { virtual: true },
+);
+jest.mock("@buildingai/utils/path-validator", () => ({ validatePath: jest.fn() }), {
+    virtual: true,
+});
+jest.mock("@buildingai/decorators/playground.decorator", () => ({
+    Playground: () => () => undefined,
+}));
 
 describe("generation capabilities", () => {
     const getProviderMock = jest.mocked(getProvider);
@@ -66,8 +99,7 @@ describe("generation capabilities", () => {
     const supports = jest.fn();
     const getProviderConfig = jest.fn();
     const getProviderAdapter = jest.fn();
-    const service = new GenerationService(
-        {} as Repository<ImageGeneration>,
+    const service = new GenerationModelService(
         { find } as unknown as Repository<AiModel>,
         { getProviderConfig, getProviderAdapter } as unknown as PublicAiModelService,
     );
@@ -78,7 +110,12 @@ describe("generation capabilities", () => {
         modelType: MODEL_TYPES.TEXT_TO_IMAGE,
         isActive: true,
         features: ["vision", "image-edit", "segmentation", "multi-image"],
-        provider: { isActive: true, name: "Provider", provider: "adapter", bindSecretId: "secret-id" },
+        provider: {
+            isActive: true,
+            name: "Provider",
+            provider: "adapter",
+            bindSecretId: "secret-id",
+        },
         ...overrides,
     });
 
@@ -88,16 +125,21 @@ describe("generation capabilities", () => {
         supports.mockReturnValue(true);
         image.mockReturnValue({ model: { specificationVersion: "v3", doGenerate: jest.fn() } });
         languageModel.mockReturnValue({
-            specificationVersion: "v3", doGenerate: jest.fn(), doStream: jest.fn(),
+            specificationVersion: "v3",
+            doGenerate: jest.fn(),
+            doStream: jest.fn(),
         });
-        getProviderMock.mockReturnValue({ supports, image, languageModel } as unknown as ReturnType<typeof getProvider>);
+        getProviderMock.mockReturnValue({ supports, image, languageModel } as unknown as ReturnType<
+            typeof getProvider
+        >);
     });
 
     it("advertises only text-to-image for an actual image adapter", async () => {
         const result = await service.capabilities();
         expect(result.models[0].capabilities).toEqual(["text-to-image"]);
         expect(result.tools.find((tool) => tool.key === "creative")).toMatchObject({
-            status: "available", reason: null,
+            status: "available",
+            reason: null,
             modelIdsByCapability: { "text-to-image": ["image-model"] },
             limits: { sizes: null, maxInputImages: null },
         });
@@ -106,13 +148,26 @@ describe("generation capabilities", () => {
 
     it("never infers image operations from names or metadata", async () => {
         const result = await service.capabilities();
-        for (const key of ["main", "detail", "replica", "fusion", "sku", "retouch", "cutout", "expand", "translate"]) {
+        for (const key of [
+            "main",
+            "detail",
+            "replica",
+            "fusion",
+            "sku",
+            "retouch",
+            "cutout",
+            "expand",
+            "translate",
+        ]) {
             expect(result.tools.find((tool) => tool.key === key)).toMatchObject({
-                status: "unavailable", reason: "unsupported_capabilities",
+                status: "unavailable",
+                reason: "unsupported_capabilities",
             });
         }
         expect(result.tools.find((tool) => tool.key === "watermark")).toMatchObject({
-            status: "unavailable", reason: "tool_disabled", modelIdsByCapability: {},
+            status: "unavailable",
+            reason: "tool_disabled",
+            modelIdsByCapability: {},
         });
     });
 
@@ -122,15 +177,18 @@ describe("generation capabilities", () => {
         expect(image).not.toHaveBeenCalled();
     });
 
-    it.each(["throws", "invalid model"])("fails closed when the image adapter returns %s", async (behavior) => {
-        image.mockImplementation(() => {
-            if (behavior === "throws") throw new Error("upstream-secret-value");
-            return { model: {} };
-        });
-        const result = await service.capabilities();
-        expect(result.models).toEqual([]);
-        expect(JSON.stringify(result)).not.toContain("upstream-secret-value");
-    });
+    it.each(["throws", "invalid model"])(
+        "fails closed when the image adapter returns %s",
+        async (behavior) => {
+            image.mockImplementation(() => {
+                if (behavior === "throws") throw new Error("upstream-secret-value");
+                return { model: {} };
+            });
+            const result = await service.capabilities();
+            expect(result.models).toEqual([]);
+            expect(JSON.stringify(result)).not.toContain("upstream-secret-value");
+        },
+    );
 
     it("requires both vision metadata and a runtime language model", async () => {
         find.mockResolvedValue([
@@ -140,9 +198,13 @@ describe("generation capabilities", () => {
         const result = await service.capabilities();
         expect(result.models.map((model) => model.id)).toEqual(["vision"]);
         expect(result.models[0].capabilities).toEqual(["vision"]);
-        expect(result.tools.find((tool) => tool.key === "suggest")).toMatchObject({ status: "available" });
+        expect(result.tools.find((tool) => tool.key === "suggest")).toMatchObject({
+            status: "available",
+        });
         expect(languageModel).toHaveBeenCalledTimes(1);
-        languageModel.mockImplementation(() => { throw new Error("unsupported language"); });
+        languageModel.mockImplementation(() => {
+            throw new Error("unsupported language");
+        });
         expect((await service.capabilities()).models).toEqual([]);
     });
 
@@ -189,23 +251,39 @@ describe("generation capabilities", () => {
     });
 
     it("returns only whitelisted fields and never retrieves credentials or invokes inference", async () => {
-        find.mockResolvedValue([configuredModel({
-            apiKey: "private-api-key", modelConfig: [{ secret: "private-config" }],
-            provider: {
-                isActive: true, name: "Provider", provider: "adapter",
-                apiKey: "private-provider-key", baseURL: "https://private-endpoint", bindSecretId: "private-secret-id",
-            },
-        })]);
+        find.mockResolvedValue([
+            configuredModel({
+                apiKey: "private-api-key",
+                modelConfig: [{ secret: "private-config" }],
+                provider: {
+                    isActive: true,
+                    name: "Provider",
+                    provider: "adapter",
+                    apiKey: "private-provider-key",
+                    baseURL: "https://private-endpoint",
+                    bindSecretId: "private-secret-id",
+                },
+            }),
+        ]);
         const result = await service.capabilities();
         expect(Object.keys(result.models[0]).sort()).toEqual([
-            "capabilities", "id", "model", "name", "provider", "providerCode",
+            "capabilities",
+            "id",
+            "model",
+            "name",
+            "provider",
+            "providerCode",
         ]);
-        expect(JSON.stringify(result)).not.toMatch(/private-|apiKey|baseURL|bindSecretId|modelConfig/);
+        expect(JSON.stringify(result)).not.toMatch(
+            /private-|apiKey|baseURL|bindSecretId|modelConfig/,
+        );
         expect(getProviderConfig).not.toHaveBeenCalled();
         expect(getProviderAdapter).not.toHaveBeenCalled();
         expect(getProviderSecret).not.toHaveBeenCalled();
         expect(generateImage).not.toHaveBeenCalled();
-        expect(getProviderMock).toHaveBeenCalledWith("adapter", { apiKey: "capability-probe-not-a-credential" });
+        expect(getProviderMock).toHaveBeenCalledWith("adapter", {
+            apiKey: "capability-probe-not-a-credential",
+        });
         expect(image.mock.results[0].value.model.doGenerate).not.toHaveBeenCalled();
     });
 
@@ -230,20 +308,43 @@ describe("generation runtime security", () => {
     const getProviderConfig = jest.fn();
     const getProviderAdapter = jest.fn();
     const service = new GenerationService(
-        { save, update, create, findOne, findAndCount, remove } as unknown as Repository<ImageGeneration>,
-        {} as Repository<AiModel>,
-        { getModelInfo, getProviderConfig, getProviderAdapter } as unknown as PublicAiModelService,
+        {
+            save,
+            update,
+            create,
+            findOne,
+            findAndCount,
+            remove,
+        } as unknown as Repository<ImageGeneration>,
+        new GenerationModelService(
+            {} as Repository<AiModel>,
+            {
+                getModelInfo,
+                getProviderConfig,
+                getProviderAdapter,
+            } as unknown as PublicAiModelService,
+        ),
+        new GenerationImageService(),
+        {} as Queue<GenerationJobData>,
+        {} as ProductImageService,
     );
     const input = {
-        prompt: "A product photo", modelId: "model", count: 1,
-        size: "1024x1024", quality: "standard", style: "vivid",
+        prompt: "A product photo",
+        modelId: "model",
+        count: 1,
+        size: "1024x1024",
+        quality: "standard",
+        style: "vivid",
     } as const;
 
     beforeEach(() => {
         jest.clearAllMocks();
         getModelInfo.mockResolvedValue({
-            id: "model", name: "Image model", model: "image-model",
-            isActive: true, modelType: MODEL_TYPES.TEXT_TO_IMAGE,
+            id: "model",
+            name: "Image model",
+            model: "image-model",
+            isActive: true,
+            modelType: MODEL_TYPES.TEXT_TO_IMAGE,
             provider: { isActive: true, provider: "adapter" },
         });
         getProviderConfig.mockResolvedValue({});
@@ -255,18 +356,31 @@ describe("generation runtime security", () => {
         update.mockResolvedValue({ affected: 1 });
         jest.mocked(realpath).mockImplementation(async (value) => path.resolve(String(value)));
         jest.mocked(lstat).mockResolvedValue({
-            isFile: () => true, isSymbolicLink: () => false, size: 68,
+            isFile: () => true,
+            isSymbolicLink: () => false,
+            size: 68,
         } as Awaited<ReturnType<typeof lstat>>);
-        jest.mocked(readFile).mockResolvedValue(Buffer.from(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=", "base64",
-        ));
+        jest.mocked(readFile).mockResolvedValue(
+            Buffer.from(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=",
+                "base64",
+            ),
+        );
     });
 
     it.each([
         { supports: () => false, image: jest.fn() },
-        { supports: () => true, image: () => ({ model: { specificationVersion: "v2", doGenerate: jest.fn() } }) },
+        {
+            supports: () => true,
+            image: () => ({ model: { specificationVersion: "v2", doGenerate: jest.fn() } }),
+        },
         { supports: () => true, image: () => ({ model: { specificationVersion: "v3" } }) },
-        { supports: () => true, image: () => { throw new Error("secret-response-body"); } },
+        {
+            supports: () => true,
+            image: () => {
+                throw new Error("secret-response-body");
+            },
+        },
     ])("rejects unsupported adapters before creating a processing task", async (adapter) => {
         getProviderAdapter.mockResolvedValue(adapter);
         await expect(service.generate("owner", input)).rejects.toThrow("所选图片模型不可用");
@@ -276,11 +390,17 @@ describe("generation runtime security", () => {
     });
 
     it("redacts provider errors from both the response and saved task", async () => {
-        jest.mocked(generateImage).mockRejectedValue(new Error("Bearer sk-secret raw response body"));
+        jest.mocked(generateImage).mockRejectedValue(
+            new Error("Bearer sk-secret raw response body"),
+        );
         await expect(service.generate("owner", input)).rejects.toThrow("图片生成失败，请稍后重试");
-        expect(update).toHaveBeenLastCalledWith(expect.any(Array), expect.objectContaining({
-            status: "failed", error: "图片生成失败，请稍后重试",
-        }));
+        expect(update).toHaveBeenLastCalledWith(
+            expect.any(Array),
+            expect.objectContaining({
+                status: "failed",
+                error: "图片生成失败，请稍后重试",
+            }),
+        );
         expect(JSON.stringify(save.mock.calls)).not.toContain("sk-secret");
         expect(JSON.stringify(update.mock.calls)).not.toContain("sk-secret");
     });
@@ -291,10 +411,15 @@ describe("generation runtime security", () => {
         expect(remove).not.toHaveBeenCalled();
     });
 
-    const imageUrl = () => `/image-studio/${(process.env.VITE_APP_WEB_API_PREFIX || "api").replace(/^\/+|\/+$/g, "")}/generations/${taskId}/images/0`;
-    const legacyUrl = () => `/image-studio/uploads/generated/${taskId}-1-22222222-2222-4222-8222-222222222222.png`;
+    const imageUrl = () =>
+        `/image-studio/${(process.env.VITE_APP_WEB_API_PREFIX || "api").replace(/^\/+|\/+$/g, "")}/generations/${taskId}/images/0`;
+    const legacyUrl = () =>
+        `/image-studio/uploads/generated/${taskId}-1-22222222-2222-4222-8222-222222222222.png`;
     const owned = (url = imageUrl(), mediaType = "image/png") => ({
-        id: taskId, userId: "owner", status: "completed", images: [{ url, mediaType }],
+        id: taskId,
+        userId: "owner",
+        status: "completed",
+        images: [{ url, mediaType }],
     });
 
     it("does not touch the filesystem when the task is not owned", async () => {
@@ -306,27 +431,40 @@ describe("generation runtime security", () => {
         }
     });
 
-    it.each([imageUrl, legacyUrl])("serves only the owner's validated private or legacy image", async (url) => {
-        findOne.mockResolvedValue(owned(url()));
-        await expect(service.readImage("owner", taskId, 0)).resolves.toMatchObject({ mediaType: "image/png" });
-        const filename = jest.mocked(readFile).mock.calls[0][0] as string;
-        expect(filename).toContain(path.join("storage", url === imageUrl ? "private" : "uploads", "generated"));
-        expect(path.basename(filename)).toBe(url === imageUrl ? `${taskId}-0.png` : path.basename(legacyUrl()));
-    });
+    it.each([imageUrl, legacyUrl])(
+        "serves only the owner's validated private or legacy image",
+        async (url) => {
+            findOne.mockResolvedValue(owned(url()));
+            await expect(service.readImage("owner", taskId, 0)).resolves.toMatchObject({
+                mediaType: "image/png",
+            });
+            const filename = jest.mocked(readFile).mock.calls[0][0] as string;
+            expect(filename).toContain(
+                path.join("storage", url === imageUrl ? "private" : "uploads", "generated"),
+            );
+            expect(path.basename(filename)).toBe(
+                url === imageUrl ? `${taskId}-0.png` : path.basename(legacyUrl()),
+            );
+        },
+    );
 
-    it.each([-1, 0.5, 1, NaN])("rejects invalid image index %s before filesystem access", async (index) => {
-        findOne.mockResolvedValue(owned());
-        await expect(service.readImage("owner", taskId, index)).rejects.toThrow("图片不存在");
-        expect(realpath).not.toHaveBeenCalled();
-        expect(readFile).not.toHaveBeenCalled();
-    });
+    it.each([-1, 0.5, 1, NaN])(
+        "rejects invalid image index %s before filesystem access",
+        async (index) => {
+            findOne.mockResolvedValue(owned());
+            await expect(service.readImage("owner", taskId, index)).rejects.toThrow("图片不存在");
+            expect(realpath).not.toHaveBeenCalled();
+            expect(readFile).not.toHaveBeenCalled();
+        },
+    );
 
     it.each([
         "/image-studio/uploads/generated/../../secret.png",
         "/image-studio/uploads/generated/%2e%2e%2fsecret.png",
         "https://example.test/secret.png",
         "/image-studio/uploads/generated/22222222-2222-4222-8222-222222222222-1-22222222-2222-4222-8222-222222222222.png",
-        "C:\\secret.png", "data:image/svg+xml,secret",
+        "C:\\secret.png",
+        "data:image/svg+xml,secret",
     ])("rejects supplied paths and noncanonical URLs: %s", async (url) => {
         findOne.mockResolvedValue(owned(url));
         await expect(service.readImage("owner", taskId, 0)).rejects.toThrow("图片不存在");
@@ -344,7 +482,9 @@ describe("generation runtime security", () => {
 
     it("rejects symlink escapes before reading bytes", async () => {
         findOne.mockResolvedValue(owned());
-        jest.mocked(realpath).mockImplementation(async (value) => String(value).endsWith(".png") ? "/secret.png" : path.resolve(String(value)));
+        jest.mocked(realpath).mockImplementation(async (value) =>
+            String(value).endsWith(".png") ? "/secret.png" : path.resolve(String(value)),
+        );
         await expect(service.readImage("owner", taskId, 0)).rejects.toThrow("图片不存在");
         expect(readFile).not.toHaveBeenCalled();
     });
@@ -352,22 +492,31 @@ describe("generation runtime security", () => {
     it("rejects oversized files before reading bytes and rejects MIME mismatches", async () => {
         findOne.mockResolvedValue(owned());
         jest.mocked(lstat).mockResolvedValueOnce({
-            isFile: () => true, isSymbolicLink: () => false, size: 21 * 1024 * 1024,
+            isFile: () => true,
+            isSymbolicLink: () => false,
+            size: 21 * 1024 * 1024,
         } as Awaited<ReturnType<typeof lstat>>);
         await expect(service.readImage("owner", taskId, 0)).rejects.toThrow("图片不存在");
         expect(readFile).not.toHaveBeenCalled();
         jest.mocked(readFile).mockResolvedValueOnce(Buffer.from("<html>secret-body</html>"));
-        await expect(service.readImage("owner", taskId, 0)).rejects.toThrow("图片不存在或格式不受支持");
+        await expect(service.readImage("owner", taskId, 0)).rejects.toThrow(
+            "图片不存在或格式不受支持",
+        );
     });
 
     it("writes validated new results only to private storage with canonical names", async () => {
         const png = await readFile("fixture");
-        jest.mocked(generateImage).mockResolvedValue({ images: [{ base64: png.toString("base64"), mediaType: "image/png" }] } as never);
+        jest.mocked(generateImage).mockResolvedValue({
+            images: [{ base64: png.toString("base64"), mediaType: "image/png" }],
+        } as never);
         const result = await service.generate("owner", input);
         expect(result.images).toEqual([{ url: imageUrl(), mediaType: "image/png" }]);
         expect(writeFile).toHaveBeenCalledWith(
-            expect.stringContaining(path.join("storage", "private", "generated", `${taskId}-0.png`)),
-            png, { flag: "wx", mode: 0o600 },
+            expect.stringContaining(
+                path.join("storage", "private", "generated", `${taskId}-0.png`),
+            ),
+            png,
+            { flag: "wx", mode: 0o600 },
         );
         expect(JSON.stringify(jest.mocked(mkdir).mock.calls)).not.toContain("uploads");
     });
@@ -376,17 +525,22 @@ describe("generation runtime security", () => {
         const png = await readFile("fixture");
         const image = { base64: png.toString("base64"), mediaType: "image/png" };
         jest.mocked(generateImage).mockResolvedValue({ images: [image, image] } as never);
-        jest.mocked(writeFile).mockResolvedValueOnce(undefined).mockRejectedValueOnce(
-            Object.assign(new Error("disk full"), { code: "ENOSPC" }),
+        jest.mocked(writeFile)
+            .mockResolvedValueOnce(undefined)
+            .mockRejectedValueOnce(Object.assign(new Error("disk full"), { code: "ENOSPC" }));
+        await expect(service.generate("owner", { ...input, count: 2 })).rejects.toThrow(
+            "图片生成失败",
         );
-        await expect(service.generate("owner", { ...input, count: 2 })).rejects.toThrow("图片生成失败");
         expect(rm).toHaveBeenCalledTimes(2);
         for (const index of [0, 1]) {
-            expect(rm).toHaveBeenCalledWith(
-                expect.stringContaining(`${taskId}-${index}.png`), { force: true },
-            );
+            expect(rm).toHaveBeenCalledWith(expect.stringContaining(`${taskId}-${index}.png`), {
+                force: true,
+            });
         }
-        expect(update).toHaveBeenLastCalledWith(expect.any(Array), expect.objectContaining({ status: "failed", images: [] }));
+        expect(update).toHaveBeenLastCalledWith(
+            expect.any(Array),
+            expect.objectContaining({ status: "failed", images: [] }),
+        );
     });
 
     it("does not delete an existing file when exclusive creation fails", async () => {
@@ -394,7 +548,9 @@ describe("generation runtime security", () => {
         jest.mocked(generateImage).mockResolvedValue({
             images: [{ base64: png.toString("base64"), mediaType: "image/png" }],
         } as never);
-        jest.mocked(writeFile).mockRejectedValueOnce(Object.assign(new Error("exists"), { code: "EEXIST" }));
+        jest.mocked(writeFile).mockRejectedValueOnce(
+            Object.assign(new Error("exists"), { code: "EEXIST" }),
+        );
         await expect(service.generate("owner", input)).rejects.toThrow("图片生成失败");
         expect(rm).not.toHaveBeenCalled();
     });
@@ -406,8 +562,13 @@ describe("generation runtime security", () => {
         } as never);
         update.mockRejectedValueOnce(new Error("database unavailable"));
         await expect(service.generate("owner", input)).rejects.toThrow("图片生成失败");
-        expect(rm).toHaveBeenCalledWith(expect.stringContaining(`${taskId}-0.png`), { force: true });
-        expect(update).toHaveBeenLastCalledWith(expect.any(Array), expect.objectContaining({ status: "failed", images: [] }));
+        expect(rm).toHaveBeenCalledWith(expect.stringContaining(`${taskId}-0.png`), {
+            force: true,
+        });
+        expect(update).toHaveBeenLastCalledWith(
+            expect.any(Array),
+            expect.objectContaining({ status: "failed", images: [] }),
+        );
     });
 
     it.each([
@@ -416,7 +577,7 @@ describe("generation runtime security", () => {
         { base64: "data:image/png;base64,aGVsbG8=", mediaType: "image/png" },
         { base64: "PGh0bWw+c2VjcmV0PC9odG1sPg==", mediaType: "image/png" },
         { base64: "", mediaType: "image/png" },
-        { base64: "A".repeat(4 * Math.ceil(20 * 1024 * 1024 / 3) + 4), mediaType: "image/png" },
+        { base64: "A".repeat(4 * Math.ceil((20 * 1024 * 1024) / 3) + 4), mediaType: "image/png" },
     ])("rejects invalid generated payload without writing files", async (image) => {
         jest.mocked(generateImage).mockResolvedValue({ images: [image] } as never);
         await expect(service.generate("owner", input)).rejects.toThrow("图片生成失败，请稍后重试");
@@ -441,7 +602,9 @@ describe("generation runtime security", () => {
         expect(rm).not.toHaveBeenCalled();
         expect(remove).not.toHaveBeenCalled();
         findOne.mockResolvedValue(owned());
-        jest.mocked(realpath).mockRejectedValueOnce(Object.assign(new Error("missing"), { code: "ENOENT" }));
+        jest.mocked(realpath).mockRejectedValueOnce(
+            Object.assign(new Error("missing"), { code: "ENOENT" }),
+        );
         await expect(service.remove("owner", taskId)).resolves.toEqual({ success: true });
         expect(remove).toHaveBeenCalled();
     });
@@ -458,8 +621,12 @@ describe("generation runtime security", () => {
 describe("async generation tasks", () => {
     const taskId = "11111111-1111-4111-8111-111111111111";
     const input = {
-        prompt: "A product photo", modelId: "model", count: 1,
-        size: "1024x1024", quality: "standard", style: "vivid",
+        prompt: "A product photo",
+        modelId: "model",
+        count: 1,
+        size: "1024x1024",
+        quality: "standard",
+        style: "vivid",
     } as const;
     const data = { id: taskId, userId: "owner" };
     let record: ImageGeneration | undefined;
@@ -476,9 +643,17 @@ describe("async generation tasks", () => {
     const getProviderAdapter = jest.fn();
     const service = new GenerationService(
         { create, save, update, findOne, remove } as unknown as Repository<ImageGeneration>,
-        {} as Repository<AiModel>,
-        { getModelInfo, getProviderConfig, getProviderAdapter } as unknown as PublicAiModelService,
+        new GenerationModelService(
+            {} as Repository<AiModel>,
+            {
+                getModelInfo,
+                getProviderConfig,
+                getProviderAdapter,
+            } as unknown as PublicAiModelService,
+        ),
+        new GenerationImageService(),
         { add, getJob } as unknown as Queue<GenerationJobData>,
+        {} as ProductImageService,
     );
     const processor = new GenerationProcessor(service);
     const job = { data } as Job<GenerationJobData>;
@@ -488,13 +663,22 @@ describe("async generation tasks", () => {
     };
     const seed = (status = ImageGenerationStatus.QUEUED) => {
         record = {
-            ...input, ...data, modelName: "Image model", status, images: [], error: null,
-            createdAt: new Date(), updatedAt: new Date(),
+            ...input,
+            ...data,
+            toolKey: "creative",
+            modelName: "Image model",
+            status,
+            images: [],
+            error: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
         };
     };
-    const deferred = <Value,>() => {
+    const deferred = <Value>() => {
         let resolve!: (value: Value) => void;
-        const promise = new Promise<Value>((complete) => { resolve = complete; });
+        const promise = new Promise<Value>((complete) => {
+            resolve = complete;
+        });
         return { promise, resolve };
     };
 
@@ -502,21 +686,34 @@ describe("async generation tasks", () => {
         jest.resetAllMocks();
         record = undefined;
         create.mockImplementation((value) => ({ id: taskId, ...value }));
-        save.mockImplementation(async (value) => { record = { ...value }; return { ...record }; });
+        save.mockImplementation(async (value) => {
+            record = { ...value };
+            return { ...record };
+        });
         findOne.mockImplementation(async ({ where }) =>
-            record && record.id === where.id && record.userId === where.userId ? { ...record } : null,
+            record && record.id === where.id && record.userId === where.userId
+                ? { ...record }
+                : null,
         );
         update.mockImplementation(async (criteria, values) => {
             const alternatives = Array.isArray(criteria) ? criteria : [criteria];
-            const matches = record && alternatives.some((condition) =>
-                Object.entries(condition).every(([key, value]) => record![key as keyof ImageGeneration] === value),
-            );
+            const matches =
+                record &&
+                alternatives.some((condition) =>
+                    Object.entries(condition).every(
+                        ([key, value]) => record![key as keyof ImageGeneration] === value,
+                    ),
+                );
             if (matches) record = { ...record!, ...values };
             return { affected: matches ? 1 : 0 };
         });
         getModelInfo.mockResolvedValue({
-            id: "model", name: "Image model", model: "image-model", isActive: true,
-            modelType: MODEL_TYPES.TEXT_TO_IMAGE, provider: { isActive: true, provider: "openai" },
+            id: "model",
+            name: "Image model",
+            model: "image-model",
+            isActive: true,
+            modelType: MODEL_TYPES.TEXT_TO_IMAGE,
+            provider: { isActive: true, provider: "openai" },
         });
         getProviderConfig.mockResolvedValue({});
         getProviderAdapter.mockResolvedValue({
@@ -533,10 +730,21 @@ describe("async generation tasks", () => {
 
     it("validates then submits a queued public record without inference or files", async () => {
         const response = await service.submit("owner", input);
-        expect(response).toMatchObject({ id: taskId, userId: "owner", status: "queued", images: [], error: null });
-        expect(getProviderAdapter.mock.invocationCallOrder[0]).toBeLessThan(save.mock.invocationCallOrder[0]);
+        expect(response).toMatchObject({
+            id: taskId,
+            userId: "owner",
+            status: "queued",
+            images: [],
+            error: null,
+        });
+        expect(getProviderAdapter.mock.invocationCallOrder[0]).toBeLessThan(
+            save.mock.invocationCallOrder[0],
+        );
         expect(add).toHaveBeenCalledWith("generate", data, {
-            jobId: taskId, attempts: 1, removeOnComplete: true, removeOnFail: true,
+            jobId: taskId,
+            attempts: 1,
+            removeOnComplete: true,
+            removeOnFail: true,
         });
         expect(GENERATION_QUEUE).toBe("image-studio-generation");
         expect(generateImage).not.toHaveBeenCalled();
@@ -544,13 +752,16 @@ describe("async generation tasks", () => {
         expect(JSON.stringify(add.mock.calls)).not.toContain(input.prompt);
     });
 
-    it.each(["disabled", "adapter"])("rejects an invalid %s before saving or enqueuing", async (kind) => {
-        if (kind === "disabled") getModelInfo.mockResolvedValue({ isActive: false });
-        else getProviderAdapter.mockResolvedValue({ supports: () => false });
-        await expect(service.submit("owner", input)).rejects.toThrow("所选图片模型不可用");
-        expect(save).not.toHaveBeenCalled();
-        expect(add).not.toHaveBeenCalled();
-    });
+    it.each(["disabled", "adapter"])(
+        "rejects an invalid %s before saving or enqueuing",
+        async (kind) => {
+            if (kind === "disabled") getModelInfo.mockResolvedValue({ isActive: false });
+            else getProviderAdapter.mockResolvedValue({ supports: () => false });
+            await expect(service.submit("owner", input)).rejects.toThrow("所选图片模型不可用");
+            expect(save).not.toHaveBeenCalled();
+            expect(add).not.toHaveBeenCalled();
+        },
+    );
 
     it("sanitizes queue failure and prevents delivery of the failed row", async () => {
         add.mockRejectedValue(new Error("redis://password secret"));
@@ -561,22 +772,28 @@ describe("async generation tasks", () => {
         expect(JSON.stringify(update.mock.calls)).not.toContain("password");
     });
 
-    it.each(["get", "cancel", "retryTask", "remove"] as const)("rejects another owner's %s before queue or filesystem effects", async (method) => {
-        seed();
-        await expect(service[method]("stranger", taskId)).rejects.toThrow("生成记录不存在");
-        expect(update).not.toHaveBeenCalled();
-        expect(getJob).not.toHaveBeenCalled();
-        expect(add).not.toHaveBeenCalled();
-        expect(rm).not.toHaveBeenCalled();
-        expect(generateImage).not.toHaveBeenCalled();
-    });
+    it.each(["get", "cancel", "retryTask", "remove"] as const)(
+        "rejects another owner's %s before queue or filesystem effects",
+        async (method) => {
+            seed();
+            await expect(service[method]("stranger", taskId)).rejects.toThrow("生成记录不存在");
+            expect(update).not.toHaveBeenCalled();
+            expect(getJob).not.toHaveBeenCalled();
+            expect(add).not.toHaveBeenCalled();
+            expect(rm).not.toHaveBeenCalled();
+            expect(generateImage).not.toHaveBeenCalled();
+        },
+    );
 
-    it.each([ImageGenerationStatus.QUEUED, ImageGenerationStatus.PROCESSING])("blocks deletion of %s records", async (status) => {
-        seed(status);
-        await expect(service.remove("owner", taskId)).rejects.toThrow("生成中的记录不可删除");
-        expect(remove).not.toHaveBeenCalled();
-        expect(rm).not.toHaveBeenCalled();
-    });
+    it.each([ImageGenerationStatus.QUEUED, ImageGenerationStatus.PROCESSING])(
+        "blocks deletion of %s records",
+        async (status) => {
+            seed(status);
+            await expect(service.remove("owner", taskId)).rejects.toThrow("生成中的记录不可删除");
+            expect(remove).not.toHaveBeenCalled();
+            expect(rm).not.toHaveBeenCalled();
+        },
+    );
 
     it("persists cancellation before queue removal and skips cancelled delivery", async () => {
         seed();
@@ -584,14 +801,20 @@ describe("async generation tasks", () => {
             expect(record?.status).toBe("cancelled");
             throw new Error("job locked");
         });
-        await expect(service.cancel("owner", taskId)).resolves.toMatchObject({ status: "cancelled" });
+        await expect(service.cancel("owner", taskId)).resolves.toMatchObject({
+            status: "cancelled",
+        });
         await processor.process(job);
         expect(generateImage).not.toHaveBeenCalled();
         expect(getModelInfo).not.toHaveBeenCalled();
         expect(writeFile).not.toHaveBeenCalled();
     });
 
-    it.each([ImageGenerationStatus.COMPLETED, ImageGenerationStatus.FAILED, ImageGenerationStatus.CANCELLED])("returns an already %s record without cancelling effects", async (status) => {
+    it.each([
+        ImageGenerationStatus.COMPLETED,
+        ImageGenerationStatus.FAILED,
+        ImageGenerationStatus.CANCELLED,
+    ])("returns an already %s record without cancelling effects", async (status) => {
         seed(status);
         await expect(service.cancel("owner", taskId)).resolves.toMatchObject({ status });
         expect(update).not.toHaveBeenCalled();
@@ -606,7 +829,10 @@ describe("async generation tasks", () => {
         expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({ maxRetries: 0 }));
         expect(save).not.toHaveBeenCalled();
         expect(record).toMatchObject({ id: taskId, status: "completed" });
-        expect(update).toHaveBeenCalledWith({ ...data, status: "processing" }, expect.objectContaining({ status: "completed" }));
+        expect(update).toHaveBeenCalledWith(
+            { ...data, status: "processing" },
+            expect.objectContaining({ status: "completed" }),
+        );
     });
 
     it("does not claim a row with a mismatched worker owner", async () => {
@@ -619,7 +845,7 @@ describe("async generation tasks", () => {
     it("discards and cleans results when cancellation wins during inference", async () => {
         seed();
         const started = deferred<void>();
-        const provider = deferred<{ images: typeof image[] }>();
+        const provider = deferred<{ images: (typeof image)[] }>();
         jest.mocked(generateImage).mockImplementation(() => {
             started.resolve();
             return provider.promise as never;
@@ -630,13 +856,17 @@ describe("async generation tasks", () => {
         provider.resolve({ images: [image] });
         await processing;
         expect(record).toMatchObject({ status: "cancelled", images: [], error: null });
-        expect(rm).toHaveBeenCalledWith(expect.stringContaining(`${taskId}-0.png`), { force: true });
+        expect(rm).toHaveBeenCalledWith(expect.stringContaining(`${taskId}-0.png`), {
+            force: true,
+        });
         await expect(service.readImage("owner", taskId, 0)).rejects.toThrow("图片不存在");
     });
 
     it("cleans results when cancellation wins during a file write", async () => {
         seed();
-        jest.mocked(writeFile).mockImplementationOnce(async () => { await service.cancel("owner", taskId); });
+        jest.mocked(writeFile).mockImplementationOnce(async () => {
+            await service.cancel("owner", taskId);
+        });
         await processor.process(job);
         expect(record).toMatchObject({ status: "cancelled", images: [] });
         expect(rm).toHaveBeenCalledTimes(1);
@@ -645,14 +875,17 @@ describe("async generation tasks", () => {
     it("keeps results when completion wins the cancellation CAS", async () => {
         seed();
         await processor.process(job);
-        await expect(service.cancel("owner", taskId)).resolves.toMatchObject({ status: "completed", images: [expect.anything()] });
+        await expect(service.cancel("owner", taskId)).resolves.toMatchObject({
+            status: "completed",
+            images: [expect.anything()],
+        });
         expect(getJob).not.toHaveBeenCalled();
         expect(rm).not.toHaveBeenCalled();
     });
 
     it("also protects legacy synchronous completion from cancellation", async () => {
         const started = deferred<void>();
-        const provider = deferred<{ images: typeof image[] }>();
+        const provider = deferred<{ images: (typeof image)[] }>();
         jest.mocked(generateImage).mockImplementation(() => {
             started.resolve();
             return provider.promise as never;
@@ -664,7 +897,9 @@ describe("async generation tasks", () => {
         await expect(synchronous).resolves.toMatchObject({ status: "cancelled", images: [] });
         expect(record).toMatchObject({ status: "cancelled", images: [] });
         expect(save).toHaveBeenCalledTimes(1);
-        expect(rm).toHaveBeenCalledWith(expect.stringContaining(`${taskId}-0.png`), { force: true });
+        expect(rm).toHaveBeenCalledWith(expect.stringContaining(`${taskId}-0.png`), {
+            force: true,
+        });
     });
 
     it("does not overwrite cancelled legacy requests after provider failure", async () => {
@@ -672,7 +907,9 @@ describe("async generation tasks", () => {
             await service.cancel("owner", taskId);
             throw new Error("sk-provider-secret");
         });
-        await expect(service.generate("owner", input)).rejects.toThrow(/^图片生成失败，请稍后重试$/);
+        await expect(service.generate("owner", input)).rejects.toThrow(
+            /^图片生成失败，请稍后重试$/,
+        );
         expect(record).toMatchObject({ status: "cancelled", images: [], error: null });
     });
 
@@ -685,29 +922,45 @@ describe("async generation tasks", () => {
         });
         await expect(processor.process(job)).rejects.toThrow(/^图片生成失败，请稍后重试$/);
         expect(record).toMatchObject({ status: "failed", images: [] });
-        expect(rm).toHaveBeenCalledWith(expect.stringContaining(`${taskId}-0.png`), { force: true });
+        expect(rm).toHaveBeenCalledWith(expect.stringContaining(`${taskId}-0.png`), {
+            force: true,
+        });
     });
 
     it("sanitizes provider failure without paid retries", async () => {
         seed();
         jest.mocked(generateImage).mockRejectedValue(new Error("sk-provider-secret"));
         await expect(processor.process(job)).rejects.toThrow(/^图片生成失败，请稍后重试$/);
-        expect(record).toMatchObject({ status: "failed", images: [], error: "图片生成失败，请稍后重试" });
+        expect(record).toMatchObject({
+            status: "failed",
+            images: [],
+            error: "图片生成失败，请稍后重试",
+        });
         expect(generateImage).toHaveBeenCalledTimes(1);
         expect(JSON.stringify(update.mock.calls)).not.toContain("sk-provider-secret");
     });
 
-    it.each([ImageGenerationStatus.QUEUED, ImageGenerationStatus.PROCESSING])("marks %s failed after a worker failure or stall", async (status) => {
-        seed(status);
-        await processor.onFailed(job);
-        expect(record).toMatchObject({ status: "failed", images: [], error: "图片生成失败，请稍后重试" });
-    });
+    it.each([ImageGenerationStatus.QUEUED, ImageGenerationStatus.PROCESSING])(
+        "marks %s failed after a worker failure or stall",
+        async (status) => {
+            seed(status);
+            await processor.onFailed(job);
+            expect(record).toMatchObject({
+                status: "failed",
+                images: [],
+                error: "图片生成失败，请稍后重试",
+            });
+        },
+    );
 
-    it.each([ImageGenerationStatus.CANCELLED, ImageGenerationStatus.COMPLETED])("does not overwrite %s on a late worker failure", async (status) => {
-        seed(status);
-        await processor.onFailed(job);
-        expect(record?.status).toBe(status);
-    });
+    it.each([ImageGenerationStatus.CANCELLED, ImageGenerationStatus.COMPLETED])(
+        "does not overwrite %s on a late worker failure",
+        async (status) => {
+            seed(status);
+            await processor.onFailed(job);
+            expect(record?.status).toBe(status);
+        },
+    );
 
     it("handles absent failed jobs and database errors without exposing details", async () => {
         await expect(processor.onFailed(undefined)).resolves.toBeUndefined();
@@ -725,11 +978,14 @@ describe("async generation tasks", () => {
         expect(generateImage).not.toHaveBeenCalled();
     });
 
-    it.each([ImageGenerationStatus.CANCELLED, ImageGenerationStatus.COMPLETED])("keeps %s unchanged on a stalled event", async (status) => {
-        seed(status);
-        await processor.onStalled(taskId);
-        expect(record?.status).toBe(status);
-    });
+    it.each([ImageGenerationStatus.CANCELLED, ImageGenerationStatus.COMPLETED])(
+        "keeps %s unchanged on a stalled event",
+        async (status) => {
+            seed(status);
+            await processor.onStalled(taskId);
+            expect(record?.status).toBe(status);
+        },
+    );
 
     it("handles a removed stalled job and unavailable Redis without throwing raw errors", async () => {
         getJob.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("redis-password"));
@@ -751,17 +1007,35 @@ describe("async generation tasks", () => {
         seed(ImageGenerationStatus.FAILED);
         const oldId = "22222222-2222-4222-8222-222222222222";
         record!.id = oldId;
-        await expect(service.retryTask("owner", oldId)).resolves.toMatchObject({ id: taskId, status: "queued" });
+        await expect(service.retryTask("owner", oldId)).resolves.toMatchObject({
+            id: taskId,
+            status: "queued",
+        });
         expect(create).toHaveBeenCalledWith(expect.objectContaining({ ...input, userId: "owner" }));
         expect(add).toHaveBeenCalledTimes(1);
         expect(generateImage).not.toHaveBeenCalled();
     });
 
     it("registers a worker with no automatic stalled replay and a renewable lock", () => {
-        expect(Reflect.getMetadata("bullmq:processor_metadata", GenerationProcessor)).toMatchObject({ name: GENERATION_QUEUE });
-        expect(Reflect.getMetadata("bullmq:worker_metadata", GenerationProcessor)).toMatchObject({ maxStalledCount: 0, lockDuration: 120000 });
-        expect(Reflect.getMetadata("bullmq:worker_events_metadata", GenerationProcessor.prototype.onFailed)).toMatchObject({ eventName: "failed" });
-        expect(Reflect.getMetadata("bullmq:worker_events_metadata", GenerationProcessor.prototype.onStalled)).toMatchObject({ eventName: "stalled" });
+        expect(Reflect.getMetadata("bullmq:processor_metadata", GenerationProcessor)).toMatchObject(
+            { name: GENERATION_QUEUE },
+        );
+        expect(Reflect.getMetadata("bullmq:worker_metadata", GenerationProcessor)).toMatchObject({
+            maxStalledCount: 0,
+            lockDuration: 120000,
+        });
+        expect(
+            Reflect.getMetadata(
+                "bullmq:worker_events_metadata",
+                GenerationProcessor.prototype.onFailed,
+            ),
+        ).toMatchObject({ eventName: "failed" });
+        expect(
+            Reflect.getMetadata(
+                "bullmq:worker_events_metadata",
+                GenerationProcessor.prototype.onStalled,
+            ),
+        ).toMatchObject({ eventName: "stalled" });
     });
 });
 
@@ -772,11 +1046,15 @@ describe("generation controller contracts", () => {
         expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.GET);
         expect(Reflect.getMetadata("skip_transform", handler)).toBe(true);
         expect(Reflect.getMetadata("decorator:is-public-controller", handler)).toBeUndefined();
-        expect(Reflect.getMetadata(HEADERS_METADATA, handler)).toEqual(expect.arrayContaining([
-            { name: "X-Content-Type-Options", value: "nosniff" },
-            { name: "Cache-Control", value: "private, no-store" },
-        ]));
-        const readImage = jest.fn().mockResolvedValue({ buffer: Buffer.from("png"), mediaType: "image/png" });
+        expect(Reflect.getMetadata(HEADERS_METADATA, handler)).toEqual(
+            expect.arrayContaining([
+                { name: "X-Content-Type-Options", value: "nosniff" },
+                { name: "Cache-Control", value: "private, no-store" },
+            ]),
+        );
+        const readImage = jest
+            .fn()
+            .mockResolvedValue({ buffer: Buffer.from("png"), mediaType: "image/png" });
         const controller = new GenerationController({ readImage } as unknown as GenerationService);
         const result = await controller.image({ id: "owner" } as never, "task", 0);
         expect(readImage).toHaveBeenCalledWith("owner", "task", 0);
@@ -785,12 +1063,27 @@ describe("generation controller contracts", () => {
     });
 
     it("keeps capabilities on the authenticated extension web controller", () => {
-        expect(Reflect.getMetadata("decorator:plugin-web-controller", GenerationController)).toBe(true);
-        expect(Reflect.getMetadata("decorator:is-public-controller", GenerationController)).toBeUndefined();
-        expect(Reflect.getMetadata(PATH_METADATA, GenerationController)).toMatch(/image-studio\/.*generations$/);
-        expect(Reflect.getMetadata(PATH_METADATA, GenerationController.prototype.capabilities)).toBe("capabilities");
-        expect(Reflect.getMetadata(METHOD_METADATA, GenerationController.prototype.capabilities)).toBe(RequestMethod.GET);
-        expect(Reflect.getMetadata("decorator:is-public-controller", GenerationController.prototype.capabilities)).toBeUndefined();
+        expect(Reflect.getMetadata("decorator:plugin-web-controller", GenerationController)).toBe(
+            true,
+        );
+        expect(
+            Reflect.getMetadata("decorator:is-public-controller", GenerationController),
+        ).toBeUndefined();
+        expect(Reflect.getMetadata(PATH_METADATA, GenerationController)).toMatch(
+            /image-studio\/.*generations$/,
+        );
+        expect(
+            Reflect.getMetadata(PATH_METADATA, GenerationController.prototype.capabilities),
+        ).toBe("capabilities");
+        expect(
+            Reflect.getMetadata(METHOD_METADATA, GenerationController.prototype.capabilities),
+        ).toBe(RequestMethod.GET);
+        expect(
+            Reflect.getMetadata(
+                "decorator:is-public-controller",
+                GenerationController.prototype.capabilities,
+            ),
+        ).toBeUndefined();
     });
 
     it.each([
@@ -813,14 +1106,21 @@ describe("generation controller contracts", () => {
         const methods = {
             capabilities: jest.fn().mockResolvedValue({ models: [], tools: [] }),
             listModels: jest.fn().mockResolvedValue([]),
-            list: jest.fn(), generate: jest.fn(), retry: jest.fn(), remove: jest.fn(),
+            list: jest.fn(),
+            generate: jest.fn(),
+            retry: jest.fn(),
+            remove: jest.fn(),
         };
         const controller = new GenerationController(methods as unknown as GenerationService);
         const user = { id: "owner" } as Parameters<GenerationController["list"]>[0];
         const query = { page: 1, limit: 20 };
         const input = {
-            prompt: "A product photo", modelId: "model", count: 1,
-            size: "1024x1024", quality: "standard", style: "vivid",
+            prompt: "A product photo",
+            modelId: "model",
+            count: 1,
+            size: "1024x1024",
+            quality: "standard",
+            style: "vivid",
         } as const;
         await expect(controller.capabilities()).resolves.toEqual({ models: [], tools: [] });
         await expect(controller.listModels()).resolves.toEqual([]);

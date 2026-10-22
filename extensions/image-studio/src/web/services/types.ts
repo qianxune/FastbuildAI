@@ -1,3 +1,5 @@
+import type { MainImageInput } from "../../api/shared/main-image";
+
 export interface ImageModel {
     id: string;
     name: string;
@@ -16,6 +18,8 @@ export type GenerationStatus = "queued" | "processing" | "completed" | "failed" 
 
 export interface ImageGeneration {
     id: string;
+    toolKey?: "creative" | "main";
+    mainInput?: MainImageInput | null;
     prompt: string;
     modelId: string;
     modelName: string;
@@ -44,4 +48,12 @@ export interface GenerationList {
     total: number;
     page: number;
     limit: number;
+}
+
+export interface ProductImage {
+    id: string;
+    mediaType: string;
+    width: number;
+    height: number;
+    size: number;
 }

@@ -65,6 +65,15 @@ services:
             - /buildingai/packages/cli/node_modules
             - /buildingai/packages/core/node_modules
             - /buildingai/packages/client/node_modules
+            - /buildingai/extensions/image-studio/node_modules
+            - /buildingai/packages/@buildingai/web/core/node_modules
+            - /buildingai/packages/@buildingai/web/hooks/node_modules
+            - /buildingai/packages/@buildingai/web/http/node_modules
+            - /buildingai/packages/@buildingai/web/i18n/node_modules
+            - /buildingai/packages/@buildingai/web/services/node_modules
+            - /buildingai/packages/@buildingai/web/stores/node_modules
+            - /buildingai/packages/@buildingai/web/types/node_modules
+            - /buildingai/packages/@buildingai/web/ui/node_modules
             - /buildingai/packages/web/@buildingai/designer/node_modules
             - /buildingai/packages/web/@buildingai/hooks/node_modules
             - /buildingai/packages/web/@buildingai/http/node_modules

@@ -7,12 +7,25 @@ import { Module } from "@nestjs/common";
 import { ImageGeneration } from "../../db/entities/image-generation.entity";
 import { GenerationController } from "./controllers/web/generation.controller";
 import { GenerationProcessor } from "./generation.processor";
-import { GENERATION_QUEUE, GenerationService } from "./services/generation.service";
+import { GENERATION_QUEUE } from "./constants/generation.constants";
+import { GenerationModelService } from "./services/generation-model.service";
+import { GenerationImageService } from "./services/generation-image.service";
+import { GenerationService } from "./services/generation.service";
+import { ProductImageService } from "./services/product-image.service";
 
 @Module({
-    imports: [AiPublicModule, TypeOrmModule.forFeature([ImageGeneration, AiModel]),
-        BullModule.registerQueue({ name: GENERATION_QUEUE })],
+    imports: [
+        AiPublicModule,
+        TypeOrmModule.forFeature([ImageGeneration, AiModel]),
+        BullModule.registerQueue({ name: GENERATION_QUEUE }),
+    ],
     controllers: [GenerationController],
-    providers: [GenerationService, GenerationProcessor],
+    providers: [
+        GenerationService,
+        GenerationModelService,
+        GenerationImageService,
+        GenerationProcessor,
+        ProductImageService,
+    ],
 })
 export class GenerationModule {}

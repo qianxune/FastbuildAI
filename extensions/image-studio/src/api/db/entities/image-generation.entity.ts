@@ -7,6 +7,8 @@ import {
     UpdateDateColumn,
 } from "@buildingai/db/typeorm";
 
+import type { MainImageInput } from "../../shared/main-image";
+
 export enum ImageGenerationStatus {
     QUEUED = "queued",
     CANCELLED = "cancelled",
@@ -31,6 +33,12 @@ export class ImageGeneration {
 
     @Column({ type: "text" })
     prompt: string;
+
+    @Column({ type: "varchar", length: 20, default: "creative" })
+    toolKey: "creative" | "main";
+
+    @Column({ type: "jsonb", nullable: true })
+    mainInput?: MainImageInput | null;
 
     @Column({ type: "uuid" })
     modelId: string;
