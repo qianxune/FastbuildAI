@@ -5,7 +5,10 @@ import { HttpErrorFactory } from "@buildingai/errors";
 import { ExtensionBillingService } from "@buildingai/extension-sdk";
 import { Injectable } from "@nestjs/common";
 
-import { ImageGeneration, ImageGenerationStatus } from "../../../db/entities/image-generation.entity";
+import {
+    ImageGeneration,
+    ImageGenerationStatus,
+} from "../../../db/entities/image-generation.entity";
 import { quoteGenerationCredits } from "../../../shared/billing";
 import { GENERATION_FAILED } from "../constants/generation.constants";
 
@@ -32,18 +35,23 @@ export class GenerationBillingService {
             throw HttpErrorFactory.badRequest("所选模型的积分价格配置无效，请联系管理员");
         }
         const repository = manager.getRepository(ImageGeneration);
-        const generation = await repository.save(repository.create({
-            ...input,
-            billingAmount: amount,
-            billingStatus: amount > 0 ? "charged" : "free",
-        }));
+        const generation = await repository.save(
+            repository.create({
+                ...input,
+                billingAmount: amount,
+                billingStatus: amount > 0 ? "charged" : "free",
+            }),
+        );
         if (amount > 0) {
-            await this.extensionBilling.deductUserPower({
-                userId: input.userId,
-                amount,
-                associationNo: generation.id,
-                remark: `图片生成 ${input.count} 张`,
-            }, manager);
+            await this.extensionBilling.deductUserPower(
+                {
+                    userId: input.userId,
+                    amount,
+                    associationNo: generation.id,
+                    remark: `图片生成 ${input.count} 张`,
+                },
+                manager,
+            );
         }
         return generation;
     }
@@ -60,7 +68,11 @@ export class GenerationBillingService {
             lock: { mode: "pessimistic_write" },
         });
         if (!generation) throw HttpErrorFactory.notFound("生成记录不存在");
-        if (![ImageGenerationStatus.QUEUED, ImageGenerationStatus.PROCESSING].includes(generation.status)) {
+        if (
+            ![ImageGenerationStatus.QUEUED, ImageGenerationStatus.PROCESSING].includes(
+                generation.status,
+            )
+        ) {
             return generation;
         }
         if (generation.billingStatus === "charged") {
@@ -71,12 +83,18 @@ export class GenerationBillingService {
                 where: { id: userId },
                 lock: { mode: "pessimistic_write" },
             });
-            await this.extensionBilling.addUserPower({
-                userId,
-                amount: generation.billingAmount,
-                associationNo: generation.id,
-                remark: status === ImageGenerationStatus.CANCELLED ? "图片生成取消退款" : "图片生成失败退款",
-            }, manager);
+            await this.extensionBilling.addUserPower(
+                {
+                    userId,
+                    amount: generation.billingAmount,
+                    associationNo: generation.id,
+                    remark:
+                        status === ImageGenerationStatus.CANCELLED
+                            ? "图片生成取消退款"
+                            : "图片生成失败退款",
+                },
+                manager,
+            );
             generation.billingStatus = "refunded";
         }
         generation.status = status;

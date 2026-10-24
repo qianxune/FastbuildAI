@@ -19,12 +19,26 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 
 import { GenerateImageDto, MainImageDto, QueryGenerationDto } from "../../dto";
+import { AnalyzeProductDto } from "../../dto/main-image.dto";
 import { GenerationService } from "../../services/generation.service";
 import type { ProductImageUpload } from "../../services/product-image.service";
 
 @ExtensionWebController("generations")
 export class GenerationController {
     constructor(private readonly generationService: GenerationService) {}
+
+    @Get("billing/balance")
+    async balance(@Playground() user: UserPlayground) {
+        return this.generationService.balance(user.id);
+    }
+
+    @Get("billing/quote")
+    async quote(
+        @Query("modelId", ParseUUIDPipe) modelId: string,
+        @Query("count", ParseIntPipe) count: number,
+    ) {
+        return this.generationService.quote(modelId, count);
+    }
 
     @Post("product-images")
     @UseInterceptors(
@@ -59,6 +73,11 @@ export class GenerationController {
         @Param("id", ParseUUIDPipe) id: string,
     ) {
         return this.generationService.removeProductImage(user.id, id);
+    }
+
+    @Post("main/analyze")
+    async analyzeProduct(@Playground() user: UserPlayground, @Body() input: AnalyzeProductDto) {
+        return this.generationService.analyzeProduct(user.id, input);
     }
 
     @Post("main/tasks")

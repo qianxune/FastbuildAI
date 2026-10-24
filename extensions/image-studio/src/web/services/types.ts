@@ -28,6 +28,8 @@ export interface ImageGeneration {
     style: string;
     count: number;
     status: GenerationStatus;
+    billingAmount: number;
+    billingStatus: "uncharged" | "free" | "charged" | "refunded";
     images: GeneratedImage[];
     error?: string | null;
     createdAt: string;

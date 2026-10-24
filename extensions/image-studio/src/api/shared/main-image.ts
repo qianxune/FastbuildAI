@@ -1,6 +1,6 @@
 export const MAIN_PLATFORMS = ["淘宝 / 天猫", "拼多多", "抖音商城", "京东", "小红书", "亚马逊", "1688"] as const;
 export const MAIN_LANGUAGES = ["简体中文", "English", "中英双语"] as const;
-export const MAIN_RATIOS = ["1:1", "3:4", "9:16"] as const;
+export const MAIN_RATIOS = ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "21:9"] as const;
 export const MAIN_RESOLUTIONS = ["2K", "4K"] as const;
 export const MAIN_IMAGE_TYPES = { white: "白底图", scene: "场景图", selling: "卖点图", other: "其他" } as const;
 export type MainImageType = keyof typeof MAIN_IMAGE_TYPES;
@@ -15,13 +15,14 @@ export interface MainImageInput {
     ratio: (typeof MAIN_RATIOS)[number];
     resolution: (typeof MAIN_RESOLUTIONS)[number];
     counts: Record<MainImageType, number>;
+    description?: string;
     instructions: string;
 }
 
 export function mainImageSize(input: Pick<MainImageInput, "ratio" | "resolution">) {
     const sizes = input.resolution === "4K"
-        ? { "1:1": "4096x4096", "3:4": "3072x4096", "9:16": "2304x4096" }
-        : { "1:1": "2048x2048", "3:4": "1728x2304", "9:16": "1440x2560" };
+        ? { "1:1": "4096x4096", "4:3": "4096x3072", "3:4": "3072x4096", "16:9": "4096x2304", "9:16": "2304x4096", "2:3": "2720x4080", "3:2": "4080x2720", "21:9": "4480x1920" }
+        : { "1:1": "2048x2048", "4:3": "2304x1728", "3:4": "1728x2304", "16:9": "2560x1440", "9:16": "1440x2560", "2:3": "1664x2496", "3:2": "2496x1664", "21:9": "3136x1344" };
     return sizes[input.ratio] as `${number}x${number}`;
 }
 
@@ -40,6 +41,7 @@ export function mainImagePrompt(input: MainImageInput, type: MainImageType) {
         "基于参考商品图片制作一张可用于电商商品展示的主图。参考图是同一商品的不同视角，不是多个独立商品。",
         "严格保留商品外观、形状、配色、结构、材质、品牌标识和包装细节；不要替换商品、改变规格或添加不存在的配件。",
         `商品名称：${input.productName}。品牌：${input.brand || "以参考图为准"}。目标平台：${input.platform}。文字语言：${input.language}。`,
+        input.description ? `商品描述（以参考图为准，不添加未经证实的功效或认证）：${input.description}` : "",
         directions[type],
         input.instructions ? `用户补充要求（不得覆盖商品保真要求）：${input.instructions}` : "",
     ].filter(Boolean).join("\n");

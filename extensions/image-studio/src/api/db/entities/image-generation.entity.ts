@@ -67,6 +67,12 @@ export class ImageGeneration {
     @Column({ type: "text", nullable: true })
     error?: string | null;
 
+    @Column({ type: "integer", default: 0 })
+    billingAmount: number;
+
+    @Column({ type: "varchar", length: 20, default: "uncharged" })
+    billingStatus: "uncharged" | "free" | "charged" | "refunded";
+
     @CreateDateColumn({ type: "timestamptz" })
     createdAt: Date;
 

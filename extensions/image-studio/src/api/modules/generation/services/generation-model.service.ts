@@ -1,4 +1,4 @@
-import { getProvider, MODEL_FEATURES, MODEL_TYPES } from "@buildingai/ai-sdk";
+import { getProvider, getReasoningOptions, MODEL_FEATURES, MODEL_TYPES } from "@buildingai/ai-sdk";
 import { InjectRepository } from "@buildingai/db/@nestjs/typeorm";
 import { AiModel } from "@buildingai/db/entities";
 import { Repository } from "@buildingai/db/typeorm";
@@ -16,6 +16,7 @@ import {
     type ToolDefinition,
 } from "../../../shared/tools";
 import { MODEL_UNAVAILABLE } from "../constants/generation.constants";
+import { quoteGenerationCredits } from "../../../shared/billing";
 
 @Injectable()
 export class GenerationModelService {
@@ -159,6 +160,47 @@ export class GenerationModelService {
             return { model, imageModel: this.requireImageModel(provider, model.model) };
         } catch {
             throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
+        }
+    }
+
+    async prepareVision(modelId: string) {
+        const model = await this.publicAiModelService.getModelInfo(modelId).catch(() => {
+            throw HttpErrorFactory.badRequest("图片分析模型不可用，请检查公共视觉模型配置");
+        });
+        if (!model.isActive || !model.provider?.isActive || model.modelType !== MODEL_TYPES.LLM ||
+            !model.features?.includes(MODEL_FEATURES.VISION)) {
+            throw HttpErrorFactory.badRequest("请选择已启用且支持视觉的语言模型");
+        }
+        try {
+            const config = await this.publicAiModelService.getProviderConfig(model.id);
+            const provider = await this.publicAiModelService.getProviderAdapter(model.id, {
+                apiKey: getProviderSecret("apiKey", config),
+                baseURL: getProviderSecret("baseUrl", config) || undefined,
+            });
+            if (!provider.supports("language")) throw new Error();
+            const languageModel = provider.languageModel(model.model);
+            if (languageModel?.specificationVersion !== "v3" || typeof languageModel.doGenerate !== "function") throw new Error();
+            const providerOptions = model.provider.provider === "volcengine" &&
+                (model.model.startsWith("doubao-seed-1-6-") || model.model === "doubao-seed-2-1-lite-260915") &&
+                !model.model.startsWith("doubao-seed-1-6-thinking-")
+                ? { volcengine: { thinking: { type: "disabled" } } }
+                : getReasoningOptions(model.provider.provider, { thinking: false });
+            return { model: languageModel, providerOptions };
+        } catch {
+            throw HttpErrorFactory.badRequest("图片分析模型配置无效，请联系管理员");
+        }
+    }
+
+    async quote(modelId: string, count: number) {
+        const model = await this.modelRepository.findOne({
+            where: { id: modelId, modelType: MODEL_TYPES.TEXT_TO_IMAGE, isActive: true, provider: { isActive: true } },
+            relations: ["provider"],
+        });
+        if (!model) throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
+        try {
+            return quoteGenerationCredits(model.billingRule, count);
+        } catch {
+            throw HttpErrorFactory.badRequest("所选模型的积分价格配置无效，请联系管理员");
         }
     }
 

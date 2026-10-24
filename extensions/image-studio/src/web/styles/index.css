@@ -563,6 +563,50 @@ details.adv summary:hover{color:var(--text1)}
 .main-fields:disabled .main-segmented label{cursor:not-allowed; opacity:.55}
 .main-fields+.form-foot{flex-wrap:wrap}
 .main-fields .sel{padding-right:30px; text-overflow:ellipsis}
+.main-product-form .field{margin-bottom:18px}
+.main-settings-grid{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0 12px}
+.main-settings-grid>.field:last-child:nth-child(3){grid-column:1/-1}
+.product-upload-row{display:flex; flex-wrap:wrap; gap:10px; align-items:flex-start}
+.product-upload-row .product-thumb,.product-upload-row .main-upload{box-sizing:border-box; flex:0 0 80px; width:80px; height:80px; min-width:80px; max-width:80px; min-height:80px; max-height:80px; padding:8px; border-radius:6px}
+.product-upload-row .product-thumb{padding:0}
+.product-upload-row .main-upload{justify-content:center; gap:6px}
+.product-upload-row .main-upload .dz-t{font-size:11px; margin:0; line-height:1.25}
+.product-upload-row .main-upload svg{flex-shrink:0; width:20px; height:20px}
+.upload-formats{font-size:10px; color:var(--text3); margin-top:10px}
+.main-type-grid{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px 12px}
+.main-type-grid .step-row{min-width:0; margin:0; padding:8px 0; gap:4px}
+.main-type-grid .sr-name{font-size:12px; flex:1; min-width:0; white-space:nowrap}
+.main-type-grid .stepper{flex-shrink:0}
+.main-type-grid .stepper button{width:23px; height:26px}
+.main-type-grid .main-count{width:24px; height:26px; font-size:12px}
+.product-description-field .f-label{display:flex; justify-content:space-between; align-items:center; gap:8px}
+.analysis-button{display:inline-flex; align-items:center; gap:5px; color:var(--lime); font-size:11px; background:none; padding:3px 0; border:0; cursor:pointer}
+.analysis-model-select{margin-bottom:8px; font-size:11px}
+.product-description{min-height:116px; resize:vertical; line-height:1.6}
+.description-count{display:block; text-align:right; color:var(--text3); font-size:10px; margin-top:5px}
+.main-form-foot{gap:10px; align-items:center}
+.advanced-settings-trigger{display:flex; align-items:center; width:100%; gap:8px; min-height:38px; text-align:left; padding:8px 0; color:var(--text2); font-size:12px; border-top:1px solid var(--line); background:none; cursor:pointer}
+.advanced-settings-trigger svg:last-child{margin-left:auto; flex-shrink:0}
+.advanced-setting-value{font-size:10px; color:var(--text3); white-space:nowrap}
+.main-settings-dialog{box-sizing:border-box; width:min(420px,calc(100% - 32px)); max-height:calc(100dvh - 40px); overflow-y:auto; margin:auto; padding:22px; border:1px solid var(--line-strong); border-radius:8px; background:var(--surface); color:var(--text1); box-shadow:0 20px 70px rgba(0,0,0,.5)}
+.main-settings-dialog::backdrop{background:rgba(0,0,0,.66)}
+.settings-dialog-head{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:22px}
+.settings-dialog-head h3{font-size:16px; margin:0}
+.main-settings-dialog .main-segmented{flex-wrap:wrap}
+.main-settings-dialog .main-segmented label{flex:1 0 25%}
+.main-settings-dialog .field{margin-bottom:20px}
+.main-settings-dialog .settings-confirm{width:100%; margin:0}
+.generation-progress{display:block; width:100%; height:5px; margin:18px 0 24px; accent-color:var(--lime); border:0; border-radius:4px; overflow:hidden}
+.generation-placeholder{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:130px; color:var(--text3); font-size:12px; border-radius:6px}
+.generation-placeholder .spin{width:18px; height:18px}
+.generation-summary{display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px}
+.generation-summary .res-actions{flex-wrap:wrap}
+.result-preview{display:block; width:100%; height:100%; padding:0; border:0; background:none; cursor:zoom-in}
+.result-image-dialog{width:min(1000px,calc(100% - 32px)); max-height:calc(100dvh - 32px); margin:auto; padding:14px; color:var(--text1); background:var(--bg0); border:1px solid var(--line-strong); border-radius:8px}
+.result-image-dialog::backdrop{background:rgba(0,0,0,.8)}
+.result-image-dialog img{display:block; max-width:100%; width:auto; height:auto; max-height:calc(100dvh - 140px); object-fit:contain; margin:auto}
+.result-image-dialog .res-actions{margin-bottom:12px; justify-content:flex-end; align-items:center}
+.result-image-dialog .res-actions span{margin-right:auto; font-size:12px; overflow-wrap:anywhere; min-width:0}
 .future-form .chipset,.future-form .posgrid,.future-form .dz{pointer-events:none}
 .workflow-message{padding:12px 16px; color:var(--text2); font-size:12.5px; overflow-wrap:anywhere}
 .workflow-message.error{color:var(--err); display:flex; flex-wrap:wrap; align-items:center; gap:10px}
@@ -631,10 +675,10 @@ details.adv summary:hover{color:var(--text1)}
 .res-bar{display:flex; align-items:center; margin-bottom:18px}
 .res-bar h3{font-size:16px; font-weight:800}
 #resMeta{font-family:var(--font-mono); font-size:11.5px; color:var(--text3); margin-left:12px; letter-spacing:.04em}
-.res-actions{margin-left:auto; display:flex; gap:10px}
-.res-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px; padding-bottom:44px}
+.res-actions{margin-left:auto; display:flex; flex-wrap:wrap; align-items:center; gap:10px}
+.res-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),240px)); justify-content:start; align-items:start; gap:14px; padding-bottom:32px}
 .rtile{
-  position:relative; aspect-ratio:1/1; border-radius:14px; overflow:hidden;
+  position:relative; aspect-ratio:16/10; border-radius:6px; overflow:hidden;
   border:1px solid var(--line); background:var(--surface); cursor:pointer; user-select:none;
   transition:border-color .25s;
 }

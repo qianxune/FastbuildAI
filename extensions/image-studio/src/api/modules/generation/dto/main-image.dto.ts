@@ -83,6 +83,29 @@ export class MainImageDto implements MainImageInput {
     counts: MainImageCountsDto = new MainImageCountsDto();
 
     @IsString()
+    @Length(0, 3000)
+    description: string = "";
+
+    @IsString()
     @Length(0, 1500)
     instructions: string = "";
+}
+
+export class AnalyzeProductDto {
+    @IsUUID()
+    modelId: string;
+
+    @IsArray()
+    @ArrayMinSize(1)
+    @ArrayMaxSize(5)
+    @ArrayUnique()
+    @IsUUID(undefined, { each: true })
+    assetIds: string[];
+
+    @IsString()
+    @Length(0, 100)
+    productName: string = "";
+
+    @IsIn(MAIN_LANGUAGES)
+    language: MainImageInput["language"] = "简体中文";
 }

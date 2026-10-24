@@ -1,4 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import type { GenerationQuote } from "../../api/shared/billing";
 import type { GenerationCapabilities } from "../../api/shared/tools";
 import type { MainImageInput } from "../../api/shared/main-image";
 
@@ -13,6 +15,45 @@ import type {
 
 const historyKey = ["image-studio", "generations"] as const;
 const productsKey = ["image-studio", "product-images"] as const;
+const balanceKey = ["image-studio", "credit-balance"] as const;
+const quoteKey = ["image-studio", "credit-quote"] as const;
+
+function invalidateGenerationBilling(client: QueryClient) {
+    return Promise.all([
+        client.invalidateQueries({ queryKey: historyKey }),
+        client.invalidateQueries({ queryKey: balanceKey }),
+        client.invalidateQueries({ queryKey: quoteKey }),
+    ]);
+}
+
+export function useCreditBalanceQuery() {
+    return useQuery({
+        queryKey: balanceKey,
+        queryFn: () => apiHttpClient.get<{ balance: number }>("/generations/billing/balance"),
+        refetchInterval: 30000,
+    });
+}
+
+export function fetchGenerationQuote(modelId: string, count: number) {
+    return apiHttpClient.get<GenerationQuote>("/generations/billing/quote", { params: { modelId, count } });
+}
+
+export function useGenerationBilling(modelId: string, count: number, enabled = true) {
+    const balance = useCreditBalanceQuery();
+    const validCount = Number.isInteger(count) && count >= 1 && count <= 4;
+    const quote = useQuery({
+        queryKey: [...quoteKey, modelId, count],
+        queryFn: () => fetchGenerationQuote(modelId, count),
+        enabled: enabled && Boolean(modelId) && validCount,
+    });
+    const insufficient = quote.isSuccess && balance.isSuccess && quote.data.total > balance.data.balance;
+    const ready = enabled && validCount && quote.isSuccess && !quote.isFetching && balance.isSuccess && !insufficient;
+    const costText = !validCount ? "请选择 1–4 张图片" : !modelId ? "请选择模型" :
+        quote.isError ? "费用查询失败" : !quote.isSuccess || quote.isFetching ? "正在查询费用..." :
+        balance.isError ? "余额查询失败" : !balance.isSuccess ? "正在查询余额..." :
+        `${quote.data.total} 积分 · ${quote.data.unitPrice} 积分/张${insufficient ? " · 余额不足" : ""}`;
+    return { balance, quote, ready, insufficient, costText };
+}
 
 export function useProductImagesQuery() {
     return useQuery({ queryKey: productsKey, queryFn: () => apiHttpClient.get<ProductImage[]>("/generations/product-images") });
@@ -59,7 +100,7 @@ export function useGenerateMainImageMutation() {
     const client = useQueryClient();
     return useMutation({
         mutationFn: (input: MainImageInput) => apiHttpClient.post<ImageGeneration>("/generations/main/tasks", input),
-        onSettled: () => client.invalidateQueries({ queryKey: historyKey }),
+        onSettled: () => invalidateGenerationBilling(client),
     });
 }
 
@@ -129,12 +170,18 @@ export function useImageModelsQuery() {
 }
 
 export function useGenerationHistoryQuery(page = 1, limit = 30) {
-    return useQuery({
+    const client = useQueryClient();
+    const query = useQuery({
         queryKey: [...historyKey, page, limit],
         queryFn: () => apiHttpClient.get<GenerationList>("/generations", { params: { page, limit } }),
         refetchInterval: (query) =>
             query.state.data?.items.some((item) => isGenerationActive(item)) ? 5000 : false,
     });
+    const statuses = query.data?.items.map((item) => `${item.id}:${item.status}`).join(",");
+    useEffect(() => {
+        if (statuses) void client.invalidateQueries({ queryKey: balanceKey });
+    }, [client, statuses]);
+    return query;
 }
 
 export function isGenerationActive(item: Pick<ImageGeneration, "status"> | undefined | null) {
@@ -142,12 +189,20 @@ export function isGenerationActive(item: Pick<ImageGeneration, "status"> | undef
 }
 
 export function useGenerationQuery(id?: string) {
-    return useQuery({
+    const client = useQueryClient();
+    const query = useQuery({
         queryKey: ["image-studio", "generation", id],
         queryFn: () => apiHttpClient.get<ImageGeneration>(`/generations/${id}`),
         enabled: Boolean(id),
         refetchInterval: (query) => isGenerationActive(query.state.data) ? 2000 : false,
     });
+    const status = query.data?.status;
+    useEffect(() => {
+        if (id && status && status !== "queued" && status !== "processing") {
+            void client.invalidateQueries({ queryKey: balanceKey });
+        }
+    }, [client, id, status]);
+    return query;
 }
 
 export function useGenerateImageMutation() {
@@ -155,7 +210,7 @@ export function useGenerateImageMutation() {
     return useMutation({
         mutationFn: (input: GenerateImageInput) =>
             apiHttpClient.post<ImageGeneration>("/generations/tasks", input),
-        onSettled: () => queryClient.invalidateQueries({ queryKey: historyKey }),
+        onSettled: () => invalidateGenerationBilling(queryClient),
     });
 }
 
@@ -164,7 +219,7 @@ export function useRetryGenerationMutation() {
     return useMutation({
         mutationFn: (id: string) =>
             apiHttpClient.post<ImageGeneration>(`/generations/${id}/retry-task`),
-        onSettled: () => queryClient.invalidateQueries({ queryKey: historyKey }),
+        onSettled: () => invalidateGenerationBilling(queryClient),
     });
 }
 
@@ -176,7 +231,7 @@ export function useCancelGenerationMutation() {
         onSuccess: (record) => {
             queryClient.setQueryData(["image-studio", "generation", record.id], record);
         },
-        onSettled: () => queryClient.invalidateQueries({ queryKey: historyKey }),
+        onSettled: () => invalidateGenerationBilling(queryClient),
     });
 }
 
@@ -185,5 +240,13 @@ export function useDeleteGenerationMutation() {
     return useMutation({
         mutationFn: (id: string) => apiHttpClient.delete(`/generations/${id}`),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: historyKey }),
+    });
+}
+
+export function useAnalyzeProductMutation() {
+    return useMutation({
+        mutationFn: (input: { modelId: string; assetIds: string[]; productName: string; language: MainImageInput["language"] }) =>
+            apiHttpClient.post<{ description: string }>("/generations/main/analyze", input, { timeout: 120000 }),
+        retry: false,
     });
 }

@@ -6,7 +6,7 @@ import { RequestMethod, StreamableFile } from "@nestjs/common";
 import { HEADERS_METADATA, METHOD_METADATA, PATH_METADATA } from "@nestjs/common/constants";
 import type { Job, Queue } from "bullmq";
 import { getProviderSecret } from "@buildingai/utils";
-import { generateImage } from "ai";
+import { generateImage, generateText } from "ai";
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "fs/promises";
 import path from "path";
 
@@ -18,6 +18,7 @@ import { GenerationController } from "../src/api/modules/generation/controllers/
 import { GenerationProcessor } from "../src/api/modules/generation/generation.processor";
 import { GenerationImageService } from "../src/api/modules/generation/services/generation-image.service";
 import { GenerationModelService } from "../src/api/modules/generation/services/generation-model.service";
+import { GenerationBillingService } from "../src/api/modules/generation/services/generation-billing.service";
 import type { ProductImageService } from "../src/api/modules/generation/services/product-image.service";
 import {
     GENERATION_QUEUE,
@@ -29,11 +30,13 @@ jest.mock("@buildingai/ai-sdk", () => ({
     MODEL_TYPES: { TEXT_TO_IMAGE: "text-to-image", LLM: "llm" },
     MODEL_FEATURES: { VISION: "vision" },
     getProvider: jest.fn(),
+    getReasoningOptions: jest.fn().mockReturnValue({}),
 }));
 jest.mock("@buildingai/db/@nestjs/typeorm", () => ({ InjectRepository: () => () => undefined }));
 jest.mock("@buildingai/db/entities", () => ({ AiModel: class {} }));
 jest.mock("@buildingai/db/typeorm", () => ({ Repository: class {} }));
-jest.mock("@buildingai/extension-sdk", () => ({ PublicAiModelService: class {} }));
+jest.mock("@buildingai/extension-sdk", () => ({ PublicAiModelService: class {}, ExtensionBillingService: class {} }));
+jest.mock("@buildingai/core/modules", () => ({ BaseBillingService: class {} }));
 jest.mock("@buildingai/errors", () => ({
     HttpErrorFactory: {
         badRequest: (message: string) => new Error(message),
@@ -41,7 +44,7 @@ jest.mock("@buildingai/errors", () => ({
     },
 }));
 jest.mock("@buildingai/utils", () => ({ getProviderSecret: jest.fn() }));
-jest.mock("ai", () => ({ generateImage: jest.fn() }));
+jest.mock("ai", () => ({ generateImage: jest.fn(), generateText: jest.fn() }));
 jest.mock("fs/promises", () => ({
     lstat: jest.fn(),
     mkdir: jest.fn(),
@@ -90,6 +93,142 @@ jest.mock("@buildingai/utils/path-validator", () => ({ validatePath: jest.fn() }
 jest.mock("@buildingai/decorators/playground.decorator", () => ({
     Playground: () => () => undefined,
 }));
+
+describe("product image analysis", () => {
+    const input = { modelId: "vision-model", assetIds: ["image-one", "image-two"], productName: "Product", language: "English" as const };
+    const generateTextMock = jest.mocked(generateText);
+    const model = { specificationVersion: "v3", doGenerate: jest.fn(), doStream: jest.fn() };
+
+    function fixture() {
+        const prepareVision = jest.fn().mockResolvedValue({ model, providerOptions: { volcengine: { thinking: { type: "disabled" } } } });
+        const readForAnalysis = jest.fn().mockResolvedValue(Buffer.from("owned resized image"));
+        const service = new GenerationService({} as never, { prepareVision } as never, {} as never,
+            {} as never, { readForAnalysis } as never, {} as never);
+        return { service, prepareVision, readForAnalysis };
+    }
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        generateTextMock.mockResolvedValue({ text: "  Visible product description  " } as Awaited<ReturnType<typeof generateText>>);
+    });
+
+    it("analyzes only owned resized images with bounded inference and no image generation", async () => {
+        const state = fixture();
+        expect(await state.service.analyzeProduct("owner", input)).toEqual({ description: "Visible product description" });
+        expect(state.readForAnalysis.mock.calls).toEqual([["owner", "image-one"], ["owner", "image-two"]]);
+        expect(state.prepareVision).toHaveBeenCalledWith("vision-model");
+        expect(generateTextMock).toHaveBeenCalledWith(expect.objectContaining({
+            model, maxRetries: 0, maxOutputTokens: 1200, abortSignal: expect.any(AbortSignal),
+            providerOptions: { volcengine: { thinking: { type: "disabled" } } },
+            messages: [{ role: "user", content: [expect.objectContaining({ type: "text" }),
+                { type: "image", image: Buffer.from("owned resized image"), mediaType: "image/jpeg" },
+                { type: "image", image: Buffer.from("owned resized image"), mediaType: "image/jpeg" }] }],
+        }));
+        expect(generateImage).not.toHaveBeenCalled();
+    });
+
+    it("rejects inaccessible images before touching the configured provider", async () => {
+        const state = fixture();
+        state.readForAnalysis.mockRejectedValue(new Error("not owned"));
+        await expect(state.service.analyzeProduct("other-owner", input)).rejects.toThrow("not owned");
+        expect(state.prepareVision).not.toHaveBeenCalled();
+        expect(generateTextMock).not.toHaveBeenCalled();
+    });
+
+    it("blocks concurrent analyses for the same user and releases the lock on completion", async () => {
+        const state = fixture();
+        let finish!: (result: Awaited<ReturnType<typeof generateText>>) => void;
+        generateTextMock.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+        const first = state.service.analyzeProduct("owner", input);
+        await new Promise(setImmediate);
+        await expect(state.service.analyzeProduct("owner", input)).rejects.toThrow();
+        expect(generateTextMock).toHaveBeenCalledTimes(1);
+        finish({ text: "Completed" } as Awaited<ReturnType<typeof generateText>>);
+        await first;
+        await expect(state.service.analyzeProduct("owner", input)).resolves.toHaveProperty("description");
+    });
+
+    it("sanitizes provider failures and permits a subsequent analysis", async () => {
+        const state = fixture();
+        generateTextMock.mockRejectedValueOnce(new Error("secret provider payload"));
+        await expect(state.service.analyzeProduct("owner", input)).rejects.not.toThrow("secret provider payload");
+        await expect(state.service.analyzeProduct("owner", input)).resolves.toHaveProperty("description");
+    });
+
+    it("reports an unavailable upstream model instead of a timeout without retrying inference", async () => {
+        const state = fixture();
+        generateTextMock.mockRejectedValueOnce(Object.assign(new Error("secret provider payload"), { statusCode: 404 }));
+        await expect(state.service.analyzeProduct("owner", input)).rejects.toThrow("所选视觉模型不存在或当前密钥无权访问");
+        expect(generateTextMock).toHaveBeenCalledTimes(1);
+        expect(generateImage).not.toHaveBeenCalled();
+        await expect(state.service.analyzeProduct("owner", input)).resolves.toHaveProperty("description");
+    });
+
+    it("rejects empty output and bounds the returned description", async () => {
+        const state = fixture();
+        generateTextMock.mockResolvedValueOnce({ text: "   " } as Awaited<ReturnType<typeof generateText>>);
+        await expect(state.service.analyzeProduct("owner", input)).rejects.toThrow();
+        generateTextMock.mockResolvedValueOnce({ text: "a".repeat(4000) } as Awaited<ReturnType<typeof generateText>>);
+        expect((await state.service.analyzeProduct("owner", input)).description).toHaveLength(3000);
+    });
+
+    it.each([
+        { isActive: false }, { modelType: "text-to-image" }, { features: [] }, { provider: { isActive: false } },
+    ])("rejects unavailable or non-vision public model %p", async (overrides) => {
+        const getProviderConfig = jest.fn();
+        const getModelInfo = jest.fn().mockResolvedValue({ id: "vision-model", model: "configured-vision", isActive: true,
+            modelType: "llm", features: ["vision"], provider: { isActive: true }, ...overrides });
+        const service = new GenerationModelService({} as never, { getModelInfo, getProviderConfig } as never);
+        await expect(service.prepareVision("vision-model")).rejects.toThrow();
+        expect(getProviderConfig).not.toHaveBeenCalled();
+        expect(generateTextMock).not.toHaveBeenCalled();
+    });
+
+    it("uses configured credentials only on the backend and returns the language adapter", async () => {
+        const getModelInfo = jest.fn().mockResolvedValue({ id: "vision-model", model: "configured-vision", isActive: true,
+            modelType: "llm", features: ["vision"], provider: { isActive: true } });
+        const languageModel = jest.fn().mockReturnValue(model);
+        const getProviderAdapter = jest.fn().mockResolvedValue({ supports: () => true, languageModel });
+        const service = new GenerationModelService({} as never, { getModelInfo,
+            getProviderConfig: jest.fn().mockResolvedValue({}), getProviderAdapter } as never);
+        expect(await service.prepareVision("vision-model")).toEqual({ model, providerOptions: {} });
+        expect(languageModel).toHaveBeenCalledWith("configured-vision");
+        expect(generateTextMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["doubao-seed-1-6-250615", true],
+        ["doubao-seed-1-6-flash-250828", true],
+        ["doubao-seed-2-1-lite-260915", true],
+        ["doubao-seed-1-6-thinking-250715", false],
+    ])("bounds reasoning for supported Doubao analysis models %s", async (configuredModel, disableThinking) => {
+        const service = new GenerationModelService({} as never, {
+            getModelInfo: jest.fn().mockResolvedValue({ id: "vision-model", model: configuredModel,
+                isActive: true, modelType: "llm", features: ["vision"],
+                provider: { isActive: true, provider: "volcengine" } }),
+            getProviderConfig: jest.fn().mockResolvedValue({}),
+            getProviderAdapter: jest.fn().mockResolvedValue({ supports: () => true, languageModel: () => model }),
+        } as never);
+        const prepared = await service.prepareVision("vision-model");
+        expect(prepared.providerOptions).toEqual(disableThinking ? { volcengine: { thinking: { type: "disabled" } } } : {});
+        expect(generateTextMock).not.toHaveBeenCalled();
+    });
+
+    it("logs only bounded failure metadata, excluding provider payloads and credentials", async () => {
+        const state = fixture();
+        const logger = jest.spyOn((state.service as unknown as { logger: { error: (message: string) => void } }).logger, "error").mockImplementation(() => {});
+        generateTextMock.mockRejectedValueOnce(Object.assign(new Error("secret provider payload"), {
+            statusCode: 400, cause: Object.assign(new Error("private image and key"), { code: "InvalidParameter" }),
+            responseBody: "secret response", headers: { Authorization: "secret key" },
+        }));
+        await expect(state.service.analyzeProduct("owner", input)).rejects.toThrow();
+        const entry = JSON.parse(logger.mock.calls[0][0]);
+        expect(entry).toMatchObject({ event: "product_image_analysis_failed", modelId: input.modelId,
+            errors: [{ name: "Error", statusCode: 400 }, { name: "Error", code: "InvalidParameter" }] });
+        expect(logger.mock.calls[0][0]).not.toMatch(/secret|private|Authorization/);
+        logger.mockRestore();
+    });
+});
 
 describe("generation capabilities", () => {
     const getProviderMock = jest.mocked(getProvider);
@@ -315,6 +454,7 @@ describe("generation runtime security", () => {
             findOne,
             findAndCount,
             remove,
+            manager: { transaction: async (work: (manager: unknown) => unknown) => work({ getRepository: () => ({ create, save, findOne }) }) },
         } as unknown as Repository<ImageGeneration>,
         new GenerationModelService(
             {} as Repository<AiModel>,
@@ -327,6 +467,7 @@ describe("generation runtime security", () => {
         new GenerationImageService(),
         {} as Queue<GenerationJobData>,
         {} as ProductImageService,
+        new GenerationBillingService({} as never, {} as never),
     );
     const input = {
         prompt: "A product photo",
@@ -339,12 +480,14 @@ describe("generation runtime security", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        findOne.mockResolvedValue({ id: taskId, userId: "owner", status: "processing", billingStatus: "free", billingAmount: 0 });
         getModelInfo.mockResolvedValue({
             id: "model",
             name: "Image model",
             model: "image-model",
             isActive: true,
             modelType: MODEL_TYPES.TEXT_TO_IMAGE,
+            billingRule: { power: 0 },
             provider: { isActive: true, provider: "adapter" },
         });
         getProviderConfig.mockResolvedValue({});
@@ -394,8 +537,7 @@ describe("generation runtime security", () => {
             new Error("Bearer sk-secret raw response body"),
         );
         await expect(service.generate("owner", input)).rejects.toThrow("图片生成失败，请稍后重试");
-        expect(update).toHaveBeenLastCalledWith(
-            expect.any(Array),
+        expect(save).toHaveBeenLastCalledWith(
             expect.objectContaining({
                 status: "failed",
                 error: "图片生成失败，请稍后重试",
@@ -642,7 +784,9 @@ describe("async generation tasks", () => {
     const getProviderConfig = jest.fn();
     const getProviderAdapter = jest.fn();
     const service = new GenerationService(
-        { create, save, update, findOne, remove } as unknown as Repository<ImageGeneration>,
+        { create, save, update, findOne, remove,
+            manager: { transaction: async (work: (manager: unknown) => unknown) => work({ getRepository: () => ({ create, save, findOne }) }) },
+        } as unknown as Repository<ImageGeneration>,
         new GenerationModelService(
             {} as Repository<AiModel>,
             {
@@ -654,6 +798,7 @@ describe("async generation tasks", () => {
         new GenerationImageService(),
         { add, getJob } as unknown as Queue<GenerationJobData>,
         {} as ProductImageService,
+        new GenerationBillingService({} as never, {} as never),
     );
     const processor = new GenerationProcessor(service);
     const job = { data } as Job<GenerationJobData>;
@@ -668,6 +813,8 @@ describe("async generation tasks", () => {
             toolKey: "creative",
             modelName: "Image model",
             status,
+            billingAmount: 0,
+            billingStatus: "uncharged",
             images: [],
             error: null,
             createdAt: new Date(),
@@ -714,6 +861,7 @@ describe("async generation tasks", () => {
             isActive: true,
             modelType: MODEL_TYPES.TEXT_TO_IMAGE,
             provider: { isActive: true, provider: "openai" },
+            billingRule: { power: 0 },
         });
         getProviderConfig.mockResolvedValue({});
         getProviderAdapter.mockResolvedValue({

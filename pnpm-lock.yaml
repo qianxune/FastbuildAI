@@ -724,6 +724,9 @@ importers:
       class-validator:
         specifier: catalog:api
         version: 0.14.4
+      fflate:
+        specifier: 0.8.2
+        version: 0.8.2
       lucide-react:
         specifier: catalog:web
         version: 0.561.0(react@19.2.4)

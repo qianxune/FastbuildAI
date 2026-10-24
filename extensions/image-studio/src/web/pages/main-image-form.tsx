@@ -1,4 +1,4 @@
-import { ImagePlus, LoaderCircle, Minus, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { ChevronDown, ImagePlus, LoaderCircle, Minus, Plus, RefreshCw, Settings, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 import {
@@ -12,28 +12,31 @@ import {
 import type { CapabilityModel } from "../../api/shared/tools";
 import {
     loadProductImage,
-    useDeleteProductImageMutation,
-    useProductImagesQuery,
+    useAnalyzeProductMutation,
     useUploadProductImageMutation,
+    useGenerationBilling,
 } from "../services/generation";
 import type { ProductImage } from "../services/types";
 
 export default function MainImageForm({
     models,
+    visionModels = [],
     available,
     locked,
     onSubmit,
 }: {
     models: CapabilityModel[];
+    visionModels?: CapabilityModel[];
     available: boolean;
     locked: boolean;
     onSubmit: (input: MainImageInput) => Promise<void>;
 }) {
     const id = useId();
     const fileInput = useRef<HTMLInputElement>(null);
-    const products = useProductImagesQuery();
+    const settingsDialog = useRef<HTMLDialogElement>(null);
+    const [products, setProducts] = useState<ProductImage[]>([]);
     const upload = useUploadProductImageMutation();
-    const remove = useDeleteProductImageMutation();
+    const analysis = useAnalyzeProductMutation();
     const [assetIds, setAssetIds] = useState<string[]>([]);
     const [uploading, setUploading] = useState(false);
     const [dragging, setDragging] = useState(false);
@@ -41,6 +44,7 @@ export default function MainImageForm({
     const [productName, setProductName] = useState("");
     const [brand, setBrand] = useState("");
     const [modelId, setModelId] = useState("");
+    const [visionModelId, setVisionModelId] = useState("");
     const [platform, setPlatform] = useState<MainImageInput["platform"]>(MAIN_PLATFORMS[0]);
     const [language, setLanguage] = useState<MainImageInput["language"]>(MAIN_LANGUAGES[0]);
     const [ratio, setRatio] = useState<MainImageInput["ratio"]>("1:1");
@@ -51,18 +55,21 @@ export default function MainImageForm({
         selling: 1,
         other: 0,
     });
-    const [instructions, setInstructions] = useState("");
+    const [description, setDescription] = useState("");
     const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
     const selectedModelId = models.some((model) => model.id === modelId)
         ? modelId
         : (models[0]?.id ?? "");
-    const disabled = locked || uploading || remove.isPending;
+    const selectedVisionModelId = visionModels.some((model) => model.id === visionModelId)
+        ? visionModelId : (visionModels[0]?.id ?? "");
+    const disabled = locked || uploading || analysis.isPending;
+    const billing = useGenerationBilling(selectedModelId, total, available);
 
     const uploadFiles = async (files: File[]) => {
         if (disabled || !files.length) return;
         setError(null);
-        if (files.length + assetIds.length > 5) {
-            setError("每次最多选择 5 张商品图");
+        if (files.length + products.length > 5) {
+            setError("每次最多上传 5 张商品图");
             return;
         }
         if (
@@ -80,6 +87,7 @@ export default function MainImageForm({
         try {
             for (const file of files) {
                 const product = await upload.mutateAsync(file);
+                setProducts((current) => [...current, product]);
                 setAssetIds((current) => [...current, product.id]);
             }
         } catch (failure) {
@@ -89,24 +97,33 @@ export default function MainImageForm({
         }
     };
 
-    const deleteImage = async (image: ProductImage) => {
-        if (disabled || !window.confirm("删除这张商品图？")) return;
+    const removeImage = (image: ProductImage) => {
+        if (disabled) return;
+        setError(null);
+        setProducts((current) => current.filter((value) => value.id !== image.id));
+        setAssetIds((current) => current.filter((value) => value !== image.id));
+    };
+
+    const analyzeProduct = async () => {
+        if (disabled || !assetIds.length || !selectedVisionModelId) return;
+        if (description.trim() && !window.confirm("分析结果将替换现有商品描述，是否继续？")) return;
         setError(null);
         try {
-            await remove.mutateAsync(image.id);
-            setAssetIds((current) => current.filter((value) => value !== image.id));
+            const result = await analysis.mutateAsync({ modelId: selectedVisionModelId, assetIds, productName: productName.trim(), language });
+            setDescription(result.description);
         } catch (failure) {
-            setError(failure instanceof Error ? failure.message : "商品图删除失败");
+            setError(failure instanceof Error ? failure.message : "图片分析失败，请重试");
         }
     };
 
     return (
         <form
-            className="ftpl show"
+            className="ftpl show main-product-form"
             onSubmit={(event) => {
                 event.preventDefault();
                 if (
                     disabled ||
+                    !billing.ready ||
                     !available ||
                     !selectedModelId ||
                     !assetIds.length ||
@@ -126,7 +143,8 @@ export default function MainImageForm({
                     ratio,
                     resolution,
                     counts,
-                    instructions: instructions.trim(),
+                    description: description.trim(),
+                    instructions: "",
                 });
             }}
         >
@@ -142,7 +160,7 @@ export default function MainImageForm({
             <fieldset className="main-fields" disabled={disabled}>
                 <div className="field">
                     <div className="f-label">
-                        商品图片 <span className="opt">已选 {assetIds.length}/5</span>
+                        上传商品图 <span className="opt">已选 {assetIds.length} · {products.length}/5</span>
                     </div>
                     <input
                         ref={fileInput}
@@ -155,10 +173,20 @@ export default function MainImageForm({
                             event.target.value = "";
                         }}
                     />
+                    <div className="product-upload-row">
+                        {products.map((image, index) => (
+                            <ProductThumbnail key={image.id} image={image} index={index}
+                                selected={assetIds.includes(image.id)} disabled={disabled}
+                                selectionFull={assetIds.length >= 5}
+                                onToggle={() => setAssetIds((current) => current.includes(image.id)
+                                    ? current.filter((value) => value !== image.id)
+                                    : current.length < 5 ? [...current, image.id] : current)}
+                                onDelete={() => removeImage(image)} />
+                        ))}
                     <button
                         type="button"
                         className={`dz main-upload${dragging ? "dragging" : ""}`}
-                        disabled={disabled || assetIds.length >= 5}
+                        disabled={disabled || products.length >= 5}
                         onClick={() => fileInput.current?.click()}
                         onDragOver={(event) => {
                             event.preventDefault();
@@ -174,49 +202,14 @@ export default function MainImageForm({
                         {uploading ? (
                             <LoaderCircle size={22} className="main-upload-spinner" />
                         ) : (
-                            <Upload size={22} />
+                            products.length ? <Plus size={22} /> : <Upload size={22} />
                         )}
-                        <span className="dz-t">{uploading ? "正在上传..." : "上传商品图"}</span>
-                        <span className="dz-s">PNG / JPEG / WebP · 每张不超过 10 MB</span>
+                        <span className="dz-t">{uploading ? "上传中..." : products.length ? "继续添加" : "上传商品图"}</span>
                     </button>
-                    {products.isPending ? (
-                        <p className="workflow-message" role="status">
-                            商品图加载中...
-                        </p>
-                    ) : products.isError ? (
-                        <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => void products.refetch()}
-                        >
-                            <RefreshCw size={14} />
-                            重新加载商品图
-                        </button>
-                    ) : (
-                        <div className="product-images">
-                            {(products.data ?? []).map((image, index) => (
-                                <ProductThumbnail
-                                    key={image.id}
-                                    image={image}
-                                    index={index}
-                                    selected={assetIds.includes(image.id)}
-                                    disabled={disabled}
-                                    selectionFull={assetIds.length >= 5}
-                                    onToggle={() => {
-                                        setAssetIds((current) =>
-                                            current.includes(image.id)
-                                                ? current.filter((value) => value !== image.id)
-                                                : current.length < 5
-                                                  ? [...current, image.id]
-                                                  : current,
-                                        );
-                                    }}
-                                    onDelete={() => void deleteImage(image)}
-                                />
-                            ))}
-                        </div>
-                    )}
+                    </div>
+                    <p className="upload-formats">PNG / JPEG / WebP · 每张不超过 10 MB</p>
                 </div>
+                <div className="main-settings-grid">
                 <div className="field">
                     <label className="f-label" htmlFor={`${id}-name`}>
                         商品名称
@@ -262,6 +255,8 @@ export default function MainImageForm({
                         ))}
                     </select>
                 </div>
+                </div>
+                <div className="main-settings-grid">
                 <div className="field">
                     <label className="f-label" htmlFor={`${id}-platform`}>
                         目标平台
@@ -280,26 +275,36 @@ export default function MainImageForm({
                     </select>
                 </div>
                 <div className="field">
-                    <label className="f-label" htmlFor={`${id}-language`}>
-                        输出语言
-                    </label>
-                    <select
-                        id={`${id}-language`}
-                        className="sel"
-                        value={language}
-                        onChange={(event) =>
-                            setLanguage(event.target.value as MainImageInput["language"])
-                        }
-                    >
-                        {MAIN_LANGUAGES.map((value) => (
-                            <option key={value}>{value}</option>
-                        ))}
+                    <label className="f-label" htmlFor={`${id}-language`}>输出语言</label>
+                    <select id={`${id}-language`} className="sel" value={language}
+                        onChange={(event) => setLanguage(event.target.value as MainImageInput["language"])}>
+                        {MAIN_LANGUAGES.map((value) => <option key={value}>{value}</option>)}
                     </select>
+                </div>
+                </div>
+                <div className="field product-description-field">
+                    <div className="f-label">
+                        <label htmlFor={`${id}-description`}>商品描述</label>
+                        <button type="button" className="analysis-button" disabled={disabled || !assetIds.length || !selectedVisionModelId}
+                            title={!selectedVisionModelId ? "请在公共模型配置中启用支持视觉的语言模型" : "分析已选商品图片"}
+                            onClick={() => void analyzeProduct()}>
+                            {analysis.isPending ? <LoaderCircle size={14} className="main-upload-spinner" /> : <Sparkles size={14} />}
+                            {analysis.isPending ? "分析中..." : "AI 分析"}
+                        </button>
+                    </div>
+                    {visionModels.length > 1 && <select className="sel analysis-model-select" aria-label="图片分析模型" value={selectedVisionModelId} onChange={(event) => setVisionModelId(event.target.value)}>
+                        {visionModels.map((model) => <option key={model.id} value={model.id}>{model.name} · {model.provider}</option>)}
+                    </select>}
+                    <textarea id={`${id}-description`} className="ta product-description" maxLength={3000}
+                        value={description} onChange={(event) => setDescription(event.target.value)}
+                        placeholder="商品外观、材质、结构、用途及真实卖点" />
+                    <span className="description-count">{description.length}/3000</span>
                 </div>
                 <div className="field">
                     <div className="f-label">
                         配图类型 <span className="opt">共 {total}/4 张</span>
                     </div>
+                    <div className="main-type-grid">
                     {(
                         Object.entries(MAIN_IMAGE_TYPES) as Array<
                             [keyof typeof MAIN_IMAGE_TYPES, string]
@@ -352,7 +357,17 @@ export default function MainImageForm({
                             </div>
                         </div>
                     ))}
+                    </div>
                 </div>
+            </fieldset>
+            <div className="form-foot main-form-foot">
+                <button type="button" className="advanced-settings-trigger" disabled={disabled}
+                    aria-haspopup="dialog" onClick={() => settingsDialog.current?.showModal()}>
+                    <Settings size={15} /><span>高级设置</span><span className="advanced-setting-value">比例 {ratio}</span><span className="advanced-setting-value">清晰度 {resolution}</span><ChevronDown size={14} />
+                </button>
+                <dialog ref={settingsDialog} className="main-settings-dialog" aria-labelledby={`${id}-settings-title`} onClick={(event) => { if (event.target === event.currentTarget) event.currentTarget.close(); }}>
+                    <div className="settings-dialog-head"><h3 id={`${id}-settings-title`}>高级设置</h3><button type="button" className="icon-btn" title="关闭高级设置" aria-label="关闭高级设置" onClick={() => settingsDialog.current?.close()}><X size={18} /></button></div>
+                    <fieldset className="main-fields" disabled={disabled}>
                 <div className="field">
                     <div className="f-label" id={`${id}-ratio`}>
                         图片比例
@@ -397,27 +412,17 @@ export default function MainImageForm({
                         ))}
                     </div>
                 </div>
-                <div className="field">
-                    <label className="f-label" htmlFor={`${id}-instructions`}>
-                        补充要求 <span className="opt">选填</span>
-                    </label>
-                    <textarea
-                        id={`${id}-instructions`}
-                        className="ta"
-                        maxLength={1500}
-                        value={instructions}
-                        onChange={(event) => setInstructions(event.target.value)}
-                        placeholder="商品卖点、背景或拍摄风格"
-                    />
-                </div>
-            </fieldset>
-            <div className="form-foot">
-                <span className="cost-line">费用暂不可用</span>
+                    </fieldset>
+                    <button type="button" className="btn btn-lime settings-confirm" onClick={() => settingsDialog.current?.close()}>确定</button>
+                </dialog>
+                <span className="cost-line" role="status">{billing.costText}</span>
+                {(billing.quote.isError || billing.balance.isError) && <button type="button" className="icon-btn" title="重新查询积分" aria-label="重新查询积分" onClick={() => { void billing.quote.refetch(); void billing.balance.refetch(); }}><RefreshCw size={14} /></button>}
                 <button
                     className="btn btn-lime"
                     type="submit"
                     disabled={
                         disabled ||
+                        !billing.ready ||
                         !available ||
                         !assetIds.length ||
                         !productName.trim() ||
@@ -454,7 +459,7 @@ function ProductThumbnail({
     const [failed, setFailed] = useState(false);
     useEffect(() => loadProductImage(image.id, setUrl, () => setFailed(true)), [image.id]);
     return (
-        <div className={`product-thumb${selected ? "selected" : ""}`}>
+        <div className={`product-thumb${selected ? " selected" : ""}`}>
             <label>
                 {url ? (
                     <img src={url} alt={`商品图 ${index + 1}`} />
@@ -474,8 +479,8 @@ function ProductThumbnail({
             <button
                 type="button"
                 className="product-delete"
-                title={`删除商品图 ${index + 1}`}
-                aria-label={`删除商品图 ${index + 1}`}
+                title={`移除商品图 ${index + 1}`}
+                aria-label={`移除商品图 ${index + 1}`}
                 disabled={disabled}
                 onClick={onDelete}
             >

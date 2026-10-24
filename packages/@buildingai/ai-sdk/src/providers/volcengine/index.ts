@@ -3,6 +3,7 @@ import type { EmbeddingModelV3, LanguageModelV3 } from "@ai-sdk/provider";
 
 import type { AIProvider, BaseProviderSettings, ProviderModelInfo } from "../../types";
 import { fetchProviderModels } from "../../utils/fetch-models";
+import { createVolcengineImageModel } from "./image-model";
 
 export interface VolcengineProviderSettings extends BaseProviderSettings {}
 
@@ -38,6 +39,10 @@ class VolcengineProviderImpl implements AIProvider {
 
     embeddingModel(modelId: string): EmbeddingModelV3 {
         return this.baseProvider.embeddingModel(modelId);
+    }
+
+    image(modelId: string) {
+        return createVolcengineImageModel(this.settings, modelId);
     }
 
     async listModels(): Promise<ProviderModelInfo[]> {

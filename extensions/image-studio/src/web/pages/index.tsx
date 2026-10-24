@@ -25,12 +25,13 @@ import {
   Zap,
 } from "lucide-react";
 import { useDocumentHead } from "@buildingai/hooks";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ToolKey } from "../../api/shared/tools";
 import { MAIN_IMAGE_TYPES, mainImageVariants, type MainImageInput } from "../../api/shared/main-image";
 import MainImageForm from "./main-image-form";
 import {
   loadGenerationImage,
+  fetchGenerationImage,
   isGenerationActive,
   useGenerationCapabilitiesQuery,
   useGenerationQuery,
@@ -40,6 +41,9 @@ import {
   useRetryGenerationMutation,
   useCancelGenerationMutation,
   useDeleteGenerationMutation,
+  useCreditBalanceQuery,
+  useGenerationBilling,
+  fetchGenerationQuote,
 } from "../services/generation";
 import type { ImageGeneration } from "../services/types";
 
@@ -51,6 +55,13 @@ function errorMessage(error: unknown) {
 
 function generationStatus(item: ImageGeneration) {
   return { queued: "排队中", processing: "正在生成", completed: "已完成", failed: "失败", cancelled: "已取消" }[item.status];
+}
+
+function billingCaption(item: ImageGeneration) {
+  if (item.billingStatus === "refunded") return `已退还 ${item.billingAmount} 积分`;
+  if (item.billingStatus === "charged") return `已扣除 ${item.billingAmount} 积分`;
+  if (item.billingStatus === "free") return "本次 0 积分";
+  return "";
 }
 
 function imageCaption(item: ImageGeneration, index: number) {
@@ -129,11 +140,19 @@ export default function ImageStudioPage() {
   const [result, setResult] = useState<ImageGeneration | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [retryPreparing, setRetryPreparing] = useState(false);
+  const balance = useCreditBalanceQuery();
   const task = useGenerationQuery(result?.id);
   const currentResult = task.data ?? history.data?.items.find((item) => item.id === result?.id) ?? result;
-  const submitting = generate.isPending || generateMain.isPending || retry.isPending;
+  const submitting = generate.isPending || generateMain.isPending || retry.isPending || retryPreparing;
   const busy = submitting || isGenerationActive(currentResult);
   const locked = busy || remove.isPending || cancel.isPending;
+  const pendingCount = generateMain.isPending && generateMain.variables
+    ? mainImageVariants(generateMain.variables).length
+    : generate.isPending ? (generate.variables?.count ?? 1) : (currentResult?.count ?? 1);
+  const pendingMainInput = generateMain.isPending ? generateMain.variables
+    : generate.isPending ? null : currentResult?.mainInput;
   const creative = capabilities.data?.tools.find((item) => item.key === "creative");
   const models = capabilities.data?.models.filter((model) =>
     model.capabilities.includes("text-to-image") &&
@@ -146,6 +165,7 @@ export default function ImageStudioPage() {
   const selectedSize = sizes.includes(size) ? size : (sizes[0] ?? "");
   const creativeAvailable = capabilities.isSuccess && !capabilities.isFetching &&
     creative?.status === "available" && models.length > 0 && sizes.length > 0;
+  const creativeBilling = useGenerationBilling(selectedModelId, count, tool === "creative" && creativeAvailable);
   const main = capabilities.data?.tools.find((item) => item.key === "main");
   const mainModels = capabilities.data?.models.filter((model) =>
     model.capabilities.includes("reference-image") && main?.modelIdsByCapability["reference-image"]?.includes(model.id),
@@ -191,7 +211,7 @@ export default function ImageStudioPage() {
   const t = TOOLS[tool];
 
   const startGen = async () => {
-    if (locked || tool !== "creative" || !creativeAvailable) return;
+    if (locked || tool !== "creative" || !creativeAvailable || !creativeBilling.ready) return;
     if (prompt.trim().length < 3 || prompt.trim().length > 2000) {
       setWorkflowError("请输入 3–2000 字的提示词");
       return;
@@ -227,12 +247,17 @@ export default function ImageStudioPage() {
   const retryGeneration = async (item: ImageGeneration) => {
     if (locked || !canRetry(item)) return;
     setWorkflowError(null);
-    setShowHistory(false);
+    setRetryPreparing(true);
     try {
+      const quote = await fetchGenerationQuote(item.modelId, item.count);
+      if (!window.confirm(`本次重试费用为 ${quote.total} 积分，是否继续？`)) return;
+      setShowHistory(false);
       setResult(await retry.mutateAsync(item.id));
       setPage(1);
     } catch (error) {
       setWorkflowError(errorMessage(error));
+    } finally {
+      setRetryPreparing(false);
     }
   };
 
@@ -255,6 +280,31 @@ export default function ImageStudioPage() {
       if (result?.id === item.id) setResult(cancelled);
     } catch (error) {
       setWorkflowError(errorMessage(error));
+    }
+  };
+
+  const downloadAllImages = async (item: ImageGeneration) => {
+    if (downloading || !item.images.length) return;
+    setDownloading(true);
+    try {
+      const { zipSync } = await import("fflate");
+      const files: Record<string, Uint8Array> = {};
+      for (let index = 0; index < item.images.length; index++) {
+        const blob = await fetchGenerationImage(item.id, index, import.meta.env.VITE_APP_WEB_API_PREFIX || "api");
+        const extension = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png";
+        files[`image-${index + 1}.${extension}`] = new Uint8Array(await blob.arrayBuffer());
+      }
+      const archive = new Blob([new Uint8Array(zipSync(files, { level: 0 }))], { type: "application/zip" });
+      const objectUrl = URL.createObjectURL(archive);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = `image-studio-${item.id}.zip`;
+      document.body.appendChild(anchor);
+      try { anchor.click(); } finally { anchor.remove(); window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000); }
+    } catch {
+      setToast({ msg: "整组下载失败，请重试或逐张下载", warn: true });
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -295,11 +345,12 @@ export default function ImageStudioPage() {
           <b>{t.name}</b>
         </nav>
         <div className="tb-right">
-          <div className="credits" title="计费余额暂不可用">
+          <div className="credits" title="可用积分余额" role="status">
             <Zap width={13} height={13} />
-            <span>余额暂不可用</span>
+            <span>{balance.isSuccess ? `${balance.data.balance.toLocaleString()} 积分` : balance.isError ? "余额查询失败" : "余额加载中..."}</span>
           </div>
-          <button className="tb-charge" disabled title="计费尚未接入">
+          {balance.isError && <button className="icon-btn" title="重新查询余额" aria-label="重新查询余额" disabled={balance.isFetching} onClick={() => void balance.refetch()}><RefreshCw size={14} /></button>}
+          <button className="tb-charge" disabled title="请在主站账户中心充值">
             充值
           </button>
           <button className="icon-btn" title="生成历史" aria-label="生成历史" onClick={() => setShowHistory(true)}>
@@ -363,7 +414,7 @@ export default function ImageStudioPage() {
         <section className="form">
           {unavailableReason(tool) && <div className="workflow-message" role="status">{unavailableReason(tool)}</div>}
           {capabilities.isError && <button className="btn btn-ghost btn-sm" disabled={capabilities.isFetching} onClick={() => void capabilities.refetch()}><RefreshCw size={14} />重新检查</button>}
-          {tool === "main" ? <MainImageForm models={mainModels} available={mainAvailable} locked={locked} onSubmit={startMain} /> : tool === "creative" ? (
+          {tool === "main" ? <MainImageForm models={mainModels} visionModels={(capabilities.data?.models ?? []).filter((model) => model.capabilities.includes("vision"))} available={mainAvailable} locked={locked} onSubmit={startMain} /> : tool === "creative" ? (
             <form className="ftpl show" onSubmit={(event) => { event.preventDefault(); void startGen(); }}>
               <div className="form-head"><h2>{t.name}</h2><p>{t.desc}</p></div>
               <fieldset className="creative-fields" disabled={locked}>
@@ -392,8 +443,9 @@ export default function ImageStudioPage() {
                   <select id="creative-style" className="sel" value={style} onChange={(event) => setStyle(event.target.value)}><option value="vivid">鲜明</option><option value="natural">自然</option></select>
                 </div>
               </fieldset>
-              <div className="form-foot"><span className="cost-line">费用暂不可用</span>
-                <button className="btn btn-lime" type="submit" disabled={locked || !creativeAvailable || prompt.trim().length < 3 || !Number.isInteger(count) || count < 1 || count > 4}>{busy ? "生成中..." : "立即生成"}</button>
+              <div className="form-foot"><span className="cost-line" role="status">{creativeBilling.costText}</span>
+                {(creativeBilling.quote.isError || creativeBilling.balance.isError) && <button type="button" className="icon-btn" title="重新查询积分" aria-label="重新查询积分" onClick={() => { void creativeBilling.quote.refetch(); void creativeBilling.balance.refetch(); }}><RefreshCw size={14} /></button>}
+                <button className="btn btn-lime" type="submit" disabled={locked || !creativeAvailable || !creativeBilling.ready || prompt.trim().length < 3 || !Number.isInteger(count) || count < 1 || count > 4}>{busy ? "生成中..." : "立即生成"}</button>
               </div>
             </form>
           ) : <fieldset className="future-form" disabled>{renderForm({
@@ -436,6 +488,7 @@ export default function ImageStudioPage() {
                   {history.data.items.map((item) => (
                     <article className="history-entry" key={item.id}>
                       <div className="history-summary"><button className="history-open" onClick={() => { setResult(item); setShowHistory(false); }}><strong>{item.prompt}</strong><span>{item.modelName} · {item.size} · {item.count} 张 · {new Date(item.createdAt).toLocaleString()}</span></button><span>{generationStatus(item)}</span></div>
+                      {billingCaption(item) && <p className="workflow-message">{billingCaption(item)}</p>}
                       {item.error && <p className="workflow-message error">{item.error}</p>}
                       <div className="res-grid">{item.images.map((_image, index) => <ResultTile key={`${item.id}-${index}`} generationId={item.id} imageIndex={index} caption={imageCaption(item, index)} onDownload={(blob, url) => downloadImage(blob, url, item.id, index)} />)}</div>
                       <div className="history-actions">{isGenerationActive(item) && <button className="btn btn-ghost btn-sm" disabled={cancel.isPending} onClick={() => void cancelGeneration(item)}><X size={14} />取消</button>}{(item.status === "failed" || item.status === "cancelled") && <button className="btn btn-ghost btn-sm" disabled={locked || !canRetry(item)} title={canRetry(item) ? "重试生成" : "当前能力不支持此记录重试"} onClick={() => void retryGeneration(item)}><RefreshCw size={14} />重试</button>}<button className="icon-btn" title="删除记录" aria-label="删除记录" disabled={locked || isGenerationActive(item)} onClick={() => void deleteGeneration(item)}><Trash2 size={15} /></button></div>
@@ -446,11 +499,23 @@ export default function ImageStudioPage() {
               )}
             </div>
           ) : busy ? (
-            <div className="cstate show"><div className="canvas-inner"><div className="gen-head"><span className="spin" /><span role="status">{submitting ? "正在提交任务" : currentResult ? generationStatus(currentResult) : "正在生成"} · {submitting ? t.name : currentResult?.toolKey === "main" ? "商品主图" : "创意生图"}</span></div><div className="res-actions">{currentResult && isGenerationActive(currentResult) && <button className="btn btn-ghost btn-sm" disabled={cancel.isPending} onClick={() => void cancelGeneration(currentResult)}><X size={14} />{cancel.isPending ? "正在取消..." : "取消生成"}</button>}<button className="btn btn-ghost btn-sm" onClick={() => setShowHistory(true)}><History size={14} />查看历史</button></div></div></div>
+            <div className="cstate show"><div className="canvas-inner">
+              <div className="generation-summary"><div className="gen-head"><span className="spin" /><span role="status">{submitting ? "正在提交任务" : currentResult ? generationStatus(currentResult) : "正在生成"} · {pendingCount} 张</span></div><div className="res-actions">{!submitting && currentResult && isGenerationActive(currentResult) && <button className="btn btn-ghost btn-sm" disabled={cancel.isPending} onClick={() => void cancelGeneration(currentResult)}><X size={14} />{cancel.isPending ? "正在取消..." : "取消生成"}</button>}<button className="btn btn-ghost btn-sm" onClick={() => setShowHistory(true)}><History size={14} />查看历史</button></div></div>
+              <progress className="generation-progress" aria-label={submitting ? "任务提交中" : currentResult?.status === "queued" ? "等待生成" : "图片生成中"} />
+              <div className="res-grid" aria-label="待生成图片">
+                {Array.from({ length: pendingCount }, (_, index) => <div className="rtile generation-placeholder shim" key={index}>
+                  <span className="spin" aria-hidden="true" />
+                  <span>{pendingMainInput ? MAIN_IMAGE_TYPES[mainImageVariants(pendingMainInput)[index]] : `图片 ${index + 1}`}</span>
+                  <span>{submitting ? "提交中" : currentResult?.status === "queued" ? "等待生成" : "生成中"}</span>
+                </div>)}
+              </div>
+            </div></div>
           ) : currentResult ? (
             <div className="cstate show"><div className="canvas-inner">
-              <div className="res-bar"><h3>{generationStatus(currentResult)}</h3><div className="res-actions"><button className="btn btn-ghost btn-sm" onClick={() => setResult(null)}>返回创作</button><button className="icon-btn" title="删除记录" aria-label="删除记录" disabled={locked || isGenerationActive(currentResult)} onClick={() => void deleteGeneration(currentResult)}><Trash2 size={15} /></button></div></div>
+              <div className="res-bar"><h3>{generationStatus(currentResult)}</h3><div className="res-actions">{currentResult.images.length > 0 && <button className="btn btn-ghost btn-sm" disabled={downloading} onClick={() => void downloadAllImages(currentResult)}><Download size={14} />{downloading ? "打包中..." : "一键下载"}</button>}<button className="btn btn-ghost btn-sm" onClick={() => setResult(null)}>返回创作</button><button className="icon-btn" title="删除记录" aria-label="删除记录" disabled={locked || downloading || isGenerationActive(currentResult)} onClick={() => void deleteGeneration(currentResult)}><Trash2 size={15} /></button></div></div>
+              {currentResult.status === "completed" && <progress className="generation-progress" value={currentResult.images.length} max={currentResult.count} aria-label="图片生成完成" />}
               <p className="workflow-message">{currentResult.modelName} · {currentResult.size} · {currentResult.images.length} 张</p>
+              {billingCaption(currentResult) && <p className="workflow-message">{billingCaption(currentResult)}</p>}
               <p className="result-prompt">{currentResult.prompt}</p>
               {currentResult.status === "failed" && <div className="workflow-message error" role="alert"><TriangleAlert size={18} /><span>{currentResult.error || "生成失败"}</span><button className="btn btn-ghost btn-sm" disabled={locked || !canRetry(currentResult)} onClick={() => void retryGeneration(currentResult)}><RefreshCw size={14} />重试</button></div>}
               {currentResult.status === "cancelled" && <div className="workflow-message" role="status">已取消<button className="btn btn-ghost btn-sm" disabled={locked || !canRetry(currentResult)} onClick={() => void retryGeneration(currentResult)}><RefreshCw size={14} />重新生成</button></div>}
@@ -860,6 +925,8 @@ function ResultTile({
   const [holding, setHolding] = useState(false);
   const [image, setImage] = useState<{ id: string; index: number; blob: Blob; url: string } | null>(null);
   const [failure, setFailure] = useState<{ id: string; index: number } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const previewDialog = useRef<HTMLDialogElement>(null);
   const loaded = image?.id === generationId && image.index === imageIndex ? image : null;
   const failed = failure?.id === generationId && failure.index === imageIndex;
   useEffect(() => loadGenerationImage(
@@ -868,8 +935,9 @@ function ResultTile({
     import.meta.env.VITE_APP_WEB_API_PREFIX || "api",
     (result) => setImage({ ...result, id: generationId, index: imageIndex }),
     () => setFailure({ id: generationId, index: imageIndex }),
-  ), [generationId, imageIndex]);
+  ), [generationId, imageIndex, attempt]);
   return (
+    <>
     <div
       className={`rtile${hover ? " peek" : ""}${holding ? " holding" : ""}`}
       onMouseEnter={() => setHover(true)}
@@ -878,17 +946,22 @@ function ResultTile({
       onPointerUp={() => setHolding(false)}
       onPointerLeave={() => setHolding(false)}
     >
-      {loaded ? <img src={loaded.url} alt={caption} draggable={false} /> : <span role={failed ? "alert" : "status"}>{failed ? "图片加载失败，请稍后重试" : "图片加载中..."}</span>}
+      {loaded ? <button type="button" className="result-preview" aria-label={`预览图片 ${caption}`} title="放大预览" onClick={() => previewDialog.current?.showModal()}><img src={loaded.url} alt={caption} draggable={false} /></button> : <div className="generation-placeholder" role={failed ? "alert" : "status"}><span>{failed ? "图片加载失败" : "图片加载中..."}</span>{failed && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setFailure(null); setAttempt((value) => value + 1); }}><RefreshCw size={14} />重新加载</button>}</div>}
       {beforeSrc && <img className="before" src={beforeSrc} alt="原图" draggable={false} />}
       {beforeSrc && <span className="hold-tag">按住看原图</span>}
       <div className="ovl">
         <button className="o-btn" title="下载" aria-label={`下载图片 ${caption}`} disabled={!loaded} onClick={() => loaded && onDownload(loaded.blob, loaded.url)}>
           <Download width={14} height={14} />
         </button>
-        <a className="o-btn" title="打开原图" aria-label={`打开原图 ${caption}`} href={loaded?.url} aria-disabled={!loaded} target="_blank" rel="noopener noreferrer"><ImageIcon size={14} /></a>
+        <button type="button" className="o-btn" title="放大预览" aria-label={`放大预览 ${caption}`} disabled={!loaded} onClick={() => previewDialog.current?.showModal()}><ImageIcon size={14} /></button>
         <span className="o-cap">{caption}</span>
       </div>
     </div>
+    <dialog ref={previewDialog} className="result-image-dialog" aria-label={`图片预览 ${caption}`} onClick={(event) => { if (event.target === event.currentTarget) event.currentTarget.close(); }}>
+      <div className="res-actions"><span>{caption}</span><button type="button" className="icon-btn" title="下载原图" aria-label="下载原图" disabled={!loaded} onClick={() => loaded && onDownload(loaded.blob, loaded.url)}><Download size={18} /></button><button type="button" className="icon-btn" title="关闭预览" aria-label="关闭预览" onClick={() => previewDialog.current?.close()}><X size={18} /></button></div>
+      {loaded && <img src={loaded.url} alt={caption} />}
+    </dialog>
+    </>
   );
 }
 

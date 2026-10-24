@@ -121,6 +121,15 @@ export class ProductImageService {
         }
     }
 
+    async readForAnalysis(userId: string, id: string) {
+        const buffer = await this.read(userId, id);
+        return sharp(buffer, { limitInputPixels: 40000000 })
+            .resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true })
+            .flatten({ background: "#ffffff" })
+            .jpeg({ quality: 85 })
+            .toBuffer();
+    }
+
     async list(userId: string) {
         const directory = this.directory(userId);
         const names = await readdir(directory).catch((error: NodeJS.ErrnoException) => {
