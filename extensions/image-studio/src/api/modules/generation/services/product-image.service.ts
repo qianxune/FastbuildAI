@@ -15,6 +15,7 @@ export interface ProductImageUpload {
 
 @Injectable()
 export class ProductImageService {
+    /** 校验用户编号并构造按用户隔离的私有商品图目录。 */
     private directory(userId: string) {
         if (!UUID.test(userId)) throw HttpErrorFactory.badRequest("用户信息无效");
         return path.join(
@@ -30,6 +31,7 @@ export class ProductImageService {
         );
     }
 
+    /** 校验图片编号、真实路径及文件属性，拒绝符号链接和超限文件。 */
     private async filename(userId: string, id: string) {
         if (!UUID.test(id)) throw HttpErrorFactory.notFound("商品图不存在");
         const directory = await realpath(this.directory(userId));
@@ -42,6 +44,7 @@ export class ProductImageService {
         return { filename, stat };
     }
 
+    /** 校验静态图片并旋转缩放为 PNG，限制用户存储数量后排他写入私有目录。 */
     async upload(userId: string, file?: ProductImageUpload) {
         if (
             !file?.buffer?.length ||
@@ -106,6 +109,7 @@ export class ProductImageService {
         return { id, mediaType: "image/png", width, height, size: buffer.length };
     }
 
+    /** 读取用户所属商品图并检查 PNG 签名和大小，失败时统一返回未找到提示。 */
     async read(userId: string, id: string) {
         try {
             const { filename } = await this.filename(userId, id);
@@ -121,6 +125,7 @@ export class ProductImageService {
         }
     }
 
+    /** 将商品图缩放到一千零二十四像素以内，铺白底并转为 JPEG 供视觉分析。 */
     async readForAnalysis(userId: string, id: string) {
         const buffer = await this.read(userId, id);
         return sharp(buffer, { limitInputPixels: 40000000 })
@@ -130,6 +135,7 @@ export class ProductImageService {
             .toBuffer();
     }
 
+    /** 枚举用户目录中的有效商品图元数据，跳过异常文件并按修改时间倒序返回。 */
     async list(userId: string) {
         const directory = this.directory(userId);
         const names = await readdir(directory).catch((error: NodeJS.ErrnoException) => {
@@ -164,6 +170,7 @@ export class ProductImageService {
             .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     }
 
+    /** 校验归属路径后删除商品图；历史引用保护由上层生成服务负责。 */
     async remove(userId: string, id: string) {
         try {
             const { filename } = await this.filename(userId, id);

@@ -14,15 +14,18 @@ import { GENERATION_FAILED } from "../constants/generation.constants";
 
 @Injectable()
 export class GenerationBillingService {
+    /** 注入扩展积分收支服务与可用余额查询服务。 */
     constructor(
         private readonly extensionBilling: ExtensionBillingService,
         private readonly baseBilling: BaseBillingService,
     ) {}
 
+    /** 查询用户当前可消费积分，不扣费也不创建生成任务。 */
     async balance(userId: string) {
         return { balance: await this.baseBilling.getSpendablePower(userId) };
     }
 
+    /** 在调用方事务中按张数计价、保存任务并扣费；任一步失败均由事务回滚。 */
     async createTask(
         manager: EntityManager,
         input: DeepPartial<ImageGeneration> & { userId: string; count: number },
@@ -56,6 +59,7 @@ export class GenerationBillingService {
         return generation;
     }
 
+    /** 锁定任务后将未结束任务标记为失败或取消；已扣费任务锁定用户并退款，避免重复退款。 */
     async finishUnsuccessful(
         manager: EntityManager,
         userId: string,

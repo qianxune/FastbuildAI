@@ -17,11 +17,13 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 
 @Injectable()
 export class GenerationImageService {
+    /** 根据扩展接口前缀构造生成图的受保护访问地址，索引从零开始。 */
     url(id: string, index: number) {
         const prefix = (process.env.VITE_APP_WEB_API_PREFIX || "api").replace(/^\/+|\/+$/g, "");
         return `/${APP_IDENTIFIER}/${prefix}/generations/${id}/images/${index}`;
     }
 
+    /** 解析新旧存储位置并校验真实路径、文件类型、大小及图片签名后读取文件。 */
     async read(id: string, index: number, image: GeneratedImage) {
         const location = this.imageLocation(id, index, image);
         try {
@@ -38,6 +40,7 @@ export class GenerationImageService {
         }
     }
 
+    /** 删除记录关联的新旧图片文件；忽略文件不存在，其余错误转换为业务提示。 */
     async remove(id: string, images: GeneratedImage[]) {
         await Promise.all(
             images.map(async (image, index) => {
@@ -55,6 +58,7 @@ export class GenerationImageService {
         );
     }
 
+    /** 尽力清理当前私有目录中的任务输出，适用于失败或取消后的补偿。 */
     cleanup(id: string, images: GeneratedImage[]) {
         return this.cleanupFiles(
             images.map((image, index) =>
@@ -66,6 +70,7 @@ export class GenerationImageService {
         );
     }
 
+    /** 校验一至四张图片的 Base64、格式与大小后排他写入；失败时清理本次写入文件。 */
     async persist(
         generationId: string,
         images: Array<{ base64: string; mediaType: string }>,
@@ -119,6 +124,7 @@ export class GenerationImageService {
         }
     }
 
+    /** 返回生成图目录，可切换到兼容旧记录的 uploads 路径。 */
     private storageDirectory(legacy = false) {
         return path.join(
             process.cwd(),
@@ -132,6 +138,7 @@ export class GenerationImageService {
         );
     }
 
+    /** 校验任务编号和图片元数据，将受保护地址或合法旧地址映射到存储文件名。 */
     private imageLocation(id: string, index: number, image: GeneratedImage) {
         if (
             !new RegExp(`^${UUID_PATTERN}$`, "i").test(id) ||
@@ -163,6 +170,7 @@ export class GenerationImageService {
         return { directory: this.storageDirectory(true), filename };
     }
 
+    /** 解析真实路径并拒绝指向不同目标的符号链接，返回校验后的文件路径。 */
     private async checkedPath(directory: string, filename: string) {
         const root = await realpath(directory);
         const candidate = path.join(root, filename);
@@ -171,6 +179,7 @@ export class GenerationImageService {
         return candidate;
     }
 
+    /** 检查 PNG、JPEG 或 WebP 文件签名及二十 MiB 大小上限，不进行完整解码。 */
     private validateImage(buffer: Buffer, mediaType: string) {
         const valid =
             mediaType === "image/png"
@@ -186,6 +195,7 @@ export class GenerationImageService {
         if (!valid || buffer.length > MAX_IMAGE_BYTES) throw new Error(GENERATION_FAILED);
     }
 
+    /** 并行尝试删除文件并吸收清理异常，避免覆盖原始生成错误。 */
     private async cleanupFiles(filenames: string[]) {
         await Promise.allSettled(filenames.map((filename) => rm(filename, { force: true })));
     }

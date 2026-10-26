@@ -4,6 +4,7 @@ export interface GenerationQuote {
     total: number;
 }
 
+/** 校验一至四张图片的整数单价并计算总积分，拒绝无效配置及超出数据库整数范围的金额。 */
 export function quoteGenerationCredits(
     rule: { power: number } | null | undefined,
     count: number,

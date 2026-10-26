@@ -20,12 +20,14 @@ import { quoteGenerationCredits } from "../../../shared/billing";
 
 @Injectable()
 export class GenerationModelService {
+    /** 注入公共模型仓储及模型配置、密钥和适配器读取服务。 */
     constructor(
         @InjectRepository(AiModel)
         private readonly modelRepository: Repository<AiModel>,
         private readonly publicAiModelService: PublicAiModelService,
     ) {}
 
+    /** 根据已启用配置及适配器接口推导工具能力，不调用供应商或验证真实密钥权限。 */
     async capabilities(): Promise<GenerationCapabilities> {
         const configuredModels = await this.modelRepository.find({
             where: [
@@ -118,6 +120,7 @@ export class GenerationModelService {
         };
     }
 
+    /** 返回模型与供应商均启用的图片模型列表，不暴露密钥。 */
     async listModels() {
         const models = await this.modelRepository.find({
             where: {
@@ -139,6 +142,7 @@ export class GenerationModelService {
         }));
     }
 
+    /** 校验图片模型状态并读取密钥配置，构造符合 V3 接口的图片适配器。 */
     async prepare(modelId: string) {
         const model = await this.publicAiModelService.getModelInfo(modelId).catch(() => {
             throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
@@ -163,12 +167,17 @@ export class GenerationModelService {
         }
     }
 
+    /** 校验视觉语言模型并构造适配器，为适用模型配置关闭思考的供应商参数。 */
     async prepareVision(modelId: string) {
         const model = await this.publicAiModelService.getModelInfo(modelId).catch(() => {
             throw HttpErrorFactory.badRequest("图片分析模型不可用，请检查公共视觉模型配置");
         });
-        if (!model.isActive || !model.provider?.isActive || model.modelType !== MODEL_TYPES.LLM ||
-            !model.features?.includes(MODEL_FEATURES.VISION)) {
+        if (
+            !model.isActive ||
+            !model.provider?.isActive ||
+            model.modelType !== MODEL_TYPES.LLM ||
+            !model.features?.includes(MODEL_FEATURES.VISION)
+        ) {
             throw HttpErrorFactory.badRequest("请选择已启用且支持视觉的语言模型");
         }
         try {
@@ -179,21 +188,33 @@ export class GenerationModelService {
             });
             if (!provider.supports("language")) throw new Error();
             const languageModel = provider.languageModel(model.model);
-            if (languageModel?.specificationVersion !== "v3" || typeof languageModel.doGenerate !== "function") throw new Error();
-            const providerOptions = model.provider.provider === "volcengine" &&
-                (model.model.startsWith("doubao-seed-1-6-") || model.model === "doubao-seed-2-1-lite-260915") &&
+            if (
+                languageModel?.specificationVersion !== "v3" ||
+                typeof languageModel.doGenerate !== "function"
+            )
+                throw new Error();
+            const providerOptions =
+                model.provider.provider === "volcengine" &&
+                (model.model.startsWith("doubao-seed-1-6-") ||
+                    model.model === "doubao-seed-2-1-lite-260915") &&
                 !model.model.startsWith("doubao-seed-1-6-thinking-")
-                ? { volcengine: { thinking: { type: "disabled" } } }
-                : getReasoningOptions(model.provider.provider, { thinking: false });
+                    ? { volcengine: { thinking: { type: "disabled" } } }
+                    : getReasoningOptions(model.provider.provider, { thinking: false });
             return { model: languageModel, providerOptions };
         } catch {
             throw HttpErrorFactory.badRequest("图片分析模型配置无效，请联系管理员");
         }
     }
 
+    /** 校验模型启用状态并按图片数量计算积分报价，不调用模型或扣费。 */
     async quote(modelId: string, count: number) {
         const model = await this.modelRepository.findOne({
-            where: { id: modelId, modelType: MODEL_TYPES.TEXT_TO_IMAGE, isActive: true, provider: { isActive: true } },
+            where: {
+                id: modelId,
+                modelType: MODEL_TYPES.TEXT_TO_IMAGE,
+                isActive: true,
+                provider: { isActive: true },
+            },
             relations: ["provider"],
         });
         if (!model) throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
@@ -204,6 +225,7 @@ export class GenerationModelService {
         }
     }
 
+    /** 要求供应商支持图片生成，且返回的模型实现 V3 图片生成接口。 */
     private requireImageModel(provider: ReturnType<typeof getProvider>, model: string) {
         if (!provider.supports("image")) throw new Error(MODEL_UNAVAILABLE);
         const imageModel = provider.image(model).model;
