@@ -33,10 +33,10 @@ jest.mock("@buildingai/ai-sdk", () => ({
     getReasoningOptions: jest.fn().mockReturnValue({}),
 }));
 jest.mock("@buildingai/db/@nestjs/typeorm", () => ({ InjectRepository: () => () => undefined }));
-jest.mock("@buildingai/db/entities", () => ({ AiModel: class {} }));
+jest.mock("@buildingai/db/entities", () => ({ AiModel: class {}, StorageConfig: class {} }));
 jest.mock("@buildingai/db/typeorm", () => ({ Repository: class {} }));
 jest.mock("@buildingai/extension-sdk", () => ({ PublicAiModelService: class {}, ExtensionBillingService: class {} }));
-jest.mock("@buildingai/core/modules", () => ({ BaseBillingService: class {} }));
+jest.mock("@buildingai/core/modules", () => ({ BaseBillingService: class {}, CloudStorageService: class {} }));
 jest.mock("@buildingai/errors", () => ({
     HttpErrorFactory: {
         badRequest: (message: string) => new Error(message),
@@ -464,7 +464,10 @@ describe("generation runtime security", () => {
                 getProviderAdapter,
             } as unknown as PublicAiModelService,
         ),
-        new GenerationImageService(),
+        new GenerationImageService(
+            { findOne: async () => ({ storageType: "local" }) } as never,
+            {} as never,
+        ),
         {} as Queue<GenerationJobData>,
         {} as ProductImageService,
         new GenerationBillingService({} as never, {} as never),
@@ -795,7 +798,10 @@ describe("async generation tasks", () => {
                 getProviderAdapter,
             } as unknown as PublicAiModelService,
         ),
-        new GenerationImageService(),
+        new GenerationImageService(
+            { findOne: async () => ({ storageType: "local" }) } as never,
+            {} as never,
+        ),
         { add, getJob } as unknown as Queue<GenerationJobData>,
         {} as ProductImageService,
         new GenerationBillingService({} as never, {} as never),

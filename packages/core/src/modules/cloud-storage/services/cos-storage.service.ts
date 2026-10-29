@@ -39,6 +39,7 @@ export class CosStorageService {
      * 复用 COS SDK 客户端，避免每次上传重复实例化
      */
     private cosClient: COS | null = null;
+    private cosConfig: TencentCosConfig | null = null;
 
     constructor(private readonly cacheService: RedisService) {}
 
@@ -64,6 +65,33 @@ export class CosStorageService {
             ContentType: file.mimetype,
             ContentDisposition: uploadHeaders["Content-Disposition"],
             Headers: uploadHeaders,
+        });
+    }
+
+    /** 按指定配置读取对象，通过范围请求限制图片响应大小。 */
+    async readBuffer(storageConfig: CloudStorageParams["storageConfig"], key: string, maxBytes: number) {
+        if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+            throw new Error("Invalid COS object size limit");
+        }
+        const config = storageConfig.config as TencentCosConfig;
+        const result = await this.getCosClient(config).getObject({
+            Bucket: config.bucket,
+            Region: config.region,
+            Key: key,
+            Range: `bytes=0-${maxBytes}`,
+        });
+        const buffer = Buffer.isBuffer(result.Body) ? result.Body : Buffer.from(result.Body);
+        if (buffer.length > maxBytes) throw new Error("COS object exceeds size limit");
+        return buffer;
+    }
+
+    /** 删除指定配置中的对象，用于业务删除和上传失败补偿。 */
+    async deleteObject(storageConfig: CloudStorageParams["storageConfig"], key: string) {
+        const config = storageConfig.config as TencentCosConfig;
+        await this.getCosClient(config).deleteObject({
+            Bucket: config.bucket,
+            Region: config.region,
+            Key: key,
         });
     }
 
@@ -102,13 +130,18 @@ export class CosStorageService {
         const cacheKey = this.CACHE_PREFIX;
         await this.cacheService.del(cacheKey);
         this.cosClient = null;
+        this.cosConfig = null;
     }
 
     /**
      * 获取 COS 客户端实例
      */
     private getCosClient(config: TencentCosConfig, sts?: TencentSTSResult) {
-        if (!sts && this.cosClient) {
+        if (
+            !sts && this.cosClient &&
+            this.cosConfig?.accessKey === config.accessKey &&
+            this.cosConfig?.secretKey === config.secretKey
+        ) {
             return this.cosClient;
         }
 
@@ -121,6 +154,7 @@ export class CosStorageService {
 
         if (!sts) {
             this.cosClient = client;
+            this.cosConfig = { ...config };
         }
 
         return client;

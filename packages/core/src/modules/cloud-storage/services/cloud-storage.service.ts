@@ -35,6 +35,22 @@ export class CloudStorageService {
         }
     }
 
+    /** 从腾讯 COS 读取大小受限的对象，不要求对象可公开访问。 */
+    async readBuffer(storageConfig: StorageConfig, key: string, maxBytes: number) {
+        if (storageConfig.storageType !== StorageType.COS) {
+            throw new Error("Object reads require Tencent COS storage");
+        }
+        return this.cosStorageService.readBuffer(storageConfig, key, maxBytes);
+    }
+
+    /** 从指定腾讯 COS 配置删除对象，不依赖当前启用的存储类型。 */
+    async deleteObject(storageConfig: StorageConfig, key: string) {
+        if (storageConfig.storageType !== StorageType.COS) {
+            throw new Error("Object deletion requires Tencent COS storage");
+        }
+        await this.cosStorageService.deleteObject(storageConfig, key);
+    }
+
     async signature(storageConfig: StorageConfig, key?: string) {
         switch (storageConfig.storageType) {
             case StorageType.OSS: {

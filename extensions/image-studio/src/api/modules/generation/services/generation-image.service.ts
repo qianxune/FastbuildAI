@@ -1,7 +1,13 @@
+import { CloudStorageService } from "@buildingai/core/modules";
+import { InjectRepository } from "@buildingai/db/@nestjs/typeorm";
+import { StorageConfig } from "@buildingai/db/entities";
+import { Repository } from "@buildingai/db/typeorm";
 import { HttpErrorFactory } from "@buildingai/errors";
 import { Injectable } from "@nestjs/common";
+import { randomUUID } from "crypto";
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "fs/promises";
 import path from "path";
+import { Readable } from "stream";
 
 import type { GeneratedImage } from "../../../db/entities/image-generation.entity";
 import { GENERATION_FAILED } from "../constants/generation.constants";
@@ -17,16 +23,33 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 
 @Injectable()
 export class GenerationImageService {
+    /** 复用系统启用的存储配置及云存储服务，不在扩展内另存密钥。 */
+    constructor(
+        @InjectRepository(StorageConfig)
+        private readonly storageConfigRepository: Repository<StorageConfig>,
+        private readonly cloudStorageService: CloudStorageService,
+    ) {}
+
     /** 根据扩展接口前缀构造生成图的受保护访问地址，索引从零开始。 */
     url(id: string, index: number) {
         const prefix = (process.env.VITE_APP_WEB_API_PREFIX || "api").replace(/^\/+|\/+$/g, "");
         return `/${APP_IDENTIFIER}/${prefix}/generations/${id}/images/${index}`;
     }
 
-    /** 解析新旧存储位置并校验真实路径、文件类型、大小及图片签名后读取文件。 */
+    /** 按记录读取 COS 或历史本地文件，校验大小和图片签名；鉴权由上层服务执行。 */
     async read(id: string, index: number, image: GeneratedImage) {
         const location = this.imageLocation(id, index, image);
         try {
+            if (image.storage) {
+                const config = await this.cloudConfig(id, index, image);
+                const buffer = await this.cloudStorageService.readBuffer(
+                    config,
+                    image.storage.key,
+                    MAX_IMAGE_BYTES,
+                );
+                this.validateImage(buffer, image.mediaType);
+                return { buffer, mediaType: image.mediaType };
+            }
             const filename = await this.checkedPath(location.directory, location.filename);
             const info = await lstat(filename);
             if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_IMAGE_BYTES) {
@@ -40,12 +63,17 @@ export class GenerationImageService {
         }
     }
 
-    /** 删除记录关联的新旧图片文件；忽略文件不存在，其余错误转换为业务提示。 */
+    /** 删除记录关联的 COS 或本地图片；忽略本地文件不存在，其余错误转换为业务提示。 */
     async remove(id: string, images: GeneratedImage[]) {
         await Promise.all(
             images.map(async (image, index) => {
                 const location = this.imageLocation(id, index, image);
                 try {
+                    if (image.storage) {
+                        const config = await this.cloudConfig(id, index, image);
+                        await this.cloudStorageService.deleteObject(config, image.storage.key);
+                        return;
+                    }
                     await rm(await this.checkedPath(location.directory, location.filename), {
                         force: true,
                     });
@@ -58,19 +86,25 @@ export class GenerationImageService {
         );
     }
 
-    /** 尽力清理当前私有目录中的任务输出，适用于失败或取消后的补偿。 */
+    /** 尽力清理记录指定的 COS 或本地输出，不让补偿异常覆盖原始错误。 */
     cleanup(id: string, images: GeneratedImage[]) {
-        return this.cleanupFiles(
-            images.map((image, index) =>
-                path.join(
-                    this.storageDirectory(),
-                    `${id}-${index}.${IMAGE_EXTENSIONS[image.mediaType]}`,
-                ),
-            ),
+        return Promise.allSettled(
+            images.map(async (image, index) => {
+                if (image.storage) {
+                    this.imageLocation(id, index, image);
+                    const config = await this.cloudConfig(id, index, image);
+                    await this.cloudStorageService.deleteObject(config, image.storage.key);
+                    return;
+                }
+                await rm(
+                    path.join(this.storageDirectory(), `${id}-${index}.${IMAGE_EXTENSIONS[image.mediaType]}`),
+                    { force: true },
+                );
+            }),
         );
     }
 
-    /** 校验一至四张图片的 Base64、格式与大小后排他写入；失败时清理本次写入文件。 */
+    /** 校验图片后按系统启用配置写入 COS 或本地，COS 失败不回退到本地存储。 */
     async persist(
         generationId: string,
         images: Array<{ base64: string; mediaType: string }>,
@@ -98,6 +132,14 @@ export class GenerationImageService {
             this.validateImage(buffer, image.mediaType);
             return buffer;
         });
+        const storageConfig = await this.storageConfigRepository.findOne({ where: { isActive: true } });
+        if (!storageConfig) throw new Error("No active image storage configuration");
+        if (storageConfig.storageType === "cos") {
+            return this.persistCloud(generationId, images, decoded, storageConfig);
+        }
+        if (storageConfig.storageType !== "local") {
+            throw new Error("Generated images require local or Tencent COS storage");
+        }
         const outputDir = this.storageDirectory();
         await mkdir(outputDir, { recursive: true });
 
@@ -122,6 +164,83 @@ export class GenerationImageService {
             await this.cleanupFiles(writtenFiles);
             throw error;
         }
+    }
+
+    /** 使用唯一对象前缀上传一批图片；任何上传失败时清理本批次已尝试写入的对象。 */
+    private async persistCloud(
+        generationId: string,
+        images: Array<{ mediaType: string }>,
+        decoded: Buffer[],
+        storageConfig: StorageConfig,
+    ): Promise<GeneratedImage[]> {
+        const config = storageConfig.config;
+        if (!config?.bucket || !config.region) throw new Error("Invalid Tencent COS configuration");
+        const prefix = `${APP_IDENTIFIER}/generated/${generationId}/${randomUUID()}`;
+        const persisted: GeneratedImage[] = [];
+        try {
+            for (const [index, image] of images.entries()) {
+                const filename = `${index}.${IMAGE_EXTENSIONS[image.mediaType]}`;
+                const key = `${prefix}/${filename}`;
+                persisted.push({
+                    url: this.url(generationId, index),
+                    mediaType: image.mediaType,
+                    storage: {
+                        type: "cos",
+                        configId: storageConfig.id,
+                        bucket: config.bucket,
+                        region: config.region,
+                        key,
+                    },
+                });
+                await this.cloudStorageService.upload({
+                    storageConfig,
+                    path: key,
+                    file: {
+                        fieldname: "file",
+                        originalname: filename,
+                        encoding: "7bit",
+                        mimetype: image.mediaType,
+                        size: decoded[index].length,
+                        buffer: decoded[index],
+                        destination: "",
+                        filename,
+                        path: key,
+                        stream: Readable.from(decoded[index]),
+                    },
+                });
+            }
+            return persisted;
+        } catch (error) {
+            await Promise.allSettled(
+                persisted.map((image) =>
+                    this.cloudStorageService.deleteObject(storageConfig, image.storage!.key),
+                ),
+            );
+            throw error;
+        }
+    }
+
+    /** 校验对象属于当前任务及索引，读取原配置密钥并使用上传时的存储桶与地域。 */
+    private async cloudConfig(id: string, index: number, image: GeneratedImage) {
+        const storage = image.storage;
+        if (
+            !storage || storage.type !== "cos" ||
+            !new RegExp(`^${UUID_PATTERN}$`, "i").test(storage.configId) ||
+            !new RegExp(
+                `^${APP_IDENTIFIER}/generated/${id}/${UUID_PATTERN}/${index}\\.${IMAGE_EXTENSIONS[image.mediaType]}$`,
+                "i",
+            ).test(storage.key) || !storage.bucket || !storage.region
+        ) {
+            throw new Error("Invalid generated image storage reference");
+        }
+        const config = await this.storageConfigRepository.findOne({ where: { id: storage.configId } });
+        if (!config || config.storageType !== "cos" || !config.config) {
+            throw new Error("Generated image storage configuration is unavailable");
+        }
+        return {
+            ...config,
+            config: { ...config.config, bucket: storage.bucket, region: storage.region },
+        };
     }
 
     /** 返回生成图目录，可切换到兼容旧记录的 uploads 路径。 */

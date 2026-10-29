@@ -1,5 +1,6 @@
+import { CloudStorageModule } from "@buildingai/core/modules";
 import { TypeOrmModule } from "@buildingai/db/@nestjs/typeorm";
-import { AiModel } from "@buildingai/db/entities";
+import { AiModel, StorageConfig } from "@buildingai/db/entities";
 import { AiPublicModule, ExtensionBillingModule } from "@buildingai/extension-sdk";
 import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
@@ -18,7 +19,8 @@ import { GenerationBillingService } from "./services/generation-billing.service"
     imports: [
         AiPublicModule,
         ExtensionBillingModule,
-        TypeOrmModule.forFeature([ImageGeneration, AiModel]),
+        CloudStorageModule,
+        TypeOrmModule.forFeature([ImageGeneration, AiModel, StorageConfig]),
         BullModule.registerQueue({ name: GENERATION_QUEUE }),
     ],
     controllers: [GenerationController],

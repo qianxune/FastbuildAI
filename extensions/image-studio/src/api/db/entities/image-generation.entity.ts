@@ -20,6 +20,13 @@ export enum ImageGenerationStatus {
 export interface GeneratedImage {
     url: string;
     mediaType: string;
+    storage?: {
+        type: "cos";
+        configId: string;
+        bucket: string;
+        region: string;
+        key: string;
+    };
 }
 
 @ExtensionEntity()
