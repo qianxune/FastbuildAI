@@ -1,5 +1,21 @@
 {
+    "extends": "../../packages/@buildingai/typescript-config/react-library.json",
     "compilerOptions": {
-        "tsBuildInfoFile": "./.temp/tsconfig.web.tsbuildinfo"
-    }
+        "tsBuildInfoFile": "./.temp/tsconfig.web.tsbuildinfo",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "lib": [
+            "ES2022",
+            "DOM",
+            "DOM.Iterable"
+        ],
+        "types": [
+            "vite/client"
+        ],
+        "noEmit": true
+    },
+    "include": [
+        "src/web",
+        "src/api/shared"
+    ]
 }
