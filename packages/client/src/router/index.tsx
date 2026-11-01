@@ -1,7 +1,6 @@
 import AuthGuard from "@buildingai/ui/components/auth/auth-guard";
 import GlobalError from "@buildingai/ui/components/exception/global-error";
 import NotFoundPage from "@buildingai/ui/components/exception/not-found-page";
-import MainLayout from "@buildingai/ui/layouts/main/index";
 import DefaultLayout from "@buildingai/ui/layouts/styles/default/index";
 import { createBrowserRouter } from "react-router-dom";
 
@@ -20,6 +19,7 @@ import DatasetsDetailPage from "@/pages/datasets/detail";
 import InstallPage from "@/pages/install";
 
 import ConsoleLayout from "../layouts/console";
+import SiteLayout from "../layouts/site";
 import DynamicHomePage from "../pages";
 import AppIframePage from "../pages/apps/[identifier]";
 import ChatPage from "../pages/chat";
@@ -29,9 +29,21 @@ import AlipayReturnPage from "../pages/payment/alipay-return";
 
 export const router = createBrowserRouter([
   {
-    element: <MainLayout />,
+    element: <SiteLayout />,
     errorElement: <GlobalError />,
     children: [
+      {
+        path: "/",
+        element: <AppIframePage productEntry />,
+      },
+      {
+        path: "/studio/*",
+        element: (
+          <AuthGuard>
+            <AppIframePage productEntry />
+          </AuthGuard>
+        ),
+      },
       {
         path: "/login",
         element: <LoginPage />,
@@ -91,10 +103,6 @@ export const router = createBrowserRouter([
           {
             element: <DynamicHomePage />,
             children: [
-              {
-                index: true,
-                element: <ChatPage />,
-              },
               {
                 path: "/c/:id",
                 element: <ChatPage />,

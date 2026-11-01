@@ -11,8 +11,9 @@ import {
 } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 
-const studioUrl = "/apps/image-studio/studio";
+const studioUrl = "/studio";
 const imageUrl = (name: string) => `/extension/image-studio/images/${name}`;
 
 const tickers = [
@@ -23,8 +24,21 @@ const tickers = [
 ];
 
 export default function LandingPage() {
+  const { hash } = useLocation();
   const [comparison, setComparison] = useState(58);
   const cmpRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!hash) return;
+    let anchor: string;
+    try {
+      anchor = decodeURIComponent(hash.slice(1));
+    } catch {
+      return;
+    }
+    const frame = requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView());
+    return () => cancelAnimationFrame(frame);
+  }, [hash]);
 
   useEffect(() => {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -87,10 +101,10 @@ export default function LandingPage() {
             <a href="#footer">更新日志</a>
           </nav>
           <div className="nav-right">
-            <a className="link-dim" href={studioUrl}>
+            <a className="link-dim" href={studioUrl} target="_top">
               登录
             </a>
-            <a className="btn btn-lime btn-sm" href={studioUrl}>
+            <a className="btn btn-lime btn-sm" href={studioUrl} target="_top">
               免费开始
             </a>
           </div>
@@ -110,7 +124,7 @@ export default function LandingPage() {
               上传一张随手拍的商品图，出图AI 自动完成布景、打光、文案排版——白底图、场景图、卖点图一次四张，直接上架。
             </p>
             <div className="hero-cta rv" data-d="3">
-              <a className="btn btn-lime btn-lg" href={studioUrl}>
+              <a className="btn btn-lime btn-lg" href={studioUrl} target="_top">
                 免费生成第一张
               </a>
               <a className="btn btn-ghost btn-lg" href="#features">
@@ -182,7 +196,7 @@ export default function LandingPage() {
           </div>
 
           <div className="bento">
-            <a className="tile t-main rv" href={studioUrl}>
+            <a className="tile t-main rv" href={studioUrl} target="_top">
               <span className="tile-no">§01</span>
               <h3>商品主图</h3>
               <p>白底图、场景图、卖点图一次四张。拖动滑块，看看同一只鞋的两种命运。</p>
@@ -204,7 +218,7 @@ export default function LandingPage() {
               </div>
             </a>
 
-            <a className="tile t-replica rv" data-d="1" href={studioUrl}>
+            <a className="tile t-replica rv" data-d="1" href={studioUrl} target="_top">
               <span className="tile-no">§02</span>
               <h3>爆款复刻</h3>
               <p>丢一张对标图，复刻同款布景与光影</p>
@@ -213,7 +227,7 @@ export default function LandingPage() {
               </div>
             </a>
 
-            <a className="tile t-retouch rv" data-d="2" href={studioUrl}>
+            <a className="tile t-retouch rv" data-d="2" href={studioUrl} target="_top">
               <span className="tile-no">§03</span>
               <h3>产品精修</h3>
               <p>瑕疵修复、质感增强，一键到位</p>
@@ -222,7 +236,7 @@ export default function LandingPage() {
               </div>
             </a>
 
-            <a className="tile t-expand rv" href={studioUrl}>
+            <a className="tile t-expand rv" href={studioUrl} target="_top">
               <span className="tile-no">§04</span>
               <h3>智能扩图</h3>
               <p>1:1 变 3:4，画布向外生长</p>
@@ -234,7 +248,7 @@ export default function LandingPage() {
               </div>
             </a>
 
-            <a className="tile t-cutout rv" data-d="1" href={studioUrl}>
+            <a className="tile t-cutout rv" data-d="1" href={studioUrl} target="_top">
               <span className="tile-no">§05</span>
               <h3>一键抠图</h3>
               <p>发丝级边缘，透明底直出</p>
@@ -252,7 +266,7 @@ export default function LandingPage() {
               </div>
             </a>
 
-            <a className="tile t-sku rv" data-d="2" href={studioUrl}>
+            <a className="tile t-sku rv" data-d="2" href={studioUrl} target="_top">
               <span className="tile-no">§06</span>
               <h3>商品SKU图</h3>
               <p>多色多码，批量产出规格图</p>
@@ -269,7 +283,7 @@ export default function LandingPage() {
               </div>
             </a>
 
-            <a className="tile t-detail rv" data-d="3" href={studioUrl}>
+            <a className="tile t-detail rv" data-d="3" href={studioUrl} target="_top">
               <span className="tile-no">§07</span>
               <h3>商品详情页</h3>
               <p>卖点排版自动生成长图</p>
@@ -380,7 +394,7 @@ export default function LandingPage() {
                   <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 单张生成，含水印
                 </li>
               </ul>
-              <a className="btn btn-ghost" href={studioUrl}>
+              <a className="btn btn-ghost" href={studioUrl} target="_top">
                 免费开始
               </a>
             </div>
@@ -406,7 +420,7 @@ export default function LandingPage() {
                   <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 生成历史云端保存 90 天
                 </li>
               </ul>
-              <a className="btn btn-lime" href={studioUrl}>
+              <a className="btn btn-lime" href={studioUrl} target="_top">
                 开通卖家版
               </a>
             </div>
@@ -431,7 +445,7 @@ export default function LandingPage() {
                   <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 专属客户成功经理
                 </li>
               </ul>
-              <a className="btn btn-ghost" href={studioUrl}>
+              <a className="btn btn-ghost" href={studioUrl} target="_top">
                 联系销售
               </a>
             </div>
@@ -490,7 +504,7 @@ export default function LandingPage() {
             下一张爆款，<span style={{ color: "var(--lime)" }}>18 秒</span>后到达
           </h2>
           <div className="rv" data-d="1">
-            <a className="btn btn-lime btn-lg" href={studioUrl}>
+            <a className="btn btn-lime btn-lg" href={studioUrl} target="_top">
               免费开始出图
             </a>
             <p className="mono-sub">NO CREDIT CARD · 30 FREE CREDITS</p>
@@ -512,7 +526,7 @@ export default function LandingPage() {
               <h4>产品</h4>
               <a href="#features">功能矩阵</a>
               <a href="#pricing">价格</a>
-              <a href={studioUrl}>创作工作台</a>
+              <a href={studioUrl} target="_top">创作工作台</a>
               <a href="#footer">更新日志</a>
             </div>
             <div className="foot-col">

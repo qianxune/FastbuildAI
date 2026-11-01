@@ -22,7 +22,7 @@ const GOOGLE_BIND_MESSAGES: Record<string, string> = {
   userinfo: "获取谷歌信息失败，请重试",
 };
 
-const MainLayout = () => {
+const MainLayout = ({ head }: { head?: Parameters<typeof useHeadRenderer>[0] }) => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -42,6 +42,7 @@ const MainLayout = () => {
     titleTemplate: `%s - ${websiteConfig?.webinfo.name || "BuildingAI"}`,
     description: websiteConfig?.webinfo.description,
     icon: websiteConfig?.webinfo.icon || `/buildingai-favicon.ico?t=${new Date().getTime()}`,
+    ...head,
   });
   useRefreshUser();
   useRefreshUserConfig();
