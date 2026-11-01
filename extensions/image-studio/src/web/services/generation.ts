@@ -5,6 +5,7 @@ import type { GenerationCapabilities } from "../../api/shared/tools";
 import type { MainImageInput } from "../../api/shared/main-image";
 
 import { apiHttpClient } from "./base";
+import { collectGenerations } from "./works";
 import type {
     GenerateImageInput,
     GenerationList,
@@ -67,6 +68,12 @@ export function useUploadProductImageMutation() {
             data.append("file", file);
             return apiHttpClient.post<ProductImage>("/generations/product-images", data);
         },
+        onSuccess: async (image) => {
+            await client.cancelQueries({ queryKey: productsKey });
+            client.setQueryData<ProductImage[]>(productsKey, (current) => [
+                ...(current ?? []).filter((item) => item.id !== image.id), image,
+            ]);
+        },
         onSettled: () => client.invalidateQueries({ queryKey: productsKey }),
     });
 }
@@ -94,6 +101,39 @@ export function loadProductImage(id: string, onLoad: (url: string) => void, onEr
         onLoad(url);
     }).catch(() => { if (!disposed) onError(); });
     return () => { disposed = true; controller.abort(); if (url) URL.revokeObjectURL(url); };
+}
+
+export function loadProductThumbnail(id: string, onLoad: (url: string) => void, onError: () => void) {
+    const controller = new AbortController();
+    let disposed = false;
+    let url: string | undefined;
+    void (async () => {
+        const prefix = (import.meta.env.VITE_APP_WEB_API_PREFIX || "api").replace(/^\/+|\/+$/g, "");
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ||
+            !/^[a-z0-9_-]+(?:\/[a-z0-9_-]+)*$/i.test(prefix)) throw new Error();
+        const response = await apiHttpClient.instance.get<Blob>(`/image-studio/${prefix}/generations/product-images/${id}/thumbnail`, {
+            responseType: "blob", signal: controller.signal, withCredentials: false,
+        });
+        if (disposed) return;
+        const blob = response.data;
+        if (!(blob instanceof Blob) || blob.type !== "image/png" || blob.size === 0 || blob.size > 256 * 1024) throw new Error();
+        const header = new Uint8Array(await blob.slice(0, 24).arrayBuffer());
+        if (disposed) return;
+        if (header.length !== 24 || ![137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => header[index] === value) ||
+            new DataView(header.buffer).getUint32(8) !== 13 ||
+            ![73, 72, 68, 82].every((value, index) => header[index + 12] === value)) throw new Error();
+        const width = new DataView(header.buffer).getUint32(16);
+        const height = new DataView(header.buffer).getUint32(20);
+        if (!width || !height || width > 256 || height > 256) throw new Error();
+        url = URL.createObjectURL(blob);
+        onLoad(url);
+    })().catch(() => { if (!disposed) onError(); });
+    return () => {
+        disposed = true;
+        controller.abort();
+        if (url) URL.revokeObjectURL(url);
+        url = undefined;
+    };
 }
 
 export function useGenerateMainImageMutation() {
@@ -182,6 +222,18 @@ export function useGenerationHistoryQuery(page = 1, limit = 30) {
         if (statuses) void client.invalidateQueries({ queryKey: balanceKey });
     }, [client, statuses]);
     return query;
+}
+
+export function useWorksQuery() {
+    return useQuery({
+        queryKey: [...historyKey, "works"],
+        queryFn: ({ signal }) => collectGenerations((page) => {
+            signal.throwIfAborted();
+            return apiHttpClient.get<GenerationList>("/generations", { params: { page, limit: 30 } });
+        }),
+        refetchOnMount: "always",
+        refetchInterval: (query) => query.state.data?.some(isGenerationActive) ? 5000 : false,
+    });
 }
 
 export function isGenerationActive(item: Pick<ImageGeneration, "status"> | undefined | null) {

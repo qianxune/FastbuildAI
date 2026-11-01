@@ -14,9 +14,11 @@ import {
     loadProductImage,
     useAnalyzeProductMutation,
     useUploadProductImageMutation,
+    useProductImagesQuery,
     useGenerationBilling,
 } from "../services/generation";
 import type { ProductImage } from "../services/types";
+import MaterialPicker from "./material-picker";
 
 export default function MainImageForm({
     models,
@@ -24,18 +26,25 @@ export default function MainImageForm({
     available,
     locked,
     onSubmit,
+    requestedMaterial,
+    onMaterialConsumed,
 }: {
     models: CapabilityModel[];
     visionModels?: CapabilityModel[];
     available: boolean;
     locked: boolean;
     onSubmit: (input: MainImageInput) => Promise<void>;
+    requestedMaterial?: { image: ProductImage; requestId: number } | null;
+    onMaterialConsumed?: (requestId: number) => void;
 }) {
     const id = useId();
     const fileInput = useRef<HTMLInputElement>(null);
     const settingsDialog = useRef<HTMLDialogElement>(null);
+    const consumedMaterial = useRef<number | null>(null);
+    const uploadInFlight = useRef(false);
     const [products, setProducts] = useState<ProductImage[]>([]);
     const upload = useUploadProductImageMutation();
+    const materials = useProductImagesQuery();
     const analysis = useAnalyzeProductMutation();
     const [assetIds, setAssetIds] = useState<string[]>([]);
     const [uploading, setUploading] = useState(false);
@@ -65,10 +74,32 @@ export default function MainImageForm({
     const disabled = locked || uploading || analysis.isPending;
     const billing = useGenerationBilling(selectedModelId, total, available);
 
+    useEffect(() => {
+        if (!materials.isSuccess || materials.isFetching || uploading) return;
+        const availableIds = new Set(materials.data.map((image) => image.id));
+        setProducts((current) => current.every((image) => availableIds.has(image.id))
+            ? current : current.filter((image) => availableIds.has(image.id)));
+        setAssetIds((current) => current.every((assetId) => availableIds.has(assetId))
+            ? current : current.filter((assetId) => availableIds.has(assetId)));
+    }, [materials.data, materials.isSuccess, materials.isFetching, uploading]);
+
+    useEffect(() => {
+        if (!requestedMaterial || disabled || consumedMaterial.current === requestedMaterial.requestId) return;
+        const { image, requestId } = requestedMaterial;
+        consumedMaterial.current = requestId;
+        if (!assetIds.includes(image.id) && assetIds.length >= 5) {
+            setError("最多选择 5 张商品图，请先取消部分选择");
+        } else {
+            setProducts((current) => current.some((item) => item.id === image.id) ? current : [...current, image]);
+            setAssetIds((current) => current.includes(image.id) ? current : [...current, image.id]);
+        }
+        onMaterialConsumed?.(requestId);
+    }, [requestedMaterial, disabled, assetIds, onMaterialConsumed]);
+
     const uploadFiles = async (files: File[]) => {
-        if (disabled || !files.length) return;
+        if (disabled || uploadInFlight.current || !files.length) return;
         setError(null);
-        if (files.length + products.length > 5) {
+        if (files.length + assetIds.length > 5) {
             setError("每次最多上传 5 张商品图");
             return;
         }
@@ -83,6 +114,7 @@ export default function MainImageForm({
             setError("请选择不超过 10 MB 的 PNG、JPEG 或 WebP 图片");
             return;
         }
+        uploadInFlight.current = true;
         setUploading(true);
         try {
             for (const file of files) {
@@ -93,6 +125,7 @@ export default function MainImageForm({
         } catch (failure) {
             setError(failure instanceof Error ? failure.message : "图片上传失败，请重试");
         } finally {
+            uploadInFlight.current = false;
             setUploading(false);
         }
     };
@@ -160,7 +193,7 @@ export default function MainImageForm({
             <fieldset className="main-fields" disabled={disabled}>
                 <div className="field">
                     <div className="f-label">
-                        上传商品图 <span className="opt">已选 {assetIds.length} · {products.length}/5</span>
+                        上传商品图 <span className="opt">已选 {assetIds.length}/5</span>
                     </div>
                     <input
                         ref={fileInput}
@@ -186,7 +219,7 @@ export default function MainImageForm({
                     <button
                         type="button"
                         className={`dz main-upload${dragging ? "dragging" : ""}`}
-                        disabled={disabled || products.length >= 5}
+                        disabled={disabled || assetIds.length >= 5}
                         onClick={() => fileInput.current?.click()}
                         onDragOver={(event) => {
                             event.preventDefault();
@@ -208,6 +241,12 @@ export default function MainImageForm({
                     </button>
                     </div>
                     <p className="upload-formats">PNG / JPEG / WebP · 每张不超过 10 MB</p>
+                    <MaterialPicker selectedIds={assetIds} max={5} disabled={disabled}
+                        onChange={(ids, images) => {
+                            if (disabled) return;
+                            setAssetIds([...new Set(ids)].slice(0, 5));
+                            setProducts((current) => [...new Map([...images, ...current].map((image) => [image.id, image])).values()]);
+                        }} />
                 </div>
                 <div className="main-settings-grid">
                 <div className="field">

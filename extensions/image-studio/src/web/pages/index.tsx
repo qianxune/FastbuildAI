@@ -1,38 +1,37 @@
 import {
-    ArrowLeft,
-    CircleHelp,
-    Crown,
     Download,
-    FolderOpen,
     History,
     Image as ImageIcon,
     Layers3,
-    Lightbulb,
-    Minus,
-    Plus,
-    Settings,
-    Scan,
-    Sparkles,
-    Wand2,
-    WandSparkles,
-    Upload,
     TriangleAlert,
     RefreshCw,
     Trash2,
     ChevronLeft,
     ChevronRight,
     X,
-    Zap,
 } from "lucide-react";
 import { useDocumentHead } from "@buildingai/hooks";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { ToolKey } from "../../api/shared/tools";
 import {
     MAIN_IMAGE_TYPES,
+    MAIN_RATIOS,
+    MAIN_RESOLUTIONS,
     mainImageVariants,
+    mainImageSize,
     type MainImageInput,
 } from "../../api/shared/main-image";
 import MainImageForm from "./main-image-form";
+import WorksView from "./works";
+import MaterialsView from "./materials";
+import ToolForm from "./tool-form";
+import { isSpecializedTool, SPECIALIZED_TOOLS, SPECIALIZED_WORKSPACE_LAYOUT } from "./specialized-workflow";
+import WorkspaceNavigation, { TOOL_LABELS, type WorkspaceView } from "./workspace-navigation";
+import WorkspaceAccount from "./workspace-account";
+import { WorkspaceHelpDialog, WorkspacePreferencesDialog, useWorkspacePreferences } from "./workspace-preferences";
+import { useGenerateToolMutation } from "../services/tool-generation";
+import { isToolEditKey, validateToolWorkflow, type ToolWorkflowInput } from "../../api/shared/tool-workflow";
+import type { GenerationCapabilities } from "../../api/shared/tools";
 import {
     loadGenerationImage,
     fetchGenerationImage,
@@ -40,16 +39,48 @@ import {
     useGenerationCapabilitiesQuery,
     useGenerationQuery,
     useGenerationHistoryQuery,
-    useGenerateImageMutation,
     useGenerateMainImageMutation,
     useRetryGenerationMutation,
     useCancelGenerationMutation,
     useDeleteGenerationMutation,
-    useCreditBalanceQuery,
-    useGenerationBilling,
     fetchGenerationQuote,
 } from "../services/generation";
-import type { ImageGeneration } from "../services/types";
+import type { ImageGeneration, ProductImage } from "../services/types";
+
+export function supportsToolInput(input: ToolWorkflowInput, capabilities?: GenerationCapabilities) {
+    if (validateToolWorkflow(input)) return false;
+    const availability = capabilities?.tools.find((entry) => entry.key === input.tool);
+    const model = capabilities?.models.find((entry) => entry.id === input.modelId);
+    if (availability?.status !== "available" || !model) return false;
+    const required = input.tool === "creative"
+        ? [input.assetIds.length ? "reference-image" : "text-to-image"] as const
+        : availability.requiredCapabilities;
+    return required.every((capability) => {
+        const approved = availability.modelIdsByCapability[capability]
+            ?? (input.tool === "creative" ? availability.modelIdsByCapability["text-to-image"] : undefined);
+        return model.capabilities.includes(capability) && approved?.includes(input.modelId);
+    }) && input.assetIds.length <= (availability.limits.maxInputImages ?? 5) &&
+        (!input.assetIds.length || input.assetIds.length <= (model.maxReferenceImages ?? 1));
+}
+
+export function supportsMainRetry(item: ImageGeneration, capabilities?: GenerationCapabilities) {
+    const input = item.mainInput;
+    const availability = capabilities?.tools.find((entry) => entry.key === "main");
+    const model = capabilities?.models.find((entry) => entry.id === item.modelId);
+    if (!input || !input.counts || !Array.isArray(input.assetIds) ||
+        typeof input.productName !== "string" || !input.productName.trim() ||
+        !MAIN_RATIOS.includes(input.ratio) || !MAIN_RESOLUTIONS.includes(input.resolution) ||
+        input.modelId !== item.modelId || availability?.status !== "available" ||
+        !model?.capabilities.includes("reference-image") ||
+        !availability.modelIdsByCapability["reference-image"]?.includes(item.modelId)) return false;
+    const counts = Object.keys(MAIN_IMAGE_TYPES).map((key) => input.counts[key as keyof typeof MAIN_IMAGE_TYPES]);
+    return counts.every((count) => Number.isInteger(count) && count >= 0 && count <= 4) &&
+        counts.reduce((total, count) => total + count, 0) === item.count && item.count >= 1 && item.count <= 4 &&
+        input.assetIds.length > 0 && new Set(input.assetIds).size === input.assetIds.length &&
+        input.assetIds.every((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) &&
+        input.assetIds.length <= Math.min(model.maxReferenceImages ?? 1, availability.limits.maxInputImages ?? 5) &&
+        mainImageSize(input) === item.size;
+}
 
 const IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536", "1792x1024", "1024x1792"];
 
@@ -82,164 +113,57 @@ function imageCaption(item: ImageGeneration, index: number) {
     return type ? `${MAIN_IMAGE_TYPES[type]} ${index + 1}` : `${index + 1}`;
 }
 
-interface ToolDef {
-    name: string;
-    group: string;
-    cost: number;
-    desc: string;
-    tpl: "main" | "retouch" | "expand" | "generic";
-}
-
-const TOOLS: Record<ToolKey, ToolDef> = {
-    main: {
-        name: "商品主图",
-        group: "电商生图",
-        cost: 30,
-        desc: "白底图、场景图、卖点图一次生成，直接用于主图位",
-        tpl: "main",
-    },
-    detail: {
-        name: "商品详情",
-        group: "电商生图",
-        cost: 20,
-        desc: "生成分模块排版的详情长图，卖点一目了然",
-        tpl: "generic",
-    },
-    replica: {
-        name: "爆款复刻",
-        group: "电商生图",
-        cost: 30,
-        desc: "上传对标爆款图，复刻同款布景与光影",
-        tpl: "generic",
-    },
-    creative: {
-        name: "创意生图",
-        group: "电商生图",
-        cost: 30,
-        desc: "输入一句话，让 AI 放飞创意场景",
-        tpl: "generic",
-    },
-    fusion: {
-        name: "多图融合",
-        group: "电商生图",
-        cost: 30,
-        desc: "多张商品图融合进同一条镜头语言",
-        tpl: "generic",
-    },
-    sku: {
-        name: "商品SKU图",
-        group: "电商生图",
-        cost: 20,
-        desc: "同一商品多色多码，批量产出规格图",
-        tpl: "generic",
-    },
-    retouch: {
-        name: "产品精修",
-        group: "AI 修图",
-        cost: 20,
-        desc: "AI 修图师级质感处理，保留商品原始细节",
-        tpl: "retouch",
-    },
-    cutout: {
-        name: "一键抠图",
-        group: "AI 修图",
-        cost: 10,
-        desc: "发丝级边缘识别，透明底直出",
-        tpl: "generic",
-    },
-    watermark: {
-        name: "去除水印",
-        group: "AI 修图",
-        cost: 10,
-        desc: "智能擦除画面中的水印与杂物",
-        tpl: "generic",
-    },
-    expand: {
-        name: "智能扩图",
-        group: "AI 修图",
-        cost: 15,
-        desc: "改变画幅比例，AI 向外补全场景",
-        tpl: "expand",
-    },
-    translate: {
-        name: "图片翻译",
-        group: "AI 修图",
-        cost: 10,
-        desc: "保留排版，图片内文字一键翻译",
-        tpl: "generic",
-    },
-    suggest: {
-        name: "产品建议",
-        group: "其他",
-        cost: 5,
-        desc: "基于商品图给出拍摄与运营建议",
-        tpl: "generic",
-    },
-};
-
-const TOOL_ICONS: Record<ToolKey, React.ReactNode> = {
-    main: <ImageIcon width={14} height={14} />,
-    detail: <Scan width={14} height={14} />,
-    replica: <Layers3 width={14} height={14} />,
-    creative: <Sparkles width={14} height={14} />,
-    fusion: <Zap width={14} height={14} />,
-    sku: <FolderOpen width={14} height={14} />,
-    retouch: <Wand2 width={14} height={14} />,
-    cutout: <Scan width={14} height={14} />,
-    watermark: <X width={14} height={14} />,
-    expand: <ArrowLeft width={14} height={14} />,
-    translate: <Wand2 width={14} height={14} />,
-    suggest: <Lightbulb width={14} height={14} />,
-};
-
-const GROUPS = {
-    电商生图: ["main", "detail", "replica", "creative", "fusion", "sku"],
-    "AI 修图": ["retouch", "cutout", "watermark", "expand", "translate"],
-    其他: ["suggest"],
-} as const;
-
 export default function ImageStudioPage() {
-    useDocumentHead({ title: "创作工作台 — 出图AI" });
+    const [view, setView] = useState<WorkspaceView>("create");
+    const showWorks = view === "works";
+    const showHistory = view === "history";
+    const setShowHistory = (open: boolean) => setView(open ? "history" : "create");
+    const preferences = useWorkspacePreferences();
+    const [mobileOpen, setMobileOpen] = useState(false);
+    const [preferencesOpen, setPreferencesOpen] = useState(false);
+    const [helpOpen, setHelpOpen] = useState(false);
+    const [requestedMaterial, setRequestedMaterial] = useState<{ image: ProductImage; requestId: number } | null>(null);
+    const materialSequence = useRef(0);
+    useDocumentHead({ title: showWorks ? "我的作品 — 出图AI" : "创作工作台 — 出图AI" });
 
     const [tool, setTool] = useState<ToolKey>("main");
     const capabilities = useGenerationCapabilitiesQuery();
     const [page, setPage] = useState(1);
     const history = useGenerationHistoryQuery(page, 8);
-    const generate = useGenerateImageMutation();
     const generateMain = useGenerateMainImageMutation();
+    const generateTool = useGenerateToolMutation();
     const retry = useRetryGenerationMutation();
     const cancel = useCancelGenerationMutation();
     const remove = useDeleteGenerationMutation();
-    const [prompt, setPrompt] = useState("");
-    const [modelId, setModelId] = useState("");
-    const [size, setSize] = useState("1024x1024");
-    const [count, setCount] = useState(1);
-    const [imageQuality, setImageQuality] = useState("standard");
-    const [style, setStyle] = useState("vivid");
     const [result, setResult] = useState<ImageGeneration | null>(null);
-    const [showHistory, setShowHistory] = useState(false);
+    const [historyResult, setHistoryResult] = useState<ImageGeneration | null>(null);
     const [workflowError, setWorkflowError] = useState<string | null>(null);
     const [downloading, setDownloading] = useState(false);
     const [retryPreparing, setRetryPreparing] = useState(false);
-    const balance = useCreditBalanceQuery();
     const task = useGenerationQuery(result?.id);
-    const currentResult =
+    const currentTask =
         task.data ?? history.data?.items.find((item) => item.id === result?.id) ?? result;
+    const currentResult = historyResult ?? currentTask;
     const submitting =
-        generate.isPending || generateMain.isPending || retry.isPending || retryPreparing;
-    const busy = submitting || isGenerationActive(currentResult);
+        generateMain.isPending || generateTool.isPending || retry.isPending || retryPreparing;
+    const busy = submitting || isGenerationActive(currentTask);
     const locked = busy || remove.isPending || cancel.isPending;
     const pendingCount =
         generateMain.isPending && generateMain.variables
             ? mainImageVariants(generateMain.variables).length
-            : generate.isPending
-              ? (generate.variables?.count ?? 1)
-              : (currentResult?.count ?? 1);
+                        : generateTool.isPending
+                            ? (generateTool.variables?.count ?? 1)
+                            : (currentTask?.count ?? 1);
     const pendingMainInput = generateMain.isPending
         ? generateMain.variables
-        : generate.isPending
+                : generateTool.isPending
           ? null
           : currentResult?.mainInput;
+        const pendingStatus = submitting
+                ? "提交中"
+                : currentTask?.status === "queued"
+                    ? "等待生成"
+                    : "生成中";
     const creative = capabilities.data?.tools.find((item) => item.key === "creative");
     const models =
         capabilities.data?.models.filter(
@@ -250,21 +174,12 @@ export default function ImageStudioPage() {
     const sizes = IMAGE_SIZES.filter(
         (value) => creative?.limits.sizes == null || creative.limits.sizes.includes(value),
     );
-    const selectedModelId = models.some((model) => model.id === modelId)
-        ? modelId
-        : (models[0]?.id ?? "");
-    const selectedSize = sizes.includes(size) ? size : (sizes[0] ?? "");
     const creativeAvailable =
         capabilities.isSuccess &&
         !capabilities.isFetching &&
         creative?.status === "available" &&
         models.length > 0 &&
         sizes.length > 0;
-    const creativeBilling = useGenerationBilling(
-        selectedModelId,
-        count,
-        tool === "creative" && creativeAvailable,
-    );
     const main = capabilities.data?.tools.find((item) => item.key === "main");
     const mainModels =
         capabilities.data?.models.filter(
@@ -284,28 +199,12 @@ export default function ImageStudioPage() {
     }, [history.isSuccess, page, pageCount]);
 
     const unavailableReason = (key: ToolKey) => {
-        if (key === "watermark") return "暂未开放";
-        if (key === "suggest") return "建议接口尚未开放";
         if (capabilities.isError) return "能力加载失败，暂不可生成";
         if (!capabilities.isSuccess || capabilities.isFetching) return "正在检查可用能力";
         if (key === "main")
             return mainAvailable ? "" : "暂无支持商品参考图的生图模型，请检查公共模型配置";
-        if (key !== "creative") return "图片上传与编辑尚未开放";
-        return creativeAvailable ? "" : "暂无支持创意生图的模型或尺寸";
+        return "";
     };
-
-    // stepper values
-    const [steppers, setSteppers] = useState({ white: 1, scene: 1, selling: 1, other: 0 });
-
-    // chip single-select values
-    const [ratio, setRatio] = useState("1:1");
-    const [quality, setQuality] = useState("2K");
-    const [origRatio, setOrigRatio] = useState("60%");
-    const [targetRatio, setTargetRatio] = useState("3:4");
-    const [posIndex, setPosIndex] = useState(4); // center
-
-    // chips multi-select
-    const [retouchModes, setRetouchModes] = useState<string[]>(["综合精修"]);
 
     const [toast, setToast] = useState<{ msg: string; warn?: boolean } | null>(null);
 
@@ -315,35 +214,31 @@ export default function ImageStudioPage() {
         return () => clearTimeout(t);
     }, [toast]);
 
-    const t = TOOLS[tool];
+    const toolName = TOOL_LABELS[tool];
 
-    const startGen = async () => {
-        if (locked || tool !== "creative" || !creativeAvailable || !creativeBilling.ready) return;
-        if (prompt.trim().length < 3 || prompt.trim().length > 2000) {
-            setWorkflowError("请输入 3–2000 字的提示词");
-            return;
-        }
-        setWorkflowError(null);
-        setShowHistory(false);
-        try {
-            const generated = await generate.mutateAsync({
-                prompt: prompt.trim(),
-                modelId: selectedModelId,
-                size: selectedSize,
-                count,
-                quality: imageQuality,
-                style,
-            });
-            setResult(generated);
-            setPage(1);
-        } catch (error) {
-            setWorkflowError(errorMessage(error));
-        }
+    const navigate = (next: WorkspaceView, nextTool?: ToolKey) => {
+        setView(next);
+        if (nextTool) setTool(nextTool);
+        if (next !== "history") setHistoryResult(null);
     };
+
+    useEffect(() => {
+        const root = document.documentElement;
+        const dark = root.classList.contains("dark");
+        const light = root.classList.contains("light");
+        const forceLight = () => { root.classList.remove("dark"); root.classList.add("light", "studio-workspace-theme"); };
+        forceLight();
+        const observer = new MutationObserver(() => {
+            if (root.classList.contains("dark") || !root.classList.contains("light")) forceLight();
+        });
+        observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+        return () => { observer.disconnect(); root.classList.remove("studio-workspace-theme"); root.classList.toggle("dark", dark); root.classList.toggle("light", light); };
+    }, []);
 
     const startMain = async (input: MainImageInput) => {
         if (locked || !mainAvailable) return;
         setWorkflowError(null);
+        setHistoryResult(null);
         setShowHistory(false);
         try {
             setResult(await generateMain.mutateAsync(input));
@@ -353,13 +248,39 @@ export default function ImageStudioPage() {
         }
     };
 
-    const canRetry = (item: ImageGeneration) =>
-        (item.status === "failed" || item.status === "cancelled") &&
-        (item.toolKey === "main"
-            ? mainAvailable && mainModels.some((model) => model.id === item.modelId)
-            : creativeAvailable &&
-              models.some((model) => model.id === item.modelId) &&
-              sizes.includes(item.size));
+    const startTool = async (input: ToolWorkflowInput) => {
+        try {
+            if (locked || view !== "create") throw new Error("当前工作区已锁定，请稍后重试");
+            const invalid = validateToolWorkflow(input);
+            if (invalid) throw new Error(invalid);
+            if (input.tool !== tool || !capabilities.isSuccess || capabilities.isFetching || !supportsToolInput(input, capabilities.data)) {
+                throw new Error("模型能力或工具状态已变化，请检查输入后重试");
+            }
+            setWorkflowError(null);
+            setHistoryResult(null);
+            setShowHistory(false);
+            setResult(await generateTool.mutateAsync(input));
+            setPage(1);
+        } catch (error) {
+            setWorkflowError(errorMessage(error));
+            throw error;
+        }
+    };
+
+    const canRetry = (item: ImageGeneration) => {
+        if ((item.status !== "failed" && item.status !== "cancelled") ||
+            !capabilities.isSuccess || capabilities.isFetching ||
+            !Number.isInteger(item.count) || item.count < 1 || item.count > 4) return false;
+        if (item.toolKey === "main") return supportsMainRetry(item, capabilities.data);
+        if (item.toolInput !== undefined && item.toolInput !== null) {
+            return isToolEditKey(item.toolKey ?? "") && Boolean(item.toolInput.tool === item.toolKey &&
+                item.toolInput.modelId === item.modelId && item.toolInput.count === item.count &&
+                supportsToolInput(item.toolInput, capabilities.data));
+        }
+        return (item.toolKey == null || item.toolKey === "creative") && creativeAvailable &&
+            typeof item.prompt === "string" && item.prompt.trim().length >= 3 && item.prompt.trim().length <= 2000 &&
+            models.some((model) => model.id === item.modelId) && sizes.includes(item.size);
+    };
 
     const retryGeneration = async (item: ImageGeneration) => {
         if (locked || !canRetry(item)) return;
@@ -369,6 +290,7 @@ export default function ImageStudioPage() {
             const quote = await fetchGenerationQuote(item.modelId, item.count);
             if (!window.confirm(`本次重试费用为 ${quote.total} 积分，是否继续？`)) return;
             setShowHistory(false);
+            setHistoryResult(null);
             setResult(await retry.mutateAsync(item.id));
             setPage(1);
         } catch (error) {
@@ -384,6 +306,7 @@ export default function ImageStudioPage() {
         try {
             await remove.mutateAsync(item.id);
             if (result?.id === item.id) setResult(null);
+            if (historyResult?.id === item.id) setHistoryResult(null);
         } catch (error) {
             setWorkflowError(errorMessage(error));
         }
@@ -395,6 +318,7 @@ export default function ImageStudioPage() {
         try {
             const cancelled = await cancel.mutateAsync(item.id);
             if (result?.id === item.id) setResult(cancelled);
+            if (historyResult?.id === item.id) setHistoryResult(cancelled);
         } catch (error) {
             setWorkflowError(errorMessage(error));
         }
@@ -462,17 +386,12 @@ export default function ImageStudioPage() {
         }
     };
 
-    const toggleRetouch = (mode: string) => {
-        setRetouchModes((prev) =>
-            prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode],
-        );
-    };
-
     return (
         <div className="studio-app">
             {/* TOPBAR */}
             <header className="topbar">
-                <a className="tb-logo" href="/extension/image-studio">
+                <button className="icon-btn workspace-menu-trigger" aria-label="打开工作区菜单" title="工作区菜单" aria-expanded={mobileOpen} onClick={() => setMobileOpen(true)}><Layers3 size={20} /></button>
+                <a className="tb-logo" href="/" target="_top">
                     <span className="mark">出</span>
                     出图AI
                 </a>
@@ -480,111 +399,34 @@ export default function ImageStudioPage() {
                 <nav className="tb-crumb" aria-label="面包屑">
                     <span>工作台</span>
                     <i>/</i>
-                    <span>{t.group}</span>
+                    <span>{{ create: "创作工作台", works: "我的作品", materials: "素材库", history: "生成历史" }[view]}</span>
                     <i>/</i>
-                    <b>{t.name}</b>
+                    <b>{showWorks ? "图片作品" : toolName}</b>
                 </nav>
                 <div className="tb-right">
-                    <div className="credits" title="可用积分余额" role="status">
-                        <Zap width={13} height={13} />
-                        <span>
-                            {balance.isSuccess
-                                ? `${balance.data.balance.toLocaleString()} 积分`
-                                : balance.isError
-                                  ? "余额查询失败"
-                                  : "余额加载中..."}
-                        </span>
-                    </div>
-                    {balance.isError && (
-                        <button
-                            className="icon-btn"
-                            title="重新查询余额"
-                            aria-label="重新查询余额"
-                            disabled={balance.isFetching}
-                            onClick={() => void balance.refetch()}
-                        >
-                            <RefreshCw size={14} />
-                        </button>
-                    )}
-                    <button className="tb-charge" disabled title="请在主站账户中心充值">
-                        充值
-                    </button>
-                    <button
-                        className="icon-btn"
-                        title="生成历史"
-                        aria-label="生成历史"
-                        onClick={() => setShowHistory(true)}
-                    >
-                        <History width={16} height={16} />
-                    </button>
-                    <div className="avatar" title="账号">
-                        <Crown width={12} height={12} />
-                    </div>
+                    <WorkspaceAccount onNavigate={navigate} locked={locked} />
                 </div>
             </header>
 
             {/* APP GRID */}
-            <main className="app">
-                {/* icon bar */}
-                <aside className="iconbar">
-                    <button
-                        className={`ibtn${!showHistory ? "on" : ""}`}
-                        title="创作工作台"
-                        aria-label="创作工作台"
-                        onClick={() => setShowHistory(false)}
-                    >
-                        <WandSparkles width={18} height={18} />
-                    </button>
-                    <button className="ibtn" title="素材库暂未开放" disabled>
-                        <FolderOpen width={18} height={18} />
-                    </button>
-                    <button
-                        className={`ibtn${showHistory ? "on" : ""}`}
-                        title="生成历史"
-                        aria-label="生成历史"
-                        onClick={() => setShowHistory(true)}
-                    >
-                        <History width={18} height={18} />
-                    </button>
-                    <button className="ibtn" title="偏好设置暂未开放" disabled>
-                        <Settings width={18} height={18} />
-                    </button>
-                    <span className="ibtn-space" />
-                    <button className="ibtn" title="帮助暂未开放" disabled>
-                        <CircleHelp width={18} height={18} />
-                    </button>
-                </aside>
+            <main className="workspace-layout">
+                <WorkspaceNavigation view={view} tool={tool} mobileOpen={mobileOpen} onMobileOpenChange={setMobileOpen} onNavigate={navigate} onPreferences={() => setPreferencesOpen(true)} onHelp={() => setHelpOpen(true)} />
+                <div className="workspace-content">
+                {busy && view !== "create" && <button className="workspace-active-task" onClick={() => navigate("create")}><span className="spin" />当前任务 {pendingStatus} · {pendingCount} 张<span>查看任务</span></button>}
+                {view === "materials" && <MaterialsView onUse={(image) => { setRequestedMaterial({ image, requestId: ++materialSequence.current }); navigate("create", "main"); }} />}
 
-                {/* feature tree */}
-                <aside className="tree">
-                    {(Object.keys(GROUPS) as (keyof typeof GROUPS)[]).map((group) => (
-                        <div key={group}>
-                            <div className="tgroup">{group}</div>
-                            {GROUPS[group].map((k) => {
-                                const key = k as ToolKey;
-                                const active = tool === key;
-                                return (
-                                    <button
-                                        key={key}
-                                        className={`titem${active ? "on" : ""}`}
-                                        disabled={Boolean(unavailableReason(key))}
-                                        title={unavailableReason(key) || TOOLS[key].name}
-                                        onClick={() => setTool(key)}
-                                    >
-                                        <span className="t-ico">{TOOL_ICONS[key]}</span>
-                                        {TOOLS[key].name}
-                                        {unavailableReason(key) && (
-                                            <span className="t-def">未开放</span>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    ))}
-                </aside>
+                {showWorks && <WorksView renderImage={({ generation, index }) => (
+                    <ResultTile generationId={generation.id} imageIndex={index}
+                        caption={imageCaption(generation, index)}
+                        onDownload={(blob, url) => downloadImage(blob, url, generation.id, index)} />
+                )} />}
 
                 {/* FORM COLUMN */}
-                <section className="form">
+                <div className={`workspace-create${isSpecializedTool(tool) ? ` ${SPECIALIZED_WORKSPACE_LAYOUT[tool].className}` : ""}`}
+                    data-tool={tool}
+                    style={isSpecializedTool(tool) ? { "--workspace-form-width": `${SPECIALIZED_WORKSPACE_LAYOUT[tool].preferredFormWidth}px` } as CSSProperties : undefined}
+                    hidden={view !== "create" && view !== "history"}>
+                <section className="form" hidden={view !== "create"}>
                     {unavailableReason(tool) && (
                         <div className="workflow-message" role="status">
                             {unavailableReason(tool)}
@@ -600,7 +442,7 @@ export default function ImageStudioPage() {
                             重新检查
                         </button>
                     )}
-                    {tool === "main" ? (
+                    <div hidden={tool !== "main"}>
                         <MainImageForm
                             models={mainModels}
                             visionModels={(capabilities.data?.models ?? []).filter((model) =>
@@ -609,185 +451,23 @@ export default function ImageStudioPage() {
                             available={mainAvailable}
                             locked={locked}
                             onSubmit={startMain}
+                            requestedMaterial={requestedMaterial}
+                            onMaterialConsumed={(requestId) => setRequestedMaterial((current) => current?.requestId === requestId ? null : current)}
                         />
-                    ) : tool === "creative" ? (
-                        <form
-                            className="ftpl show"
-                            onSubmit={(event) => {
-                                event.preventDefault();
-                                void startGen();
-                            }}
-                        >
-                            <div className="form-head">
-                                <h2>{t.name}</h2>
-                                <p>{t.desc}</p>
-                            </div>
-                            <fieldset className="creative-fields" disabled={locked}>
-                                <div className="field">
-                                    <label className="f-label" htmlFor="creative-prompt">
-                                        提示词
-                                    </label>
-                                    <textarea
-                                        id="creative-prompt"
-                                        className="ta"
-                                        required
-                                        minLength={3}
-                                        maxLength={2000}
-                                        value={prompt}
-                                        onChange={(event) => setPrompt(event.target.value)}
-                                        placeholder="描述希望生成的画面"
-                                    />
-                                </div>
-                                <div className="field">
-                                    <label className="f-label" htmlFor="creative-model">
-                                        模型
-                                    </label>
-                                    <select
-                                        id="creative-model"
-                                        className="sel"
-                                        value={selectedModelId}
-                                        onChange={(event) => setModelId(event.target.value)}
-                                        disabled={!creativeAvailable}
-                                    >
-                                        {!models.length && <option value="">暂无可用模型</option>}
-                                        {models.map((model) => (
-                                            <option key={model.id} value={model.id}>
-                                                {model.name} · {model.provider}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div className="field">
-                                    <label className="f-label" htmlFor="creative-size">
-                                        尺寸
-                                    </label>
-                                    <select
-                                        id="creative-size"
-                                        className="sel"
-                                        value={selectedSize}
-                                        onChange={(event) => setSize(event.target.value)}
-                                        disabled={!creativeAvailable}
-                                    >
-                                        {!sizes.length && <option value="">暂无可用尺寸</option>}
-                                        {sizes.map((value) => (
-                                            <option key={value} value={value}>
-                                                {value}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div className="field">
-                                    <label className="f-label" htmlFor="creative-count">
-                                        数量
-                                    </label>
-                                    <input
-                                        id="creative-count"
-                                        className="text-in"
-                                        type="number"
-                                        min={1}
-                                        max={4}
-                                        required
-                                        value={count}
-                                        onChange={(event) => setCount(Number(event.target.value))}
-                                    />
-                                </div>
-                                <div className="field">
-                                    <label className="f-label" htmlFor="creative-quality">
-                                        质量
-                                    </label>
-                                    <select
-                                        id="creative-quality"
-                                        className="sel"
-                                        value={imageQuality}
-                                        onChange={(event) => setImageQuality(event.target.value)}
-                                    >
-                                        <option value="standard">标准</option>
-                                        <option value="hd">高清</option>
-                                    </select>
-                                </div>
-                                <div className="field">
-                                    <label className="f-label" htmlFor="creative-style">
-                                        风格
-                                    </label>
-                                    <select
-                                        id="creative-style"
-                                        className="sel"
-                                        value={style}
-                                        onChange={(event) => setStyle(event.target.value)}
-                                    >
-                                        <option value="vivid">鲜明</option>
-                                        <option value="natural">自然</option>
-                                    </select>
-                                </div>
-                            </fieldset>
-                            <div className="form-foot">
-                                <span className="cost-line" role="status">
-                                    {creativeBilling.costText}
-                                </span>
-                                {(creativeBilling.quote.isError ||
-                                    creativeBilling.balance.isError) && (
-                                    <button
-                                        type="button"
-                                        className="icon-btn"
-                                        title="重新查询积分"
-                                        aria-label="重新查询积分"
-                                        onClick={() => {
-                                            void creativeBilling.quote.refetch();
-                                            void creativeBilling.balance.refetch();
-                                        }}
-                                    >
-                                        <RefreshCw size={14} />
-                                    </button>
-                                )}
-                                <button
-                                    className="btn btn-lime"
-                                    type="submit"
-                                    disabled={
-                                        locked ||
-                                        !creativeAvailable ||
-                                        !creativeBilling.ready ||
-                                        prompt.trim().length < 3 ||
-                                        !Number.isInteger(count) ||
-                                        count < 1 ||
-                                        count > 4
-                                    }
-                                >
-                                    {busy ? "生成中..." : "立即生成"}
-                                </button>
-                            </div>
-                        </form>
-                    ) : (
-                        <fieldset className="future-form" disabled>
-                            {renderForm({
-                                tool,
-                                t,
-                                uploads: {},
-                                showErr: {},
-                                steppers,
-                                setSteppers,
-                                ratio,
-                                setRatio,
-                                quality,
-                                setQuality,
-                                origRatio,
-                                setOrigRatio,
-                                targetRatio,
-                                setTargetRatio,
-                                posIndex,
-                                setPosIndex,
-                                retouchModes,
-                                toggleRetouch,
-                                addUpload: () => {},
-                                removeUpload: () => {},
-                                startGen: () => {},
-                                busy: true,
-                            })}
-                        </fieldset>
-                    )}
+                    </div>
+                    {SPECIALIZED_TOOLS.map((specializedTool) => {
+                        const inactive = tool !== specializedTool || view !== "create";
+                        return <div key={specializedTool} className="workspace-tool-form" data-tool-form={specializedTool} hidden={inactive} inert={inactive}>
+                            <ToolForm tool={specializedTool} capabilities={capabilities.data ?? { models: [], tools: [] }}
+                                locked={inactive || locked || !capabilities.isSuccess || capabilities.isFetching}
+                                defaultCount={preferences.value.count} onSubmit={startTool} />
+                        </div>;
+                    })}
+                    {tool !== "main" && !isSpecializedTool(tool) && <ToolForm tool={tool} capabilities={capabilities.data ?? { models: [], tools: [] }} locked={locked || view !== "create" || !capabilities.isSuccess || capabilities.isFetching} onSubmit={startTool} />}
                 </section>
 
                 {/* CANVAS */}
-                <section className="canvas">
+                <section className="canvas" data-empty={!currentResult && !busy && !workflowError}>
                     {workflowError && (
                         <div className="workflow-message error" role="alert">
                             {workflowError}
@@ -848,12 +528,19 @@ export default function ImageStudioPage() {
                                             <div className="history-summary">
                                                 <button
                                                     className="history-open"
+                                                    disabled={busy}
+                                                    title={busy ? "当前任务结束后可打开历史详情" : "查看结果"}
                                                     onClick={() => {
-                                                        setResult(item);
+                                                        if (isGenerationActive(item)) {
+                                                            setResult(item);
+                                                            setHistoryResult(null);
+                                                        } else {
+                                                            setHistoryResult(item);
+                                                        }
                                                         setShowHistory(false);
                                                     }}
                                                 >
-                                                    <strong>{item.prompt}</strong>
+                                                    <strong>{TOOL_LABELS[item.toolKey ?? "creative"]} · {item.prompt}</strong>
                                                     <span>
                                                         {item.modelName} · {item.size} ·{" "}
                                                         {item.count} 张 ·{" "}
@@ -1008,18 +695,17 @@ export default function ImageStudioPage() {
                                             <span className="spin" aria-hidden="true" />
                                             <span>
                                                 {pendingMainInput
-                                                    ? MAIN_IMAGE_TYPES[
-                                                          mainImageVariants(pendingMainInput)[index]
-                                                      ]
+                                                    ? mainImageVariants(pendingMainInput).map(
+                                                          (variant) => MAIN_IMAGE_TYPES[variant],
+                                                      )[index] ?? `图片 ${index + 1}`
                                                     : `图片 ${index + 1}`}
                                             </span>
-                                            <span>
-                                                {submitting
-                                                    ? "提交中"
-                                                    : currentResult?.status === "queued"
-                                                      ? "等待生成"
-                                                      : "生成中"}
-                                            </span>
+                                            <span>{pendingStatus}</span>
+                                            <progress
+                                                className="generation-progress generation-image-progress"
+                                                aria-label={`图片 ${index + 1}生成进度`}
+                                                aria-valuetext={pendingStatus}
+                                            />
                                         </div>
                                     ))}
                                 </div>
@@ -1045,7 +731,7 @@ export default function ImageStudioPage() {
                                         )}
                                         <button
                                             className="btn btn-ghost btn-sm"
-                                            onClick={() => setResult(null)}
+                                            onClick={() => { setHistoryResult(null); setResult(null); }}
                                         >
                                             返回创作
                                         </button>
@@ -1073,7 +759,7 @@ export default function ImageStudioPage() {
                                     />
                                 )}
                                 <p className="workflow-message">
-                                    {currentResult.modelName} · {currentResult.size} ·{" "}
+                                    {TOOL_LABELS[currentResult.toolKey ?? "creative"]} · {currentResult.modelName} · {currentResult.size} ·{" "}
                                     {currentResult.images.length} 张
                                 </p>
                                 {billingCaption(currentResult) && (
@@ -1177,7 +863,11 @@ export default function ImageStudioPage() {
                         </div>
                     )}
                 </section>
+                </div>
+                </div>
             </main>
+            <WorkspacePreferencesDialog open={preferencesOpen} onOpenChange={setPreferencesOpen} value={preferences.value} error={preferences.error} onChange={preferences.update} />
+            <WorkspaceHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
 
             {/* TOAST */}
             {toast && (
@@ -1186,380 +876,6 @@ export default function ImageStudioPage() {
                     <span>{toast.msg}</span>
                 </div>
             )}
-        </div>
-    );
-}
-
-/* ---------------- Form Renderer ---------------- */
-
-interface FormProps {
-    tool: ToolKey;
-    t: ToolDef;
-    uploads: Record<string, { id: number; url: string }[]>;
-    showErr: Record<string, boolean>;
-    steppers: { white: number; scene: number; selling: number; other: number };
-    setSteppers: (s: { white: number; scene: number; selling: number; other: number }) => void;
-    ratio: string;
-    setRatio: (v: string) => void;
-    quality: string;
-    setQuality: (v: string) => void;
-    origRatio: string;
-    setOrigRatio: (v: string) => void;
-    targetRatio: string;
-    setTargetRatio: (v: string) => void;
-    posIndex: number;
-    setPosIndex: (v: number) => void;
-    retouchModes: string[];
-    toggleRetouch: (mode: string) => void;
-    addUpload: (k: string) => void;
-    removeUpload: (k: string, id: number) => void;
-    startGen: () => void;
-    busy: boolean;
-}
-
-function renderForm(p: FormProps) {
-    const key = p.tool;
-    const uploads = p.uploads[key] ?? [];
-    const cnt = `${uploads.length}/5`;
-
-    const dropzone = (
-        <div className="field">
-            <div className="f-label">
-                上传商品图 <span className="opt">{cnt}</span>
-            </div>
-            <div className="f-up">
-                <div className={`dz${p.showErr[key] ? "dz-err" : ""}`} aria-disabled="true">
-                    <Upload width={22} height={22} />
-                    <div className="dz-t">图片上传暂未开放</div>
-                    <div className="dz-s">暂不支持提交源图片</div>
-                </div>
-                <div className="thumbs">
-                    {uploads.map((u) => (
-                        <div key={u.id} className="thumb">
-                            <img src={u.url} alt="已上传" />
-                            <button
-                                className="thumb-x"
-                                onClick={() => p.removeUpload(key, u.id)}
-                                aria-label="移除"
-                            >
-                                <X width={10} height={10} />
-                            </button>
-                        </div>
-                    ))}
-                </div>
-                {p.showErr[key] && (
-                    <div className="dz-error" style={{ display: "flex" }}>
-                        <svg
-                            width={13}
-                            height={13}
-                            viewBox="0 0 16 16"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={1.5}
-                        >
-                            <circle cx={8} cy={8} r={6.2} />
-                            <path d="M8 5v3.6" />
-                        </svg>
-                        请先上传商品图
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-
-    // ---------- Template: 商品主图 ----------
-    if (p.t.tpl === "main") {
-        return (
-            <div className="ftpl show">
-                <div className="form-head">
-                    <h2>{p.t.name}</h2>
-                    <p>{p.t.desc}</p>
-                </div>
-
-                {dropzone}
-
-                <div className="field">
-                    <div className="f-label">生成设置</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                        <input className="text-in" placeholder="商品名称，如：轻量透气跑步鞋" />
-                        <input className="text-in" placeholder="品牌（选填）" />
-                        <select className="sel">
-                            <option>淘宝 / 天猫</option>
-                            <option>拼多多</option>
-                            <option>抖音商城</option>
-                            <option>京东</option>
-                            <option>小红书</option>
-                            <option>亚马逊</option>
-                            <option>1688</option>
-                        </select>
-                        <select className="sel">
-                            <option>输出语言：简体中文</option>
-                            <option>输出语言：English</option>
-                            <option>输出语言：中英双语</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div className="field">
-                    <div className="f-label">
-                        配图类型 <span className="opt">暂未开放</span>
-                    </div>
-                    <StepperRow
-                        label="白底图"
-                        hint="纯白背景，满足平台规范"
-                        value={p.steppers.white}
-                        onChange={(v) => p.setSteppers({ ...p.steppers, white: v })}
-                    />
-                    <StepperRow
-                        label="场景图"
-                        hint="生活化布景与打光"
-                        value={p.steppers.scene}
-                        onChange={(v) => p.setSteppers({ ...p.steppers, scene: v })}
-                    />
-                    <StepperRow
-                        label="卖点图"
-                        hint="自动排版核心卖点"
-                        value={p.steppers.selling}
-                        onChange={(v) => p.setSteppers({ ...p.steppers, selling: v })}
-                    />
-                    <StepperRow
-                        label="其他"
-                        hint="自由发挥"
-                        value={p.steppers.other}
-                        onChange={(v) => p.setSteppers({ ...p.steppers, other: v })}
-                    />
-                </div>
-
-                <div className="field">
-                    <details className="adv">
-                        <summary>高级设置</summary>
-                        <div className="adv-in">
-                            <div className="adv-row">
-                                <span className="ar-cap">比例</span>
-                                <SingleChipRow
-                                    options={["1:1", "3:4", "9:16"]}
-                                    value={p.ratio}
-                                    onChange={p.setRatio}
-                                />
-                            </div>
-                            <div className="adv-row">
-                                <span className="ar-cap">清晰度</span>
-                                <SingleChipRow
-                                    options={["1K", "2K"]}
-                                    value={p.quality}
-                                    onChange={p.setQuality}
-                                />
-                            </div>
-                        </div>
-                    </details>
-                </div>
-
-                <div className="form-foot">
-                    <span className="cost-line">费用暂不可用</span>
-                    <button className="btn btn-lime" disabled={p.busy} onClick={p.startGen}>
-                        暂未开放
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    // ---------- Template: 产品精修 ----------
-    if (p.t.tpl === "retouch") {
-        return (
-            <div className="ftpl show">
-                <div className="form-head">
-                    <h2>{p.t.name}</h2>
-                    <p>{p.t.desc}</p>
-                </div>
-
-                {dropzone}
-
-                <div className="field">
-                    <div className="f-label">
-                        精修模式 <span className="opt">可多选</span>
-                    </div>
-                    <div className="chipset">
-                        {[
-                            "综合精修",
-                            "质感增强",
-                            "瑕疵修复",
-                            "色彩校正",
-                            "提升清晰度",
-                            "材质强化",
-                        ].map((m) => (
-                            <span
-                                key={m}
-                                className={`chip${p.retouchModes.includes(m) ? "on" : ""}`}
-                                onClick={() => p.toggleRetouch(m)}
-                            >
-                                {m}
-                            </span>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="field">
-                    <div className="f-label">
-                        补充要求 <span className="opt">选填</span>
-                    </div>
-                    <textarea
-                        className="ta"
-                        placeholder="例如：瓶身保留磨砂质感，背景压暗突出主体……"
-                    />
-                </div>
-
-                <div className="form-foot">
-                    <span className="cost-line">费用暂不可用</span>
-                    <button className="btn btn-lime" disabled={p.busy} onClick={p.startGen}>
-                        暂未开放
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    // ---------- Template: 智能扩图 ----------
-    if (p.t.tpl === "expand") {
-        return (
-            <div className="ftpl show">
-                <div className="form-head">
-                    <h2>{p.t.name}</h2>
-                    <p>{p.t.desc}</p>
-                </div>
-
-                {dropzone}
-
-                <div className="field">
-                    <div className="f-label">原图占比</div>
-                    <SingleChipRow
-                        options={["100%", "80%", "60%", "50%"]}
-                        value={p.origRatio}
-                        onChange={p.setOrigRatio}
-                    />
-                </div>
-
-                <div className="field">
-                    <div className="f-label">
-                        原图位置 <span className="opt">点击选择</span>
-                    </div>
-                    <div className="posgrid">
-                        {Array.from({ length: 9 }).map((_, i) => (
-                            <span
-                                key={i}
-                                className={`poscell${p.posIndex === i ? "on" : ""}`}
-                                onClick={() => p.setPosIndex(i)}
-                            />
-                        ))}
-                    </div>
-                </div>
-
-                <div className="field">
-                    <div className="f-label">目标比例</div>
-                    <select
-                        className="sel"
-                        value={p.targetRatio}
-                        onChange={(e) => p.setTargetRatio(e.target.value)}
-                    >
-                        <option value="1:1">1:1</option>
-                        <option value="3:4">3:4</option>
-                        <option value="9:16">9:16</option>
-                        <option value="16:9">16:9</option>
-                    </select>
-                </div>
-
-                <div className="form-foot">
-                    <span className="cost-line">费用暂不可用</span>
-                    <button className="btn btn-lime" disabled={p.busy} onClick={p.startGen}>
-                        暂未开放
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    // ---------- Template: 通用 ----------
-    return (
-        <div className="ftpl show">
-            <div className="form-head">
-                <h2>{p.t.name}</h2>
-                <p>{p.t.desc}</p>
-            </div>
-
-            {dropzone}
-
-            <div className="field">
-                <div className="f-label">
-                    补充说明 <span className="opt">选填</span>
-                </div>
-                <textarea
-                    className="ta"
-                    placeholder="描述你的需求，例如：突出便携属性，主色调与品牌 VI 保持一致……"
-                />
-            </div>
-
-            <div className="form-foot">
-                <span className="cost-line">费用暂不可用</span>
-                <button className="btn btn-lime" disabled={p.busy} onClick={p.startGen}>
-                    暂未开放
-                </button>
-            </div>
-        </div>
-    );
-}
-
-/* ---------------- Sub-components ---------------- */
-
-function StepperRow({
-    label,
-    hint,
-    value,
-    onChange,
-}: {
-    label: string;
-    hint: string;
-    value: number;
-    onChange: (v: number) => void;
-}) {
-    return (
-        <div className="step-row">
-            <span className="sr-name">
-                {label}
-                <small>{hint}</small>
-            </span>
-            <div className="stepper">
-                <button onClick={() => onChange(Math.max(0, value - 1))}>
-                    <Minus width={14} height={14} />
-                </button>
-                <span className="stp-val">{value}</span>
-                <button onClick={() => onChange(Math.min(4, value + 1))}>
-                    <Plus width={14} height={14} />
-                </button>
-            </div>
-        </div>
-    );
-}
-
-function SingleChipRow({
-    options,
-    value,
-    onChange,
-}: {
-    options: string[];
-    value: string;
-    onChange: (v: string) => void;
-}) {
-    return (
-        <div className="chipset">
-            {options.map((opt) => (
-                <span
-                    key={opt}
-                    className={`chip${value === opt ? "on" : ""}`}
-                    onClick={() => onChange(opt)}
-                >
-                    {opt}
-                </span>
-            ))}
         </div>
     );
 }

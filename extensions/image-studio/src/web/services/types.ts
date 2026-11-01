@@ -1,4 +1,6 @@
 import type { MainImageInput } from "../../api/shared/main-image";
+import type { ToolKey } from "../../api/shared/tools";
+import type { ToolWorkflowInput } from "../../api/shared/tool-workflow";
 
 export interface ImageModel {
     id: string;
@@ -18,8 +20,9 @@ export type GenerationStatus = "queued" | "processing" | "completed" | "failed" 
 
 export interface ImageGeneration {
     id: string;
-    toolKey?: "creative" | "main";
+    toolKey?: ToolKey;
     mainInput?: MainImageInput | null;
+    toolInput?: ToolWorkflowInput | null;
     prompt: string;
     modelId: string;
     modelName: string;
@@ -58,4 +61,8 @@ export interface ProductImage {
     width: number;
     height: number;
     size: number;
+    createdAt?: string;
+    name?: string;
+    group?: string;
+    metadataStatus?: "ready" | "unavailable";
 }
