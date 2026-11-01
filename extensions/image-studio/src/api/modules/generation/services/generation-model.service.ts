@@ -17,6 +17,7 @@ import {
 } from "../../../shared/tools";
 import { MODEL_UNAVAILABLE } from "../constants/generation.constants";
 import { quoteGenerationCredits } from "../../../shared/billing";
+import { isToolEditKey, toolReferenceLimit, TOOL_RATIOS } from "../../../shared/tool-workflow";
 
 @Injectable()
 export class GenerationModelService {
@@ -46,6 +47,7 @@ export class GenerationModelService {
         for (const model of configuredModels) {
             if (!model.isActive || !model.provider?.isActive) continue;
             const capabilities: ToolCapability[] = [];
+            let maxReferenceImages = 0;
             try {
                 const provider = getProvider(model.provider.provider, {
                     apiKey: "capability-probe-not-a-credential",
@@ -58,6 +60,8 @@ export class GenerationModelService {
                         imageModel.supportsReferenceImages === true
                     ) {
                         capabilities.push("reference-image");
+                        maxReferenceImages = toolReferenceLimit(imageModel);
+                        if (maxReferenceImages >= 2) capabilities.push("multi-image");
                     }
                 }
                 if (
@@ -85,6 +89,7 @@ export class GenerationModelService {
                 provider: model.provider.name,
                 providerCode: model.provider.provider,
                 capabilities,
+                maxReferenceImages,
             });
         }
 
@@ -99,11 +104,12 @@ export class GenerationModelService {
                         .map((model) => model.id);
                 }
                 const disabled = definition.status === "disabled";
+                const eligibleModels = models.filter((model) => definition.requiredCapabilities.every(
+                    (capability) => model.capabilities.includes(capability),
+                ));
                 const supported =
                     !disabled &&
-                    definition.requiredCapabilities.every(
-                        (capability) => modelIdsByCapability[capability]!.length > 0,
-                    );
+                    eligibleModels.length > 0;
                 return {
                     key,
                     status: supported ? "available" : "unavailable",
@@ -114,7 +120,11 @@ export class GenerationModelService {
                         : supported
                           ? null
                           : "unsupported_capabilities",
-                    limits: { sizes: null, maxInputImages: key === "main" ? 5 : null },
+                    limits: {
+                        sizes: isToolEditKey(key) ? TOOL_RATIOS : null,
+                        maxInputImages: key === "main" || key === "suggest" ? 5 : isToolEditKey(key)
+                            ? Math.max(0, ...eligibleModels.map((model) => model.maxReferenceImages ?? 0)) : null,
+                    },
                 };
             }),
         };

@@ -25,6 +25,7 @@ import {
     type GenerationJobData,
     GenerationService,
 } from "../src/api/modules/generation/services/generation.service";
+import { TOOL_RATIOS } from "../src/api/shared/tool-workflow";
 
 jest.mock("@buildingai/ai-sdk", () => ({
     MODEL_TYPES: { TEXT_TO_IMAGE: "text-to-image", LLM: "llm" },
@@ -280,7 +281,7 @@ describe("generation capabilities", () => {
             status: "available",
             reason: null,
             modelIdsByCapability: { "text-to-image": ["image-model"] },
-            limits: { sizes: null, maxInputImages: null },
+            limits: { sizes: TOOL_RATIOS, maxInputImages: 0 },
         });
         expect(image).toHaveBeenCalledWith("image-edit-segmentation-fusion");
     });
@@ -294,7 +295,7 @@ describe("generation capabilities", () => {
             "fusion",
             "sku",
             "retouch",
-            "cutout",
+            "watermark",
             "expand",
             "translate",
         ]) {
@@ -303,11 +304,26 @@ describe("generation capabilities", () => {
                 reason: "unsupported_capabilities",
             });
         }
-        expect(result.tools.find((tool) => tool.key === "watermark")).toMatchObject({
+        expect(result.tools.find((tool) => tool.key === "cutout")).toMatchObject({
             status: "unavailable",
             reason: "tool_disabled",
-            modelIdsByCapability: {},
+            modelIdsByCapability: { segmentation: [] },
         });
+    });
+
+    it("only advertises multi-image for the verified reference adapter and never implies masks or alpha", async () => {
+        image.mockReturnValue({ model: { specificationVersion: "v3", doGenerate: jest.fn(), supportsReferenceImages: true, provider: "unknown" } });
+        const single = await service.capabilities();
+        expect(single.models[0].maxReferenceImages).toBe(1);
+        expect(single.tools.find((tool) => tool.key === "retouch")).toMatchObject({ status: "available", limits: { maxInputImages: 1 } });
+        expect(single.tools.find((tool) => tool.key === "fusion")?.status).toBe("unavailable");
+        expect(single.tools.find((tool) => tool.key === "replica")?.status).toBe("unavailable");
+        image.mockReturnValue({ model: { specificationVersion: "v3", doGenerate: jest.fn(), supportsReferenceImages: true, provider: "volcengine", modelId: "doubao-seedream-5-0-lite" } });
+        const multi = await service.capabilities();
+        expect(multi.models[0].capabilities).toEqual(["text-to-image", "reference-image", "multi-image"]);
+        expect(multi.tools.find((tool) => tool.key === "fusion")).toMatchObject({ status: "available", limits: { maxInputImages: 5 } });
+        expect(multi.tools.find((tool) => tool.key === "cutout")).toMatchObject({ status: "unavailable", reason: "tool_disabled" });
+        expect(generateImage).not.toHaveBeenCalled();
     });
 
     it("requires image support even when the wrapper exposes image()", async () => {
@@ -408,6 +424,7 @@ describe("generation capabilities", () => {
         expect(Object.keys(result.models[0]).sort()).toEqual([
             "capabilities",
             "id",
+            "maxReferenceImages",
             "model",
             "name",
             "provider",

@@ -10,8 +10,9 @@ describe("image studio tool registry", () => {
             .toHaveLength(11);
     });
 
-    it("explicitly disables watermark", () => {
-        expect(TOOL_REGISTRY.watermark).toEqual({ status: "disabled", requiredCapabilities: [] });
+    it("disables cutout without advertising transparent segmentation", () => {
+        expect(TOOL_REGISTRY.cutout).toEqual({ status: "disabled", requiredCapabilities: ["segmentation"] });
+        expect(TOOL_REGISTRY.watermark).toEqual({ status: "intended", requiredCapabilities: ["reference-image"] });
     });
 
     it("requires actual image operations for image-based tools", () => {
@@ -19,7 +20,7 @@ describe("image studio tool registry", () => {
         expect(TOOL_REGISTRY.suggest.requiredCapabilities).toEqual(["vision"]);
         expect(TOOL_REGISTRY.fusion.requiredCapabilities).toContain("multi-image");
         expect(TOOL_REGISTRY.cutout.requiredCapabilities).toContain("segmentation");
-        expect(TOOL_REGISTRY.expand.requiredCapabilities).toContain("outpaint");
-        expect(TOOL_REGISTRY.translate.requiredCapabilities).toContain("inpaint");
+        expect(TOOL_REGISTRY.expand.requiredCapabilities).toEqual(["reference-image"]);
+        expect(TOOL_REGISTRY.translate.requiredCapabilities).toEqual(["reference-image"]);
     });
 });

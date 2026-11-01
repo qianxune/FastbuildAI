@@ -17,20 +17,20 @@ export const TOOL_REGISTRY = {
     main: { status: "intended", requiredCapabilities: ["reference-image"] },
     detail: {
         status: "intended",
-        requiredCapabilities: ["vision", "text-to-image", "reference-image"],
+        requiredCapabilities: ["reference-image"],
     },
-    replica: { status: "intended", requiredCapabilities: ["reference-image"] },
+    replica: { status: "intended", requiredCapabilities: ["reference-image", "multi-image"] },
     creative: { status: "intended", requiredCapabilities: ["text-to-image"] },
     fusion: {
         status: "intended",
         requiredCapabilities: ["reference-image", "multi-image"],
     },
-    sku: { status: "intended", requiredCapabilities: ["vision", "reference-image"] },
-    retouch: { status: "intended", requiredCapabilities: ["image-edit"] },
-    cutout: { status: "intended", requiredCapabilities: ["segmentation"] },
-    watermark: { status: "disabled", requiredCapabilities: [] },
-    expand: { status: "intended", requiredCapabilities: ["outpaint"] },
-    translate: { status: "intended", requiredCapabilities: ["vision", "inpaint", "image-edit"] },
+    sku: { status: "intended", requiredCapabilities: ["reference-image"] },
+    retouch: { status: "intended", requiredCapabilities: ["reference-image"] },
+    cutout: { status: "disabled", requiredCapabilities: ["segmentation"] },
+    watermark: { status: "intended", requiredCapabilities: ["reference-image"] },
+    expand: { status: "intended", requiredCapabilities: ["reference-image"] },
+    translate: { status: "intended", requiredCapabilities: ["reference-image"] },
     suggest: { status: "intended", requiredCapabilities: ["vision"] },
 } as const satisfies Record<string, ToolDefinition>;
 
@@ -45,6 +45,7 @@ export interface CapabilityModel {
     provider: string;
     providerCode: string;
     capabilities: ToolCapability[];
+    maxReferenceImages?: number;
 }
 
 export interface ToolAvailability {

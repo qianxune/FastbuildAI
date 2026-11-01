@@ -10,18 +10,44 @@ import {
     Param,
     ParseIntPipe,
     ParseUUIDPipe,
+    Patch,
     Post,
     Query,
     StreamableFile,
     UploadedFile,
     UseInterceptors,
+    ValidationPipe,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
+import { IsOptional, IsString, MaxLength, MinLength } from "class-validator";
 
 import { GenerateImageDto, MainImageDto, QueryGenerationDto } from "../../dto";
 import { AnalyzeProductDto } from "../../dto/main-image.dto";
+import { ToolSuggestionDto, ToolWorkflowDto } from "../../dto/tool-workflow.dto";
 import { GenerationService } from "../../services/generation.service";
 import type { ProductImageUpload } from "../../services/product-image.service";
+
+class MaterialMetadataDto {
+    @IsOptional()
+    @IsString()
+    @MinLength(1)
+    @MaxLength(120)
+    name?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(60)
+    group?: string;
+}
+
+class MaterialGroupDto {
+    @IsString()
+    @MinLength(1)
+    @MaxLength(60)
+    name: string;
+}
+
+const materialValidation = new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true });
 
 @ExtensionWebController("generations")
 export class GenerationController {
@@ -57,6 +83,15 @@ export class GenerationController {
         return this.generationService.uploadProductImage(user.id, file);
     }
 
+    @Get("product-images/:id/thumbnail")
+    @SkipTransform()
+    @Header("X-Content-Type-Options", "nosniff")
+    @Header("Cache-Control", "private, no-store")
+    async productThumbnail(@Playground() user: UserPlayground, @Param("id", ParseUUIDPipe) id: string) {
+        const buffer = await this.generationService.readProductThumbnail(user.id, id);
+        return new StreamableFile(buffer, { type: "image/png", length: buffer.length });
+    }
+
     /** 读取当前用户商品图并直接返回 PNG 文件流，禁止缓存与内容类型嗅探。 */
     @Get("product-images/:id")
     @SkipTransform()
@@ -71,6 +106,39 @@ export class GenerationController {
     @Get("product-images")
     async productImageList(@Playground() user: UserPlayground) {
         return this.generationService.listProductImages(user.id);
+    }
+
+    @Patch("product-images/:id")
+    async updateProductImage(
+        @Playground() user: UserPlayground,
+        @Param("id", ParseUUIDPipe) id: string,
+        @Body(materialValidation) input: MaterialMetadataDto,
+    ) {
+        return this.generationService.updateProductImage(user.id, id, input);
+    }
+
+    @Get("product-image-groups")
+    async productImageGroups(@Playground() user: UserPlayground) {
+        return this.generationService.listProductImageGroups(user.id);
+    }
+
+    @Post("product-image-groups")
+    async createProductImageGroup(@Playground() user: UserPlayground, @Body(materialValidation) input: MaterialGroupDto) {
+        return this.generationService.createProductImageGroup(user.id, input.name);
+    }
+
+    @Patch("product-image-groups/:name")
+    async renameProductImageGroup(
+        @Playground() user: UserPlayground,
+        @Param("name") name: string,
+        @Body(materialValidation) input: MaterialGroupDto,
+    ) {
+        return this.generationService.changeProductImageGroup(user.id, name, input.name);
+    }
+
+    @Delete("product-image-groups/:name")
+    async deleteProductImageGroup(@Playground() user: UserPlayground, @Param("name") name: string) {
+        return this.generationService.changeProductImageGroup(user.id, name);
     }
 
     /** 删除当前用户未被生成记录引用的商品图。 */
@@ -92,6 +160,22 @@ export class GenerationController {
     @Post("main/tasks")
     async submitMain(@Playground() user: UserPlayground, @Body() input: MainImageDto) {
         return this.generationService.submitMain(user.id, input);
+    }
+
+    @Post("tools/tasks")
+    async submitTool(
+        @Playground() user: UserPlayground,
+        @Body(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true })) input: ToolWorkflowDto,
+    ) {
+        return this.generationService.submitTool(user.id, input);
+    }
+
+    @Post("tools/suggest")
+    async suggestProduct(
+        @Playground() user: UserPlayground,
+        @Body(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true })) input: ToolSuggestionDto,
+    ) {
+        return this.generationService.suggestProduct(user.id, input);
     }
 
     /** 返回工具可用状态以及图片、参考图和视觉模型能力映射。 */

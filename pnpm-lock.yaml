@@ -691,6 +691,9 @@ importers:
       '@buildingai/services':
         specifier: workspace:*
         version: link:../../packages/@buildingai/web/services
+      '@buildingai/stores':
+        specifier: workspace:*
+        version: link:../../packages/@buildingai/web/stores
       '@buildingai/ui':
         specifier: workspace:*
         version: link:../../packages/@buildingai/web/ui

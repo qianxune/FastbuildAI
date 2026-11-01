@@ -8,6 +8,7 @@ import {
 } from "@buildingai/db/typeorm";
 
 import type { MainImageInput } from "../../shared/main-image";
+import type { ToolEditKey, ToolWorkflowInput } from "../../shared/tool-workflow";
 
 export enum ImageGenerationStatus {
     QUEUED = "queued",
@@ -42,10 +43,13 @@ export class ImageGeneration {
     prompt: string;
 
     @Column({ type: "varchar", length: 20, default: "creative" })
-    toolKey: "creative" | "main";
+    toolKey: "creative" | "main" | ToolEditKey;
 
     @Column({ type: "jsonb", nullable: true })
     mainInput?: MainImageInput | null;
+
+    @Column({ type: "jsonb", nullable: true })
+    toolInput?: ToolWorkflowInput | null;
 
     @Column({ type: "uuid" })
     modelId: string;
