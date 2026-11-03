@@ -1,4 +1,4 @@
-import { DETAIL_MODULES, FUSION_PRESETS, TOOL_EDIT_KEYS, TOOL_PLATFORMS, TOOL_WORKFLOWS, toolReferenceLimit, toolWorkflowPrompt, toolWorkflowSize, validateToolWorkflow, type ToolWorkflowInput } from "../src/api/shared/tool-workflow";
+import { DETAIL_MODULES, FUSION_PRESETS, RETOUCH_MODES, TOOL_EDIT_KEYS, TOOL_PLATFORMS, TOOL_WORKFLOWS, toolReferenceLimit, toolWorkflowPrompt, toolWorkflowSize, validateToolWorkflow, type ToolWorkflowInput } from "../src/api/shared/tool-workflow";
 
 const firstAsset = "22222222-2222-4222-8222-222222222222";
 const secondAsset = "33333333-3333-4333-8333-333333333333";
@@ -14,6 +14,54 @@ export function toolInput(overrides: Partial<ToolWorkflowInput> = {}): ToolWorkf
 }
 
 describe("tool workflow contract", () => {
+    it.each(RETOUCH_MODES)("validates and applies the $label retouch mode without changing legacy requests", (mode) => {
+        const input = toolInput({ tool: "retouch", productName: undefined, count: 1, design: { retouchMode: mode.id } });
+        expect(validateToolWorkflow(input)).toBeNull();
+        expect(toolWorkflowPrompt(input)).toContain(mode.instruction);
+        expect(toolWorkflowPrompt(input)).toContain("Do not redesign the product");
+        expect(validateToolWorkflow({ ...input, count: 2 })).not.toBeNull();
+        expect(validateToolWorkflow({ ...input, assetIds: [firstAsset, secondAsset] })).not.toBeNull();
+        expect(validateToolWorkflow(toolInput({ assetIds: [firstAsset, secondAsset] }))).toBeNull();
+    });
+    it.each([undefined, null, "unknown", [], 1])("rejects invalid retouch modes %p", (retouchMode) => {
+        expect(validateToolWorkflow(toolInput({ count: 1, design: { retouchMode } } as never))).not.toBeNull();
+    });
+    it("rejects retouch modes for other tools", () => {
+        expect(validateToolWorkflow(toolInput({ tool: "translate", count: 1, targetLanguage: "English", design: { protectSubject: true, retouchMode: "overall" } }))).not.toBeNull();
+    });
+    it("persists single-image watermark region guidance while keeping authorization and legacy contracts", () => {
+        const region = { x: 0.2, y: 0.3, width: 0.4, height: 0.2 };
+        const input = toolInput({ tool: "watermark", productName: undefined, count: 1, authorized: true, design: { watermarkRegion: region } });
+        expect(validateToolWorkflow(input)).toBeNull();
+        expect(toolWorkflowPrompt(input)).toContain(JSON.stringify(region));
+        expect(toolWorkflowPrompt(input)).toContain("not a mask or pixel lock");
+        expect(validateToolWorkflow({ ...input, authorized: false })).not.toBeNull();
+        expect(validateToolWorkflow({ ...input, count: 2 })).not.toBeNull();
+        expect(validateToolWorkflow({ ...input, assetIds: [firstAsset, secondAsset] })).not.toBeNull();
+        expect(validateToolWorkflow(toolInput({ tool: "watermark", authorized: true, assetIds: [firstAsset, secondAsset] }))).toBeNull();
+    });
+    it.each([true, false])("passes subject protection %p into the translation prompt without changing legacy inputs", (protectSubject) => {
+        const input = toolInput({ tool: "translate", productName: undefined, count: 1, targetLanguage: "日本語", design: { protectSubject } });
+        expect(validateToolWorkflow(input)).toBeNull();
+        expect(toolWorkflowPrompt(input)).toContain("日本語");
+        expect(toolWorkflowPrompt(input)).toContain(protectSubject ? "printed text, packaging text and brand identifiers unchanged" : "on the product or packaging");
+        expect(validateToolWorkflow({ ...input, targetLanguage: undefined })).not.toBeNull();
+        expect(validateToolWorkflow({ ...input, count: 2 })).not.toBeNull();
+        expect(validateToolWorkflow({ ...input, assetIds: [firstAsset, secondAsset] })).not.toBeNull();
+        expect(validateToolWorkflow(toolInput({ tool: "translate", targetLanguage: "English", assetIds: [firstAsset, secondAsset] }))).toBeNull();
+    });
+    it.each([null, "true", 1, undefined])("rejects non-boolean subject protection %p", (protectSubject) => {
+        expect(validateToolWorkflow(toolInput({ tool: "translate", count: 1, targetLanguage: "English", design: { protectSubject } } as never))).not.toBeNull();
+    });
+    it.each([null, [], {}, { x: 0, y: 0, width: 0, height: 1 }, { x: NaN, y: 0, width: 1, height: 1 },
+        { x: 0, y: 0, width: 1, height: Infinity }, { x: 0.9, y: 0, width: 0.2, height: 1 },
+        { x: 0, y: 0, width: 1, height: 1, mask: true }])("rejects invalid watermark regions %p", (watermarkRegion) => {
+        expect(validateToolWorkflow(toolInput({ tool: "watermark", count: 1, authorized: true, design: { watermarkRegion } } as never))).not.toBeNull();
+    });
+    it("rejects cross-tool region and protection fields", () => {
+        expect(validateToolWorkflow(toolInput({ tool: "translate", count: 1, targetLanguage: "English", design: { protectSubject: true, watermarkRegion: { x: 0, y: 0, width: 1, height: 1 } } }))).not.toBeNull();
+        expect(validateToolWorkflow(toolInput({ tool: "watermark", count: 1, authorized: true, design: { protectSubject: true, watermarkRegion: { x: 0, y: 0, width: 1, height: 1 } } }))).not.toBeNull();
+    });
     it("accepts selected detail pages and preserves the design contract", () => {
         const input = toolInput({ tool: "detail", design: { detailModules: ["hero", "selling"], outputModules: ["hero", "selling"] } });
         expect(validateToolWorkflow(input)).toBeNull();

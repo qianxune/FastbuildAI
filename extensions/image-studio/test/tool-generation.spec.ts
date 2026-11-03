@@ -5,7 +5,7 @@ import { generateImage, generateText } from "ai";
 import { ImageGenerationStatus } from "../src/api/db/entities/image-generation.entity";
 import { ToolWorkflowDto, ToolSuggestionDto } from "../src/api/modules/generation/dto/tool-workflow.dto";
 import { GenerationService } from "../src/api/modules/generation/services/generation.service";
-import { TOOL_SUGGESTION_SYSTEM, type ToolWorkflowInput } from "../src/api/shared/tool-workflow";
+import { RETOUCH_MODES, TOOL_SUGGESTION_SYSTEM, type ToolWorkflowInput } from "../src/api/shared/tool-workflow";
 import { AddToolWorkflowInput1793448000000 } from "../src/api/db/migrations/1793448000000-0.1.3-add-tool-workflow-input";
 import { GENERATION_FAILED, GENERATION_STORAGE_RESTRICTED } from "../src/api/modules/generation/constants/generation.constants";
 
@@ -30,6 +30,9 @@ const designRequests: ToolWorkflowInput[] = [
     input({ tool: "creative", productName: undefined, assetIds: [], instructions: "Geometric glass sculpture", design: { description: "Confirmed creative request", language: "English" } }),
     input({ tool: "fusion", productName: undefined, assetIds: [secondAsset, assetId], design: { productAssetIds: [assetId], fusionPreset: "print" } }),
     input({ tool: "sku", productName: undefined, design: { skuVariants: [{ name: "Blue edition", instruction: "Change panel to blue" }, { name: "Green edition", instruction: "Change panel to green" }], skuRegion: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 } } }),
+    input({ tool: "watermark", productName: undefined, count: 1, authorized: true, design: { watermarkRegion: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 } } }),
+    input({ tool: "translate", productName: undefined, count: 1, targetLanguage: "日本語", design: { protectSubject: true } }),
+    ...RETOUCH_MODES.map((mode) => input({ tool: "retouch", productName: undefined, count: 1, design: { retouchMode: mode.id } })),
 ];
 
 function fixture() {
@@ -85,6 +88,11 @@ describe("tool DTO whitelist", () => {
         input({ tool: "fusion", assetIds: [assetId, secondAsset], design: { productAssetIds: [assetId, secondAsset] } }),
         input({ tool: "sku", variant: "Blue", design: { skuRegion: { x: NaN, y: 0, width: 1, height: 1 } } }),
         input({ tool: "sku", count: 1, design: { skuVariants: [{ name: "Blue", instruction: "Blue", extra: true }] } } as never),
+        input({ tool: "watermark", count: 1, authorized: false, design: { watermarkRegion: { x: 0, y: 0, width: 1, height: 1 } } }),
+        input({ tool: "watermark", count: 1, authorized: true, design: { watermarkRegion: { x: 0.8, y: 0, width: 0.5, height: 1 } } }),
+        input({ tool: "translate", count: 1, targetLanguage: "日本語", design: { protectSubject: "true" } } as never),
+        input({ tool: "retouch", count: 1, design: { retouchMode: "unknown" } } as never),
+        input({ tool: "retouch", count: 2, design: { retouchMode: "overall" } }),
     ])("rejects malformed or inapplicable nested design at the DTO boundary %#", async (request) => {
         await expect(pipe.transform(request, { type: "body", metatype: ToolWorkflowDto })).rejects.toThrow();
     });
@@ -147,6 +155,15 @@ describe("tool generation lifecycle", () => {
         expect(result.toolInput).toEqual(request);
         expect(result.toolInput!.design).toEqual(request.design);
         expect(generateImage).not.toHaveBeenCalled(); expect(generateText).not.toHaveBeenCalled();
+    });
+    it.each(designRequests.filter((request) => ["watermark", "translate", "retouch"].includes(request.tool)))("processes one $tool output using the saved editing metadata and existing configured model", async (request) => {
+        const state = fixture();
+        Object.assign(state.record, { toolKey: request.tool, count: request.count, toolInput: request });
+        await state.service.processTask({ id: "task", userId: "owner" });
+        expect(generateImage).toHaveBeenCalledTimes(1);
+        expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({ model: state.imageModel, n: 1, maxRetries: 0,
+            prompt: { text: expect.stringContaining(request.tool === "watermark" ? JSON.stringify(request.design!.watermarkRegion) : request.tool === "retouch" ? RETOUCH_MODES.find((mode) => mode.id === request.design!.retouchMode)!.instruction : "Protect the product subject"), images: [Buffer.from("owned")] } }));
+        expect(state.persist).toHaveBeenCalledTimes(1); expect(generateText).not.toHaveBeenCalled();
     });
     it.each(["openai", "custom-provider"])("selects the configured %s text-only adapter for reference-free creative", async (provider) => {
         const state = fixture();
@@ -256,7 +273,7 @@ describe("tool generation lifecycle", () => {
         state.record.toolInput = null as never;
         await expect(state.service[method]("owner", "task")).rejects.toThrow();
     });
-    it.each(["retry", "retryTask"] as const)("%s preserves full design and asset roles for all five workflows", async (method) => {
+    it.each(["retry", "retryTask"] as const)("%s preserves full design and asset roles for all design workflows", async (method) => {
         for (const request of designRequests) {
             const state = fixture();
             Object.assign(state.record, { toolKey: request.tool, toolInput: request });

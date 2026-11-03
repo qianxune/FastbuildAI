@@ -7,6 +7,15 @@ export const TOOL_LANGUAGES = ["简体中文", "繁體中文", "English", "日�
 export const TOOL_EXPANSIONS = ["horizontal", "vertical", "surround"] as const;
 export const TOOL_PLATFORMS = ["淘宝", "天猫", "京东", "拼多多", "抖音", "小红书", "亚马逊", "其他"] as const;
 
+export const RETOUCH_MODES = [
+    { id: "overall", label: "综合精修", instruction: "Balance exposure, lighting and visible minor surface distractions for a clean product photograph." },
+    { id: "texture", label: "质感增强", instruction: "Enhance the visible surface texture and subtle tonal contrast without changing the actual material." },
+    { id: "blemish", label: "瑕疵修复", instruction: "Reduce incidental dust, smudges and minor photographic distractions. Preserve structural features, seams and genuine product markings." },
+    { id: "color", label: "色彩校正", instruction: "Correct white balance and color casts while preserving the product's true referenced color. Do not recolor the product." },
+    { id: "clarity", label: "提升清晰度", instruction: "Improve apparent edge clarity and reduce photographic noise without inventing hidden detail or unreadable text. Do not claim exact super-resolution." },
+    { id: "material", label: "材质强化", instruction: "Refine realistic highlights and reflections appropriate to the visible material, preserving surface finish and material identity." },
+] as const;
+
 export const DETAIL_MODULES = [
     { id: "hero", label: "首屏主视觉", description: "以商品主体和已确认的定位呈现首屏" },
     { id: "selling", label: "核心卖点图", description: "突出用户已确认的商品卖点" },
@@ -56,6 +65,9 @@ export interface ToolDesign {
     fusionPreset?: string;
     skuVariants?: Array<{ name: string; instruction: string }>;
     skuRegion?: { x: number; y: number; width: number; height: number };
+    watermarkRegion?: { x: number; y: number; width: number; height: number };
+    protectSubject?: boolean;
+    retouchMode?: typeof RETOUCH_MODES[number]["id"];
 }
 
 export const TOOL_WORKFLOWS = {
@@ -108,6 +120,9 @@ const DESIGN_FIELDS = {
     fusionPreset: ["fusion"],
     skuVariants: ["sku"],
     skuRegion: ["sku"],
+    watermarkRegion: ["watermark"],
+    protectSubject: ["translate"],
+    retouchMode: ["retouch"],
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -123,8 +138,12 @@ function isDistinctList(value: unknown, min: number, max: number, allowed: reado
 function validateDesign(input: ToolWorkflowInput): string | null {
     const design = input.design;
     if (design === undefined) return null;
-    if (!isRecord(design) || !DESIGN_TOOLS.includes(input.tool)
+    if (!isRecord(design) || ![...DESIGN_TOOLS, "watermark", "translate", "retouch"].includes(input.tool)
         || Object.keys(design).some((key) => !Object.hasOwn(DESIGN_FIELDS, key) || !DESIGN_FIELDS[key as keyof typeof DESIGN_FIELDS].includes(input.tool))) return "设计输入包含不支持或不适用于当前工具的字段";
+    if (["watermark", "translate", "retouch"].includes(input.tool) && (input.assetIds.length !== 1 || input.count !== 1)) return "单图编辑须选择恰好 1 张图片并输出 1 张";
+    if (input.tool === "retouch" && !RETOUCH_MODES.some((mode) => mode.id === design.retouchMode)) return "请选择有效的精修模式";
+    if (input.tool === "translate" && typeof design.protectSubject !== "boolean") return "请选择是否保护商品主体";
+    if (input.tool === "watermark" && design.watermarkRegion === undefined) return "请选择水印区域";
     if (design.brand !== undefined && (typeof design.brand !== "string" || design.brand.length > 100)) return "品牌不能超过 100 字";
     if (design.description !== undefined && (typeof design.description !== "string" || design.description.length > 1500)) return "商品描述不能超过 1500 字";
     if (design.platform !== undefined && (typeof design.platform !== "string" || !(TOOL_PLATFORMS as readonly string[]).includes(design.platform))) return "不支持的平台";
@@ -148,12 +167,13 @@ function validateDesign(input: ToolWorkflowInput): string | null {
                 || typeof variant.instruction !== "string" || !variant.instruction.trim() || variant.instruction.length > 300)) return "SKU 变体须为 1–3 项且数量与图片数量一致，名称 1–60 字、要求 1–300 字";
     }
     if (input.tool === "sku" && input.assetIds.length !== 1) return "SKU 设计须选择恰好 1 张模板图";
-    if (design.skuRegion !== undefined) {
-        const region = design.skuRegion;
+    for (const key of ["skuRegion", "watermarkRegion"] as const) {
+        const region = design[key];
+        if (region === undefined) continue;
         if (!isRecord(region) || Object.keys(region).some((key) => !["x", "y", "width", "height"].includes(key))
             || typeof region.x !== "number" || typeof region.y !== "number" || typeof region.width !== "number" || typeof region.height !== "number"
             || [region.x, region.y, region.width, region.height].some((value) => typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)
-            || region.width <= 0 || region.height <= 0 || region.x + region.width > 1 || region.y + region.height > 1) return "SKU 区域须为图内有效的归一化矩形";
+            || region.width <= 0 || region.height <= 0 || region.x + region.width > 1 || region.y + region.height > 1) return key === "skuRegion" ? "SKU 区域须为图内有效的归一化矩形" : "水印区域须为图内有效的归一化矩形";
     }
     return null;
 }
@@ -167,7 +187,8 @@ export function validateToolWorkflow(input: ToolWorkflowInput): string | null {
     if (!isToolEditKey(input.tool)) return "不支持的图片工具";
     if (typeof input.modelId !== "string" || !UUID.test(input.modelId)) return "请选择有效模型";
     if (!Array.isArray(input.assetIds) || input.assetIds.length < TOOL_WORKFLOWS[input.tool].minAssets || input.assetIds.length > 5 || new Set(input.assetIds).size !== input.assetIds.length || Array.from(input.assetIds).some((id) => typeof id !== "string" || !UUID.test(id))) return "请选择有效且不重复的商品参考图（最多 5 张）";
-    const optionalName = ["creative", "replica", "fusion", "sku"].includes(input.tool);
+    const optionalName = ["creative", "replica", "fusion", "sku"].includes(input.tool)
+        || (["watermark", "translate", "retouch"].includes(input.tool) && input.design !== undefined);
     if ((input.productName !== undefined && (typeof input.productName !== "string" || input.productName.length > 100)) || (!optionalName && !input.productName?.trim())) return "商品名称须为 1–100 字";
     if (typeof input.instructions !== "string" || input.instructions.length > 1500) return "编辑要求不能超过 1500 字";
     if (input.tool === "creative" && !input.instructions.trim()) return "请填写创意提示词";
@@ -202,6 +223,10 @@ export function toolWorkflowPrompt(input: ToolWorkflowInput, imageIndex = 0): st
     const primaryPositions = input.assetIds.flatMap((id, index) => primaryIds.includes(id) ? [index + 1] : []);
     const referencePositions = input.assetIds.flatMap((id, index) => primaryIds.includes(id) ? [] : [index + 1]);
     const workflow: string[] = [];
+    if (input.tool === "retouch" && design?.retouchMode) {
+        const mode = RETOUCH_MODES.find((item) => item.id === design.retouchMode)!;
+        workflow.push(`Selected product retouch mode (user-selected data): ${JSON.stringify(mode)}. Apply this mode and the user's supplementary request while preserving product identity, geometry, branding and authentic details. Do not redesign the product or invent missing details.`);
+    }
     if (module) workflow.push(`This output is only the selected detail page: ${JSON.stringify(module)}. Do not combine other detail pages into this output.`);
     if (input.tool === "replica") workflow.push(
         `Image roles in ordered assetIds (1-based): product identity images ${JSON.stringify(primaryPositions)}; layout/style reference images ${JSON.stringify(referencePositions)}. Product images determine the product; style references must never replace it.`,
@@ -216,6 +241,14 @@ export function toolWorkflowPrompt(input: ToolWorkflowInput, imageIndex = 0): st
     if (input.tool === "sku") workflow.push(
         `SKU for this output only (user-confirmed data): ${JSON.stringify(design?.skuVariants?.[imageIndex] ?? { instruction: input.variant })}. Keep the template and all unrelated features consistent.`,
         design?.skuRegion ? `Normalized region, origin top-left (x, y, width, height): ${JSON.stringify(design.skuRegion)}. This region is instruction guidance only, not a mask or pixel lock; exact boundaries and unchanged pixels are not guaranteed.` : "SKU edits are instruction guidance only, not a mask or pixel lock.",
+    );
+    if (input.tool === "watermark" && design?.watermarkRegion) workflow.push(
+        `Remove only the authorized watermark indicated in this normalized region, origin top-left (x, y, width, height): ${JSON.stringify(design.watermarkRegion)}. Reconstruct a plausible continuation of the background; preserve unrelated text, logos and product details. This region is instruction guidance only, not a mask or pixel lock; exact hidden pixels cannot be recovered.`,
+    );
+    if (input.tool === "translate" && design?.protectSubject !== undefined) workflow.push(
+        design.protectSubject
+            ? "Protect the product subject: leave the product itself, its printed text, packaging text and brand identifiers unchanged. Translate only legible surrounding layout text into the requested target language."
+            : "Translate legible text in the layout and on the product or packaging into the requested target language. Preserve brand identifiers, product geometry, material and proportions; do not invent unreadable text.",
     );
     return [
         input.tool === "creative" && !input.assetIds.length ? "Perform text-to-image creation from the user prompt. No reference images were supplied." : "Perform reference-image instruction editing.",
