@@ -154,6 +154,7 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
             },
         };
         if (name === "../../api/shared/tool-workflow") return workflow;
+        if (name === "../../api/shared/tools") return { TOOL_REGISTRY };
         if (name === "./specialized-workflow") return specialized;
         if (name === "./specialized-components") return componentTokens;
         if (name === "./material-picker") return { default: "MaterialPicker", MaterialDialog: "MaterialDialog" };
@@ -216,6 +217,136 @@ function formHarness(tool: SpecializedDraft["tool"], options: { ready?: boolean;
     };
     return { ...view, onSubmit, upload, analyze, billing, products, capabilities, field, button, set, role, submitButton, submit, preset, filled };
 }
+
+function imageEditHarness(tool: "watermark" | "translate" | "retouch", options: { ready?: boolean; locked?: boolean; unavailable?: boolean } = {}) {
+    const onSubmit = jest.fn().mockResolvedValue(undefined), upload = jest.fn();
+    const products = { data: [...images], isSuccess: true, isPending: false, isFetching: false, isError: false };
+    const uploadState = { isPending: false, mutateAsync: async (file: File) => {
+        uploadState.isPending = true;
+        try { const image = await upload(file); products.data = [...products.data.filter((item) => item.id !== image.id), image]; return image; }
+        finally { uploadState.isPending = false; }
+    } };
+    const billing = jest.fn().mockReturnValue({ ready: options.ready ?? true, costText: "实际报价 2 积分" });
+    const capabilities = { tools: [{ key: tool, status: options.unavailable ? "unavailable" : "available", modelIdsByCapability: { "reference-image": [modelId] } }],
+        models: [{ id: modelId, name: "Seedream", capabilities: ["reference-image"], maxReferenceImages: 5 }] } as GenerationCapabilities;
+    const view = renderHarness("image-edit-form", "default", { tool, capabilities, locked: options.locked ?? false, onSubmit }, {
+        useGenerationBilling: billing, useProductImagesQuery: () => products, useUploadProductImageMutation: () => uploadState,
+    });
+    const field = (suffix: string) => view.render().find((node) => node.props.id === `test-${suffix}`)!;
+    const picker = () => view.render().find((node) => node.type === "AssetRolePicker")!.props;
+    const button = (text: string) => view.render().find((node) => node.type === "button" && elementText(node).includes(text))!;
+    const submitButton = () => view.render().find((node) => node.props.type === "submit")!;
+    const submit = () => view.render().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+    const selectRegion = () => {
+        button("框选").props.onClick();
+        const editor = view.render().find((node) => node.type === "SkuRegionEditor")!;
+        editor.props.onChange({ x: .1, y: .2, width: .3, height: .4 }); editor.props.onClose();
+    };
+    const fill = () => { picker().onChange([images[0]]); if (tool === "watermark") { selectRegion(); field("rights").props.onChange({ target: { checked: true } }); } };
+    return { ...view, field, picker, button, submitButton, submit, selectRegion, fill, onSubmit, upload, billing, products, capabilities };
+}
+
+describe("dedicated image editing", () => {
+    it("offers all six retouch radio modes and passes the selection to the actual workflow prompt", async () => {
+        const view = imageEditHarness("retouch");
+        expect(view.picker().dropzone).toBe(true); expect(view.picker().max).toBe(1);
+        const radios = () => view.render().filter((node) => node.type === "input" && node.props.type === "radio");
+        expect(radios().map((node) => node.props["aria-label"])).toEqual(workflow.RETOUCH_MODES.map((mode) => mode.label));
+        expect(radios().find((node) => node.props.checked)!.props.value).toBe("overall");
+        view.fill(); radios().find((node) => node.props.value === "color")!.props.onChange();
+        view.field("instructions").props.onChange({ target: { value: "Remove incidental dust" } });
+        await view.submit(); const input = view.onSubmit.mock.calls[0][0];
+        expect(input).toEqual({ tool: "retouch", modelId, assetIds: [assetIds[0]], instructions: "Remove incidental dust", count: 1, ratio: "4:3", design: { retouchMode: "color" } });
+        expect(validateToolWorkflow(input)).toBeNull(); expect(toolWorkflowPrompt(input)).toContain("Correct white balance");
+        expect(view.render().some((node) => node.props.id === "test-product")).toBe(false);
+        expect(view.render().find((node) => node.type === "Popover")!.props.modal).toBe(false);
+    });
+    it.each([{ ready: false }, { locked: true }, { unavailable: true }])("gates retouch generation %p without hiding controls", async (options) => {
+        const view = imageEditHarness("retouch", options); view.fill();
+        expect(view.render().filter((node) => node.props.type === "radio")).toHaveLength(6);
+        expect(view.submitButton().props.disabled).toBe(true); await view.submit(); expect(view.onSubmit).not.toHaveBeenCalled();
+    });
+    it("requires a watermark region and affirmative authorization, preserving error and retry inputs", async () => {
+        const view = imageEditHarness("watermark"); view.picker().onChange([images[0]]);
+        expect(view.submitButton().props.disabled).toBe(true);
+        view.field("rights").props.onChange({ target: { checked: true } });
+        expect(view.submitButton().props.disabled).toBe(true);
+        view.selectRegion(); expect(view.submitButton().props.disabled).toBe(false);
+        view.onSubmit.mockRejectedValueOnce(new Error("模型能力已变更，请刷新"));
+        await expect(view.submit()).resolves.toBeUndefined();
+        const input = view.onSubmit.mock.calls[0][0];
+        expect(input).toEqual(expect.objectContaining({ tool: "watermark", modelId, assetIds: [assetIds[0]], count: 1, ratio: "4:3", authorized: true, design: { watermarkRegion: { x: .1, y: .2, width: .3, height: .4 } } }));
+        expect(validateToolWorkflow(input)).toBeNull(); expect(toolWorkflowPrompt(input)).toContain(JSON.stringify(input.design.watermarkRegion));
+        expect(view.render().some((node) => node.props.role === "alert" && elementText(node) === "模型能力已变更，请刷新")).toBe(true);
+        expect(view.picker().previewRegion).toEqual(input.design.watermarkRegion);
+        expect(view.submitButton().props.disabled).toBe(false);
+    });
+    it("sends the chosen translation language and subject protection into the existing prompt", async () => {
+        const view = imageEditHarness("translate"); view.fill();
+        expect(view.field("protect").props.checked).toBe(true);
+        view.field("language").props.onChange({ target: { value: "日本語" } });
+        view.field("protect").props.onChange({ target: { checked: false } });
+        view.field("instructions").props.onChange({ target: { value: "Keep brand identifiers" } });
+        view.field("ratio").props.onChange({ target: { value: "3:4" } });
+        await view.submit();
+        const input = view.onSubmit.mock.calls[0][0];
+        expect(input).toEqual({ tool: "translate", modelId, assetIds: [assetIds[0]], count: 1, ratio: "3:4", instructions: "Keep brand identifiers", targetLanguage: "日本語", design: { protectSubject: false } });
+        expect(validateToolWorkflow(input)).toBeNull(); expect(toolWorkflowPrompt(input)).toContain("on the product or packaging");
+        expect(view.billing).toHaveBeenLastCalledWith(modelId, 1, true);
+    });
+    it("clears region and ownership approval when replacing images and can clear/reselect the region", () => {
+        const view = imageEditHarness("watermark"); view.fill();
+        view.render().find((node) => node.props["aria-label"] === "清除水印区域")!.props.onClick();
+        expect(view.picker().previewRegion).toBeUndefined(); expect(view.submitButton().props.disabled).toBe(true);
+        view.selectRegion(); expect(view.submitButton().props.disabled).toBe(false);
+        view.picker().onChange([images[1]]);
+        expect(view.picker().previewRegion).toBeUndefined(); expect(view.field("rights").props.checked).toBe(false);
+        expect(view.submitButton().props.disabled).toBe(true);
+    });
+    it.each([{ ready: false }, { locked: true }, { unavailable: true }])("enforces billing, parent and capability gates %p", async (options) => {
+        const view = imageEditHarness("translate", options); view.fill();
+        expect(view.submitButton().props.disabled).toBe(true); await view.submit(); expect(view.onSubmit).not.toHaveBeenCalled();
+    });
+    it("uses controlled non-modal advanced settings anchored above its trigger", () => {
+        const view = imageEditHarness("translate");
+        const popover = () => view.render().find((node) => node.type === "Popover")!;
+        expect(popover().props.modal).toBe(false); expect(popover().props.open).toBe(false);
+        popover().props.onOpenChange(true); expect(popover().props.open).toBe(true);
+        const content = view.render().find((node) => node.type === "PopoverContent")!;
+        expect(content.props).toEqual(expect.objectContaining({ side: "top", align: "start", collisionPadding: 12 }));
+        view.field("ratio").props.onChange({ target: { value: "16:9" } }); popover().props.onOpenChange(false);
+        expect(view.field("ratio").props.value).toBe("16:9");
+        expect(view.onSubmit).not.toHaveBeenCalled(); expect(view.render().some((node) => node.type === "dialog")).toBe(false);
+    });
+    it("prevents duplicate submissions while keeping the selected image", async () => {
+        const view = imageEditHarness("translate"); view.fill(); let finish!: () => void;
+        view.onSubmit.mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+        const first = view.submit(); await view.submit(); expect(view.onSubmit).toHaveBeenCalledTimes(1);
+        expect(view.picker().disabled).toBe(true); view.picker().onChange([]); expect(view.picker().images).toEqual([images[0]]);
+        finish(); await first; expect(view.submitButton().props.disabled).toBe(false);
+    });
+    it("rejects oversized, unsupported and multi-file transfers without uploading", async () => {
+        const view = imageEditHarness("translate");
+        for (const files of [[{ type: "image/svg+xml", size: 10 }], [{ type: "image/png", size: 11 * 1024 * 1024 }], [{ type: "image/png", size: 10 }, { type: "image/png", size: 10 }]]) await view.picker().onFiles(files);
+        expect(view.upload).not.toHaveBeenCalled(); expect(view.picker().images).toHaveLength(0);
+    });
+    it("selects uploaded images only if the model and parent state are still current", async () => {
+        const view = imageEditHarness("translate"); let finish!: (image: typeof images[number]) => void;
+        view.upload.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+        const pending = view.picker().onFiles([{ type: "image/png", size: 10 }]);
+        view.props.locked = true; view.render(); finish(images[0]); await pending;
+        expect(view.picker().images).toHaveLength(0); expect(view.upload).toHaveBeenCalledTimes(1);
+        view.props.locked = false; view.upload.mockResolvedValueOnce(images[1]); await view.picker().onFiles([{ type: "image/png", size: 10 }]);
+        expect(view.picker().images).toEqual([images[1]]); expect(view.picker().original).toBe(true);
+    });
+    it("keeps selections during material refresh failures and clears deleted images after a successful refresh", () => {
+        const view = imageEditHarness("watermark"); view.fill();
+        Object.assign(view.products, { data: [], isSuccess: false, isError: true }); view.render();
+        expect(view.picker().images).toEqual([images[0]]);
+        Object.assign(view.products, { isSuccess: true, isError: false }); view.render(); view.render();
+        expect(view.picker().images).toHaveLength(0); expect(view.field("rights").props.checked).toBe(false); expect(view.picker().previewRegion).toBeUndefined();
+    });
+});
 
 describe("specialized form interactions", () => {
     it.each([
@@ -483,6 +614,15 @@ describe("specialized assets and region controls", () => {
         view.render().find((node) => node.props["aria-label"] === "x (%)")!.props.onChange({ target: { value: "200" } });
         confirm().props.onClick(); const region = onChange.mock.calls[1][0]; expect(region.x + region.width).toBeLessThanOrEqual(1);
         expect(region.width).toBeGreaterThan(0); expect(onClose).toHaveBeenCalledTimes(2);
+    });
+    it("reuses true image geometry for watermark previews and configurable region editor titles", () => {
+        const region = { x: .1, y: .2, width: .3, height: .4 };
+        const picker = renderHarness("specialized-components", "AssetRolePicker", { label: "待编辑图片", images: [images[0]], max: 1, disabled: false, original: true, previewRegion: region, onChange: jest.fn(), onFiles: jest.fn() });
+        expect(picker.render().find((node) => typeof node.type === "function" && node.props.image)!.props.original).toBe(true);
+        expect(picker.render().find((node) => node.props.className === "specialized-thumbnail")!.props.style.aspectRatio).toBe("400 / 300");
+        expect(picker.render().find((node) => node.props.className === "specialized-region-rect")!.props.style).toEqual({ left: "10%", top: "20%", width: "30%", height: "40%" });
+        const editor = renderHarness("specialized-components", "SkuRegionEditor", { image: images[0], title: "框选水印区域", disabled: false, onChange: jest.fn(), onClose: jest.fn() });
+        expect(editor.render().find((node) => node.type === "MaterialDialog")!.props.title).toBe("框选水印区域");
     });
     it("provides all fifteen visual presets in two real categories with independent image sources", () => {
         const onSelect = jest.fn(); const view = renderHarness("specialized-components", "FusionPresetGallery", { selected: "print", onSelect });

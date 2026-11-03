@@ -16,8 +16,9 @@ describe("per-image generation progress", () => {
         compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
     });
 
-    function render(status: string, count: number, submitting?: "creative" | "main" | "tool") {
-        const record = { id: "task-id", status, count, images: [], modelName: "Test", prompt: "Product" };
+    function render(status: string | null, count: number, submitting?: "creative" | "main" | "tool", imageCount = 0) {
+        const selectedTool = submitting === "creative" ? "creative" : submitting === "tool" ? "retouch" : "main";
+        const record = status === null ? null : { id: "task-id", toolKey: "main", status, count, images: Array.from({ length: imageCount }, () => ({})), modelName: "Test", prompt: "Product" };
         const variants = ["white", "scene", "selling", "other"].slice(0, count);
         const mutation = { isPending: false };
         const services = {
@@ -41,7 +42,7 @@ describe("per-image generation progress", () => {
             require: (name: string) => {
                 if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
                 if (name === "react") return {
-                    useState: (initial: unknown) => [initial, () => undefined],
+                    useState: (initial: unknown) => [initial === "main" ? selectedTool : initial, () => undefined],
                     useRef: (initial: unknown) => ({ current: initial }),
                     useEffect: () => undefined,
                 };
@@ -69,6 +70,24 @@ describe("per-image generation progress", () => {
         visit(exports.default!());
         return nodes;
     }
+
+    it("shows the preview placeholder before any task exists", () => {
+        const nodes = render(null, 1);
+        expect(nodes.find((node) => String(node.props.className).includes("preview-empty-state"))).toBeDefined();
+        expect(nodes.find((node) => node.type === "h3" && node.props.children === "效果图预览")).toBeDefined();
+        expect(nodes.find((node) => node.type === "p" && node.props.children === "提交任务后，生成结果将在此处展示")).toBeDefined();
+        expect(nodes.find((node) => node.props.className === "preview-empty-art")?.props["aria-hidden"]).toBe("true");
+    });
+
+    it.each(["queued", "processing", "completed", "failed", "cancelled"])("keeps the existing %s task view instead of the initial placeholder", (status) => {
+        expect(render(status, 1).some((node) => String(node.props.className).includes("preview-empty-state"))).toBe(false);
+    });
+
+    it("keeps generated images in the result view", () => {
+        const nodes = render("completed", 1, undefined, 1);
+        expect(nodes.some((node) => String(node.props.className).includes("preview-empty-state"))).toBe(false);
+        expect(nodes.some((node) => node.props.generationId === "task-id" && node.props.imageIndex === 0)).toBe(true);
+    });
 
     it.each([1, 2, 3, 4])("renders %i independent indeterminate progress bars", (count) => {
         for (const [status, caption] of [["queued", "等待生成"], ["processing", "生成中"]]) {

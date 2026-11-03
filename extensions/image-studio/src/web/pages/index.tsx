@@ -8,6 +8,8 @@ import {
     Trash2,
     ChevronLeft,
     ChevronRight,
+    Plus,
+    Sparkles,
     X,
 } from "lucide-react";
 import { useDocumentHead } from "@buildingai/hooks";
@@ -25,6 +27,7 @@ import MainImageForm from "./main-image-form";
 import WorksView from "./works";
 import MaterialsView from "./materials";
 import ToolForm from "./tool-form";
+import { RetouchPreview } from "./image-edit-form";
 import { isSpecializedTool, SPECIALIZED_TOOLS, SPECIALIZED_WORKSPACE_LAYOUT } from "./specialized-workflow";
 import WorkspaceNavigation, { TOOL_LABELS, type WorkspaceView } from "./workspace-navigation";
 import WorkspaceAccount from "./workspace-account";
@@ -137,23 +140,33 @@ export default function ImageStudioPage() {
     const remove = useDeleteGenerationMutation();
     const [result, setResult] = useState<ImageGeneration | null>(null);
     const [historyResult, setHistoryResult] = useState<ImageGeneration | null>(null);
-    const [workflowError, setWorkflowError] = useState<string | null>(null);
+    const [workflowFailure, setWorkflowFailure] = useState<{ tool: ToolKey; message: string } | null>(null);
+    const workflowError = workflowFailure?.tool === tool ? workflowFailure.message : null;
+    const setWorkflowError = (message: string | null, sourceTool: ToolKey = tool) =>
+        setWorkflowFailure(message ? { tool: sourceTool, message } : null);
     const [downloading, setDownloading] = useState(false);
-    const [retryPreparing, setRetryPreparing] = useState(false);
+    const [retryPreparing, setRetryPreparing] = useState<ToolKey | null>(null);
     const task = useGenerationQuery(result?.id);
     const currentTask =
         task.data ?? history.data?.items.find((item) => item.id === result?.id) ?? result;
-    const currentResult = historyResult ?? currentTask;
+    const previewTask = historyResult ?? currentTask;
+    const currentResult = previewTask && (previewTask.toolKey ?? "creative") === tool ? previewTask : null;
     const submitting =
-        generateMain.isPending || generateTool.isPending || retry.isPending || retryPreparing;
+        generateMain.isPending || generateTool.isPending || retry.isPending || Boolean(retryPreparing);
     const busy = submitting || isGenerationActive(currentTask);
+    const pendingTool = generateMain.isPending
+        ? "main"
+        : generateTool.isPending
+          ? generateTool.variables?.tool ?? tool
+          : retryPreparing ?? currentTask?.toolKey ?? "creative";
+    const previewBusy = submitting ? pendingTool === tool : isGenerationActive(currentResult);
     const locked = busy || remove.isPending || cancel.isPending;
     const pendingCount =
         generateMain.isPending && generateMain.variables
             ? mainImageVariants(generateMain.variables).length
                         : generateTool.isPending
                             ? (generateTool.variables?.count ?? 1)
-                            : (currentTask?.count ?? 1);
+                            : (previewTask?.count ?? 1);
     const pendingMainInput = generateMain.isPending
         ? generateMain.variables
                 : generateTool.isPending
@@ -220,6 +233,7 @@ export default function ImageStudioPage() {
         setView(next);
         if (nextTool) setTool(nextTool);
         if (next !== "history") setHistoryResult(null);
+        setWorkflowError(null);
     };
 
     useEffect(() => {
@@ -244,7 +258,7 @@ export default function ImageStudioPage() {
             setResult(await generateMain.mutateAsync(input));
             setPage(1);
         } catch (error) {
-            setWorkflowError(errorMessage(error));
+            setWorkflowError(errorMessage(error), "main");
         }
     };
 
@@ -285,18 +299,19 @@ export default function ImageStudioPage() {
     const retryGeneration = async (item: ImageGeneration) => {
         if (locked || !canRetry(item)) return;
         setWorkflowError(null);
-        setRetryPreparing(true);
+        setRetryPreparing(item.toolKey ?? "creative");
         try {
             const quote = await fetchGenerationQuote(item.modelId, item.count);
             if (!window.confirm(`本次重试费用为 ${quote.total} 积分，是否继续？`)) return;
+            setTool(item.toolKey ?? "creative");
             setShowHistory(false);
             setHistoryResult(null);
             setResult(await retry.mutateAsync(item.id));
             setPage(1);
         } catch (error) {
-            setWorkflowError(errorMessage(error));
+            setWorkflowError(errorMessage(error), item.toolKey ?? "creative");
         } finally {
-            setRetryPreparing(false);
+            setRetryPreparing(null);
         }
     };
 
@@ -308,7 +323,7 @@ export default function ImageStudioPage() {
             if (result?.id === item.id) setResult(null);
             if (historyResult?.id === item.id) setHistoryResult(null);
         } catch (error) {
-            setWorkflowError(errorMessage(error));
+            setWorkflowError(errorMessage(error), item.toolKey ?? "creative");
         }
     };
 
@@ -320,7 +335,7 @@ export default function ImageStudioPage() {
             if (result?.id === item.id) setResult(cancelled);
             if (historyResult?.id === item.id) setHistoryResult(cancelled);
         } catch (error) {
-            setWorkflowError(errorMessage(error));
+            setWorkflowError(errorMessage(error), item.toolKey ?? "creative");
         }
     };
 
@@ -412,7 +427,7 @@ export default function ImageStudioPage() {
             <main className="workspace-layout">
                 <WorkspaceNavigation view={view} tool={tool} mobileOpen={mobileOpen} onMobileOpenChange={setMobileOpen} onNavigate={navigate} onPreferences={() => setPreferencesOpen(true)} onHelp={() => setHelpOpen(true)} />
                 <div className="workspace-content">
-                {busy && view !== "create" && <button className="workspace-active-task" onClick={() => navigate("create")}><span className="spin" />当前任务 {pendingStatus} · {pendingCount} 张<span>查看任务</span></button>}
+                {busy && (view !== "create" || pendingTool !== tool) && <button className="workspace-active-task" onClick={() => navigate("create", pendingTool)}><span className="spin" />当前任务 {pendingStatus} · {pendingCount} 张<span>查看任务</span></button>}
                 {view === "materials" && <MaterialsView onUse={(image) => { setRequestedMaterial({ image, requestId: ++materialSequence.current }); navigate("create", "main"); }} />}
 
                 {showWorks && <WorksView renderImage={({ generation, index }) => (
@@ -467,7 +482,7 @@ export default function ImageStudioPage() {
                 </section>
 
                 {/* CANVAS */}
-                <section className="canvas" data-empty={!currentResult && !busy && !workflowError}>
+                <section className="canvas" data-empty={!currentResult && !previewBusy && !workflowError}>
                     {workflowError && (
                         <div className="workflow-message error" role="alert">
                             {workflowError}
@@ -531,6 +546,7 @@ export default function ImageStudioPage() {
                                                     disabled={busy}
                                                     title={busy ? "当前任务结束后可打开历史详情" : "查看结果"}
                                                     onClick={() => {
+                                                        setTool(item.toolKey ?? "creative");
                                                         if (isGenerationActive(item)) {
                                                             setResult(item);
                                                             setHistoryResult(null);
@@ -637,7 +653,7 @@ export default function ImageStudioPage() {
                                 </>
                             )}
                         </div>
-                    ) : busy ? (
+                    ) : previewBusy ? (
                         <div className="cstate show">
                             <div className="canvas-inner">
                                 <div className="generation-summary">
@@ -814,51 +830,16 @@ export default function ImageStudioPage() {
                                 </div>
                             </div>
                         </div>
-                    ) : (
-                        <div className="cstate show">
-                            <div className="canvas-inner">
-                                <div className="empty-frame">
-                                    <svg width={120} height={96} viewBox="0 0 120 96" fill="none">
-                                        <rect
-                                            x={18}
-                                            y={8}
-                                            width={84}
-                                            height={72}
-                                            rx={8}
-                                            stroke="rgba(255,255,255,.18)"
-                                            strokeDasharray="5 5"
-                                        />
-                                        <circle
-                                            cx={42}
-                                            cy={30}
-                                            r={7}
-                                            stroke="#6E6E7A"
-                                            strokeWidth={2}
-                                        />
-                                        <path
-                                            d="M26 66l18-16 12 10 14-12 24 18"
-                                            stroke="#6E6E7A"
-                                            strokeWidth={2}
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        />
-                                        <path
-                                            d="M100 12l3 6 6 3-6 3-3 6-3-6-6-3 6-3z"
-                                            fill="#CDFF57"
-                                        />
-                                    </svg>
-                                    <h3>生成结果将在此展示</h3>
-                                    <p
-                                        style={{
-                                            fontFamily: "var(--font-mono)",
-                                            fontSize: 11.5,
-                                            color: "var(--text3)",
-                                            marginTop: 10,
-                                        }}
-                                    >
-                                        {unavailableReason(tool) || "创意生图"}
-                                    </p>
+                    ) : tool === "retouch" ? <RetouchPreview /> : (
+                        <div className="cstate show preview-empty-state">
+                            <div className="preview-empty-content">
+                                <div className="preview-empty-art" aria-hidden="true">
+                                    <ImageIcon className="preview-empty-picture" size={64} strokeWidth={1.5} />
+                                    <span className="preview-empty-plus"><Plus size={20} strokeWidth={3} /></span>
+                                    <Sparkles className="preview-empty-sparkles" size={20} strokeWidth={1.5} />
                                 </div>
+                                <h3>效果图预览</h3>
+                                <p>提交任务后，生成结果将在此处展示</p>
                             </div>
                         </div>
                     )}

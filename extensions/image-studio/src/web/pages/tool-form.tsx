@@ -9,6 +9,7 @@ import {
     loadProductThumbnail, useGenerationBilling, useProductImagesQuery, useUploadProductImageMutation,
 } from "../services/generation";
 import { useToolSuggestionsMutation } from "../services/tool-generation";
+import ImageEditForm from "./image-edit-form";
 import SpecializedToolForm from "./specialized-tool-form";
 import { isSpecializedTool } from "./specialized-workflow";
 
@@ -70,6 +71,7 @@ function ProductThumbnail({ id }: { id: string }) {
 }
 
 export default function ToolForm(props: ToolFormProps) {
+    if (props.tool === "watermark" || props.tool === "translate" || props.tool === "retouch") return <ImageEditForm key={props.tool} {...props} tool={props.tool} />;
     if (isSpecializedTool(props.tool)) return <SpecializedToolForm key={props.tool} {...props} tool={props.tool} />;
     if (!isToolEditKey(props.tool) && props.tool !== "suggest") {
         return <section className="ftpl show main-product-form" aria-label="工具不可用">

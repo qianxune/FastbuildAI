@@ -67,8 +67,8 @@ export default function WorkspaceAccount({ onNavigate, locked }: { onNavigate: (
                 <Avatar><AvatarImage src={info?.avatar} alt="" /><AvatarFallback>{nickname.slice(0, 1)}</AvatarFallback></Avatar>
                 <span>{nickname}</span>
             </button></DropdownMenuTrigger>
-            <DropdownMenuContent className="workspace-account-menu" align="end">
-                <DropdownMenuLabel><strong>{nickname}</strong><span className="workspace-account-identity">{maskAccount(phone, info?.username)}</span></DropdownMenuLabel>
+            <DropdownMenuContent className="workspace-account-menu" align="end" sideOffset={8}>
+                <DropdownMenuLabel className="workspace-account-profile"><strong>{nickname}</strong><span className="workspace-account-identity">{maskAccount(phone, info?.username)}</span></DropdownMenuLabel>
                 <DropdownMenuItem onSelect={() => requestAccountAction("profile")}><UserPen size={17} />编辑资料</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel className="workspace-account-balance"><Zap size={17} /><span role="status">{credits}</span></DropdownMenuLabel>

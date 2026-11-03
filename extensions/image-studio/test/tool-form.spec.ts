@@ -10,7 +10,7 @@ type Node = { type: any; props: Record<string, any> };
 const modelId = "11111111-1111-4111-8111-111111111111";
 const assetId = "22222222-2222-4222-8222-222222222222";
 
-function harness(tool: ToolKey = "retouch", options: { ready?: boolean; locked?: boolean; unavailable?: boolean; assetCount?: number; observer?: unknown } = {}) {
+function harness(tool: ToolKey = "expand", options: { ready?: boolean; locked?: boolean; unavailable?: boolean; assetCount?: number; observer?: unknown } = {}) {
     const state: any[] = [];
     const refs: any[] = [];
     const effects: Array<() => unknown> = [];
@@ -42,6 +42,7 @@ function harness(tool: ToolKey = "retouch", options: { ready?: boolean; locked?:
             if (name === "../../api/shared/tool-workflow") return workflow;
             if (name === "./specialized-workflow") return specializedWorkflow;
             if (name === "./specialized-tool-form") return { default: (props: Node["props"]) => jsx("specialized-form", props) };
+            if (name === "./image-edit-form") return { default: (props: Node["props"]) => jsx("image-edit-form", props) };
             if (name === "../../api/shared/tools") return { TOOL_REGISTRY };
             if (name === "../services/generation") return {
                 loadProductThumbnail: load, loadProductImage: originalLoad, useGenerationBilling: billing,
@@ -97,7 +98,7 @@ describe("tool form contracts", () => {
         view.field("ratio").props.onChange({ target: { value: "4:3" } });
         expect(view.button().props.disabled).toBe(false);
         await view.submit();
-        expect(view.onSubmit).toHaveBeenCalledWith({ tool: "retouch", modelId, assetIds: [assetId], productName: "Product", instructions: "", count: 3, ratio: "4:3" });
+        expect(view.onSubmit).toHaveBeenCalledWith({ tool: "expand", modelId, assetIds: [assetId], productName: "Product", instructions: "", count: 3, ratio: "4:3", expansion: "surround" });
         const thumbnail = view.render().find((node) => typeof node.type === "function" && node.props.id === assetId)!;
         thumbnail.type(thumbnail.props);
         const dispose = view.effects.at(-1)!();
@@ -105,22 +106,15 @@ describe("tool form contracts", () => {
         expect(typeof dispose).toBe("function");
     });
     it.each([{ ready: false }, { locked: true }])("gates submission on billing and parent locks %p", async (options) => {
-        const view = harness("retouch", options);
+        const view = harness("expand", options);
         view.fill();
         expect(view.button().props.disabled).toBe(true);
         await view.submit();
         expect(view.onSubmit).not.toHaveBeenCalled();
     });
-    it("requires affirmative authorization and catches rejected submissions", async () => {
-        const view = harness("watermark");
-        view.fill();
-        expect(view.button().props.disabled).toBe(true);
-        view.field("rights").props.onChange({ target: { checked: true } });
-        expect(view.button().props.disabled).toBe(false);
-        view.onSubmit.mockRejectedValueOnce(new Error("模型能力已变更，请刷新"));
-        await expect(view.submit()).resolves.toBeUndefined();
-        expect(view.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ authorized: true }));
-        expect(view.render().some((node) => node.props.role === "alert" && node.props.children === "模型能力已变更，请刷新")).toBe(true);
+    it.each(["watermark", "translate", "retouch"] as const)("dispatches %s to the dedicated single-image form", (tool) => {
+        const view = harness(tool, { locked: true });
+        expect(view.render().find((node) => node.type === "image-edit-form")!.props).toEqual(expect.objectContaining({ tool, locked: true, onSubmit: view.onSubmit }));
     });
     it.each(["detail", "replica", "creative", "fusion", "sku"] as const)("dispatches %s to the specialized form with the parent contract", (tool) => {
         const view = harness(tool, { locked: true });
@@ -159,7 +153,7 @@ describe("tool form contracts", () => {
         expect(view.onSubmit).not.toHaveBeenCalled();
     });
     it("keeps expected edit controls visible without a capable model and refuses submission", async () => {
-        const view = harness("retouch", { unavailable: true });
+        const view = harness("expand", { unavailable: true });
         view.fill();
         expect(view.field("model")).toBeDefined();
         expect(view.field("instructions")).toBeDefined();
@@ -178,7 +172,7 @@ describe("bounded tool asset picker", () => {
             notify = callback;
             return { observe, disconnect };
         });
-        const view = harness("retouch", { observer });
+        const view = harness("expand", { observer });
         const thumbnail = view.mountThumbnail();
         const intersect = (isIntersecting: boolean, target = thumbnail.target) => notify([{ target, isIntersecting }]);
         return { view, thumbnail, observer, observe, disconnect, intersect };
@@ -243,7 +237,7 @@ describe("bounded tool asset picker", () => {
 
     it.each([undefined, jest.fn().mockImplementation(() => { throw new Error("unsupported observer"); })])(
         "falls back to at most eight thumbnails when observation is unavailable", (observer) => {
-            const view = harness("retouch", { assetCount: 40, observer });
+            const view = harness("expand", { assetCount: 40, observer });
             const thumbnails = view.render().filter((node) => typeof node.type === "function" && node.props.id);
             expect(thumbnails).toHaveLength(8);
             const cleanups = thumbnails.map((thumbnail) => {
@@ -263,7 +257,7 @@ describe("bounded tool asset picker", () => {
         const observer = jest.fn().mockImplementation(() => ({
             observe: () => { throw new Error("observation failed"); }, disconnect,
         }));
-        const view = harness("retouch", { observer });
+        const view = harness("expand", { observer });
         const thumbnail = view.mountThumbnail();
         expect(disconnect).toHaveBeenCalledTimes(1);
         expect(view.load).toHaveBeenCalledTimes(1);
@@ -272,7 +266,7 @@ describe("bounded tool asset picker", () => {
     });
 
     it("preserves ordered selection across pages and clamps pagination after assets disappear", async () => {
-        const view = harness("retouch", { assetCount: 40 });
+        const view = harness("expand", { assetCount: 40 });
         const thumbnails = () => view.render().filter((node) => typeof node.type === "function" && node.props.id);
         const pageButton = (label: string) => view.render().find((node) => node.props["aria-label"] === label)!;
         expect(thumbnails().map((node) => node.props.id)).toEqual(view.assets.slice(0, 8).map((asset) => asset.id));
@@ -300,7 +294,7 @@ describe("bounded tool asset picker", () => {
     });
 
     it("keeps the existing five-reference limit across pages", () => {
-        const view = harness("retouch", { assetCount: 40 });
+        const view = harness("expand", { assetCount: 40 });
         for (const asset of view.assets.slice(0, 5)) {
             view.render().find((node) => node.props["aria-label"] === `参考图片 ${asset.id}`)!.props.onClick();
         }

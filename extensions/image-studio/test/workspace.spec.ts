@@ -14,6 +14,18 @@ const image = (index: number) => ({ id: `22222222-2222-4222-8222-${String(index)
 const input = () => ({ modelId, assetIds: [image(1).id], productName: "Product", brand: "", platform: main.MAIN_PLATFORMS[0], language: main.MAIN_LANGUAGES[0], ratio: "1:1", resolution: "2K", counts: { white: 1, scene: 0, selling: 0, other: 0 }, instructions: "" });
 
 describe("workspace drawer positioning", () => {
+    it("shows an explicitly labeled interactive retouch example instead of pretending it is a generated result", () => {
+        const view = harness("image-edit-form");
+        const render = () => nodes(view.render({}, view.exports.RetouchPreview));
+        expect(render().filter((node) => node.type === "img").map((node) => node.props.alt)).toEqual(["香水瓶精修效果示例", "香水瓶原图示例"]);
+        const slider = render().find((node) => node.props.type === "range")!;
+        expect(slider.props["aria-label"]).toBe("原图与精修示例对比");
+        slider.props.onChange({ target: { value: "25" } });
+        expect(render().find((node) => node.props.alt === "香水瓶原图示例")!.props.style.clipPath).toBe("inset(0 75% 0 0)");
+        render().find((node) => node.type === "img")!.props.onError();
+        expect(render().some((node) => node.type === "img")).toBe(false);
+        expect(render().some((node) => node.type === "h3")).toBe(true);
+    });
     it("resets the shared dialog translate without CSS build-time folding", () => {
         const view = harness("workspace-navigation");
         const tree = nodes(view.render({ view: "create", tool: "main", mobileOpen: true }));
@@ -146,6 +158,17 @@ function account() {
 }
 
 describe("workspace account", () => {
+    it("keeps explicit hooks for portaled menu spacing and a separate identity header", () => {
+        const rendered = account().render();
+        const menu = rendered.find((node) => node.type === "DropdownMenuContent");
+        expect(menu?.props.className).toBe("workspace-account-menu");
+        expect(menu?.props.align).toBe("end");
+        expect(menu?.props.sideOffset).toBe(8);
+        const profile = rendered.find((node) => node.props.className === "workspace-account-profile");
+        expect(profile?.type).toBe("DropdownMenuLabel");
+        expect(text(profile)).toContain("Test User");
+        expect(text(profile)).toContain("138****5678");
+    });
     it("only sends approved same-origin actions and redirects standalone actions to the host", () => {
         const view = account();
         for (const action of ["profile", "wallet", "subscribe", "credits"]) view.exports.requestAccountAction(action);
@@ -203,6 +226,56 @@ describe("workspace account", () => {
         expect(view.assign).not.toHaveBeenCalled();
         finish(); await new Promise<void>((resolve) => setImmediate(resolve));
         expect(view.assign).toHaveBeenCalledWith("/login?redirect=%2Fstudio");
+    });
+});
+
+describe("main image advanced settings", () => {
+    it("uses an anchored non-modal popover without a native dialog or confirmation step", () => {
+        const view = form();
+        const rendered = view.render();
+        const popover = rendered.find((node) => node.type === "Popover")!;
+        const panel = rendered.find((node) => node.type === "PopoverContent")!;
+        expect(popover.props.open).toBe(false);
+        expect(popover.props.modal).not.toBe(true);
+        expect(panel.props).toEqual(expect.objectContaining({
+            className: "main-settings-popover", side: "top", align: "start", sideOffset: 8, collisionPadding: 12,
+        }));
+        expect(rendered.some((node) => node.type === "dialog")).toBe(false);
+        expect(rendered.some((node) => node.props.className === "settings-confirm")).toBe(false);
+        expect(rendered.find((node) => node.type === "PopoverTrigger")!.props.asChild).toBe(true);
+        popover.props.onOpenChange(true);
+        expect(view.render().find((node) => node.type === "Popover")!.props.open).toBe(true);
+        view.render().find((node) => node.props["aria-label"] === "关闭高级设置")!.props.onClick();
+        expect(view.render().find((node) => node.type === "Popover")!.props.open).toBe(false);
+    });
+    it("applies ratio and resolution immediately and retains them after closing and reopening", () => {
+        const view = form();
+        const rendered = view.render();
+        expect(rendered.find((node) => node.props.className === "main-segmented settings-ratios")!.props.children).toHaveLength(main.MAIN_RATIOS.length);
+        expect(rendered.find((node) => node.props.className === "main-segmented settings-resolutions")!.props.children).toHaveLength(main.MAIN_RESOLUTIONS.length);
+        const choose = (value: string) => view.render().find((node) => node.type === "label" && text(node) === value)!.props.children[0].props.onChange();
+        choose("16:9"); choose("4K");
+        view.render().find((node) => node.type === "Popover")!.props.onOpenChange(false);
+        view.render().find((node) => node.type === "Popover")!.props.onOpenChange(true);
+        expect(text(view.render().find((node) => node.props.className === "advanced-settings-trigger"))).toContain("比例 16:9清晰度 4K");
+        for (const value of ["16:9", "4K"]) {
+            expect(view.render().find((node) => node.type === "label" && text(node) === value)!.props.children[0].props.checked).toBe(true);
+        }
+        expect(view.props.onSubmit).not.toHaveBeenCalled();
+        expect(view.analyze).not.toHaveBeenCalled();
+    });
+    it("preserves fieldset locks and mounts the portal in the workspace theme", () => {
+        const view = form();
+        const workspace = {};
+        const closest = jest.fn().mockReturnValue(workspace);
+        view.render().find((node) => node.props.className === "advanced-settings-trigger")!.props.ref.current = { closest };
+        view.props.locked = true;
+        const rendered = view.render();
+        expect(rendered.find((node) => node.props.className === "advanced-settings-trigger")!.props.disabled).toBe(true);
+        const panel = rendered.find((node) => node.type === "PopoverContent")!;
+        expect(panel.props.container).toBe(workspace);
+        expect(closest).toHaveBeenCalledWith(".studio-app");
+        expect(nodes(panel).find((node) => node.type === "fieldset")!.props.disabled).toBe(true);
     });
 });
 
@@ -402,7 +475,7 @@ function workspace() {
     const items: any[] = [];
     const query = jest.fn((id?: string) => ({ data: id ? active : undefined }));
     const mutation = { isPending: false, mutateAsync: jest.fn().mockResolvedValue(active) };
-    const toolMutation = { isPending: false, mutateAsync: jest.fn().mockResolvedValue(active) };
+    const toolMutation = { isPending: false, mutateAsync: jest.fn().mockImplementation(async (payload: workflow.ToolWorkflowInput) => { active.toolKey = payload.tool; return active; }) };
     const retryMutation = { isPending: false, mutateAsync: jest.fn().mockResolvedValue(active) };
     const quote = jest.fn().mockResolvedValue({ total: 2 });
     const confirm = jest.fn().mockReturnValue(true);
@@ -427,6 +500,95 @@ function workspace() {
 }
 
 describe("workspace integration", () => {
+    it.each(["detail", "replica", "creative", "fusion", "sku", "retouch"])("does not carry main results into the %s column", async (tool) => {
+        const view = workspace();
+        view.active.status = "completed";
+        view.active.images = [{}];
+        view.active.prompt = "Main result only";
+        await view.render().find((node) => node.type === "./main-image-form")!.props.onSubmit(input());
+        const navigate = (nextTool: string) => view.render().find((node) => node.type === "Navigation")!.props.onNavigate("create", nextTool);
+        expect(view.render().some((node) => node.props.generationId === "active")).toBe(true);
+        navigate(tool);
+        const rendered = view.render();
+        expect(rendered.some((node) => node.props.generationId === "active")).toBe(false);
+        expect(rendered.some((node) => node.props.className === "result-prompt")).toBe(false);
+        expect(rendered.some((node) => tool === "retouch" ? node.type === "RetouchPreview" : String(node.props.className).includes("preview-empty-state"))).toBe(true);
+        expect(rendered.find((node) => node.props.className === "canvas")!.props["data-empty"]).toBe(true);
+        navigate("main");
+        expect(view.render().some((node) => node.props.generationId === "active")).toBe(true);
+    });
+    it.each(["queued", "processing"])("tracks a %s task without showing its progress in another column", async (status) => {
+        const view = workspace();
+        view.active.status = status;
+        await view.render().find((node) => node.type === "./main-image-form")!.props.onSubmit(input());
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("create", "detail");
+        let rendered = view.render();
+        expect(view.query).toHaveBeenLastCalledWith("active");
+        expect(rendered.some((node) => String(node.props.className).includes("generation-placeholder"))).toBe(false);
+        expect(rendered.some((node) => String(node.props.className).includes("preview-empty-state"))).toBe(true);
+        expect(rendered.find((node) => node.type === "./tool-form" && node.props.tool === "detail")!.props.locked).toBe(true);
+        rendered.find((node) => node.props.className === "workspace-active-task")!.props.onClick();
+        rendered = view.render();
+        expect(rendered.find((node) => node.type === "Navigation")!.props.tool).toBe("main");
+        expect(rendered.some((node) => String(node.props.className).includes("generation-placeholder"))).toBe(true);
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("create", "detail");
+        view.active.status = "completed";
+        view.active.images = [{}];
+        rendered = view.render();
+        expect(rendered.some((node) => node.props.generationId === "active")).toBe(false);
+        expect(rendered.find((node) => node.type === "./tool-form" && node.props.tool === "detail")!.props.locked).toBe(false);
+    });
+    it.each(["completed", "failed", "cancelled"])("opens a %s historical result in its owning column", (status) => {
+        const view = workspace();
+        view.items.push({ ...view.active, id: "detail-history", toolKey: "detail", status, prompt: "Detail result only" });
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("history");
+        view.render().find((node) => node.props.className === "history-open")!.props.onClick();
+        let rendered = view.render();
+        expect(rendered.find((node) => node.type === "Navigation")!.props.tool).toBe("detail");
+        expect(rendered.find((node) => node.props.className === "result-prompt")!.props.children).toBe("Detail result only");
+        rendered.find((node) => node.type === "Navigation")!.props.onNavigate("create", "main");
+        rendered = view.render();
+        expect(rendered.some((node) => node.props.className === "result-prompt")).toBe(false);
+        expect(rendered.some((node) => String(node.props.className).includes("preview-empty-state"))).toBe(true);
+    });
+    it("keeps legacy records in the creative column rather than leaking into main", () => {
+        const view = workspace();
+        view.items.push({ ...view.active, toolKey: undefined, status: "completed", prompt: "Legacy creative" });
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("history");
+        view.render().find((node) => node.props.className === "history-open")!.props.onClick();
+        expect(view.render().find((node) => node.type === "Navigation")!.props.tool).toBe("creative");
+        expect(view.render().find((node) => node.props.className === "result-prompt")!.props.children).toBe("Legacy creative");
+    });
+    it("keeps a late main submission result out of the newly selected column", async () => {
+        const view = workspace();
+        let finish!: (value: any) => void;
+        view.mutation.mutateAsync.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+        const submission = view.render().find((node) => node.type === "./main-image-form")!.props.onSubmit(input());
+        view.mutation.isPending = true;
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("create", "detail");
+        let rendered = view.render();
+        expect(rendered.some((node) => String(node.props.className).includes("generation-placeholder"))).toBe(false);
+        expect(rendered.some((node) => node.props.className === "workspace-active-task")).toBe(true);
+        view.active.status = "completed";
+        view.active.images = [{}];
+        view.mutation.isPending = false;
+        finish(view.active);
+        await submission;
+        rendered = view.render();
+        expect(view.query).toHaveBeenLastCalledWith("active");
+        expect(rendered.some((node) => node.props.generationId === "active")).toBe(false);
+        expect(rendered.some((node) => String(node.props.className).includes("preview-empty-state"))).toBe(true);
+    });
+    it("selects the owning column when retrying directly from history", async () => {
+        const view = workspace();
+        view.items.push({ ...view.active, status: "failed", size: "2048x2048", modelId, prompt: "Retry main" });
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("history", "creative");
+        view.render().find((node) => node.type === "button" && text(node) === "重试")!.props.onClick();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(view.retryMutation.mutateAsync).toHaveBeenCalledWith("active");
+        expect(view.render().find((node) => node.type === "Navigation")!.props.tool).toBe("main");
+        expect(view.render().some((node) => String(node.props.className).includes("generation-placeholder"))).toBe(true);
+    });
     it("resumes polling and cancellation when opening an active historical task after reload", () => {
         const view = workspace();
         view.items.push(view.active);
@@ -511,6 +673,25 @@ function creativeWorkspace() {
 }
 
 describe("owning-page specialized integration", () => {
+    it("keeps late tool submission errors scoped to their original column", async () => {
+        const view = creativeWorkspace();
+        view.navigate("create", "creative");
+        let reject!: (error: Error) => void;
+        view.toolMutation.mutateAsync.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+        const submission = view.form().props.onSubmit(creativeInput());
+        view.toolMutation.isPending = true;
+        Object.assign(view.toolMutation, { variables: creativeInput() });
+        view.navigate("create", "main");
+        expect(view.render().some((node) => String(node.props.className).includes("generation-placeholder"))).toBe(false);
+        expect(view.render().some((node) => node.props.className === "workspace-active-task")).toBe(true);
+        view.toolMutation.isPending = false;
+        reject(new Error("Creative submission failed"));
+        await expect(submission).rejects.toThrow("Creative submission failed");
+        expect(view.render().some((node) => node.props.role === "alert" && text(node).includes("Creative submission failed"))).toBe(false);
+        expect(view.render().some((node) => String(node.props.className).includes("preview-empty-state"))).toBe(true);
+        view.navigate("create", "creative");
+        expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(false);
+    });
     it("keeps all five keyed form slots and child types stable across tools and workspace views", () => {
         const view = creativeWorkspace();
         const slots = () => view.render().filter((node) => node.props.className === "workspace-tool-form");

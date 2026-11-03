@@ -70,12 +70,17 @@ export interface AssetRolePickerProps {
     disabled: boolean;
     onChange: (images: ProductImage[]) => void;
     onFiles: (files: File[]) => void;
+    original?: boolean;
+    previewRegion?: Region;
+    dropzone?: boolean;
 }
 
-export function AssetRolePicker({ label, images, max, disabled, onChange, onFiles }: AssetRolePickerProps) {
+export function AssetRolePicker({ label, images, max, disabled, onChange, onFiles, original = false, previewRegion, dropzone = false }: AssetRolePickerProps) {
     const input = useRef<HTMLInputElement>(null);
     const [dragging, setDragging] = useState(false);
     const unavailable = disabled || images.length >= max;
+    const materialPicker = <MaterialPicker selectedIds={images.map((image) => image.id)} max={max} disabled={disabled}
+        onChange={(_ids, selected) => { if (!disabled) onChange(selected); }} />;
     return <section className="specialized-assets" aria-label={label} tabIndex={0} data-dragging={dragging}
         onDragOver={(event) => {
             if (!acceptsAssetTransfer(event.target as HTMLElement, unavailable) || !Array.from(event.dataTransfer.types).includes("Files")) return;
@@ -91,21 +96,22 @@ export function AssetRolePicker({ label, images, max, disabled, onChange, onFile
             if (!acceptsAssetTransfer(event.target as HTMLElement, unavailable) || !event.clipboardData.files.length) return;
             event.preventDefault(); event.stopPropagation(); onFiles(Array.from(event.clipboardData.files));
         }}>
-        <div className="specialized-section-heading"><h3>{label}</h3><span>{images.length} / {max}</span></div>
-        <div className="specialized-thumbnails">{images.map((image, index) => <div key={image.id} className="specialized-thumbnail">
-            <ProtectedAsset image={image} />
+        <div className="specialized-section-heading"><h3>{label}</h3>{dropzone ? materialPicker : <span>{images.length} / {max}</span>}</div>
+        {dropzone && !images.length && <button type="button" className="retouch-upload-dropzone" disabled={unavailable} onClick={() => input.current?.click()}><ImagePlus size={22} /><strong>上传图片</strong><small>PNG / JPEG / WebP · 最多 1 张 · 10 MiB</small></button>}
+        <div className="specialized-thumbnails">{images.map((image, index) => <div key={image.id} className="specialized-thumbnail" data-original={original}
+            style={original ? { aspectRatio: `${image.width} / ${image.height}`, width: `min(100%, ${240 * image.width / image.height}px)`, height: "auto" } : undefined}>
+            <ProtectedAsset image={image} original={original} />
+            {original && previewRegion && <span className="specialized-region-rect" style={{ left: `${previewRegion.x * 100}%`, top: `${previewRegion.y * 100}%`, width: `${previewRegion.width * 100}%`, height: `${previewRegion.height * 100}%` }} />}
             <span className="specialized-asset-order">{index + 1}</span>
             <button type="button" className="specialized-remove" title={`移除${label} ${index + 1}`} aria-label={`移除${label} ${index + 1}`} disabled={disabled}
                 onClick={() => onChange(images.filter((item) => item.id !== image.id))}><X size={15} /></button>
         </div>)}</div>
         <div className="specialized-asset-actions">
-            <button type="button" disabled={unavailable} onClick={() => input.current?.click()}><Upload size={16} />上传图片</button>
-            <MaterialPicker selectedIds={images.map((image) => image.id)} max={max} disabled={disabled}
-                onChange={(_ids, selected) => { if (!disabled) onChange(selected); }} />
+            {!dropzone && <><button type="button" disabled={unavailable} onClick={() => input.current?.click()}><Upload size={16} />上传图片</button>{materialPicker}</>}
             <input ref={input} type="file" hidden multiple={max > 1} accept="image/png,image/jpeg,image/webp" disabled={unavailable}
                 aria-label={`上传${label}`} onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; onFiles(files); }} />
         </div>
-        {!images.length && <div className="specialized-drop-hint"><ImagePlus size={22} /><span>PNG / JPEG / WebP · 每张不超过 10 MiB</span></div>}
+        {!dropzone && !images.length && <div className="specialized-drop-hint"><ImagePlus size={22} /><span>PNG / JPEG / WebP · 每张不超过 10 MiB</span></div>}
     </section>;
 }
 
@@ -115,9 +121,10 @@ export interface SkuRegionEditorProps {
     disabled: boolean;
     onChange: (region: Region) => void;
     onClose: () => void;
+    title?: string;
 }
 
-export function SkuRegionEditor({ image, region, disabled, onChange, onClose }: SkuRegionEditorProps) {
+export function SkuRegionEditor({ image, region, disabled, onChange, onClose, title = "SKU 编辑参考区域" }: SkuRegionEditorProps) {
     const [draft, setDraft] = useState<Region>(region ?? { x: 0, y: 0, width: 1, height: 1 });
     const [selected, setSelected] = useState(Boolean(region));
     const [ready, setReady] = useState(false);
@@ -127,7 +134,7 @@ export function SkuRegionEditor({ image, region, disabled, onChange, onClose }: 
         return { x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
             y: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)) };
     };
-    return <MaterialDialog title="SKU 编辑参考区域" onClose={onClose} busy={disabled}>
+    return <MaterialDialog title={title} onClose={onClose} busy={disabled}>
         <div className="specialized-region-editor">
             <p>区域仅作为编辑参考，不是像素蒙版。</p>
             <div className="specialized-region-stage" data-ready={ready} style={{ aspectRatio: `${image.width} / ${image.height}`, width: `min(100%, ${54 * image.width / image.height}dvh, 560px)` }}

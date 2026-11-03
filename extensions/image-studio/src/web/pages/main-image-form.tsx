@@ -1,3 +1,4 @@
+import { Popover, PopoverContent, PopoverTrigger } from "@buildingai/ui/components/ui/popover";
 import { ChevronDown, ImagePlus, LoaderCircle, Minus, Plus, RefreshCw, Settings, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -39,7 +40,8 @@ export default function MainImageForm({
 }) {
     const id = useId();
     const fileInput = useRef<HTMLInputElement>(null);
-    const settingsDialog = useRef<HTMLDialogElement>(null);
+    const settingsTrigger = useRef<HTMLButtonElement>(null);
+    const [settingsOpen, setSettingsOpen] = useState(false);
     const consumedMaterial = useRef<number | null>(null);
     const uploadInFlight = useRef(false);
     const [products, setProducts] = useState<ProductImage[]>([]);
@@ -400,19 +402,22 @@ export default function MainImageForm({
                 </div>
             </fieldset>
             <div className="form-foot main-form-foot">
-                <button type="button" className="advanced-settings-trigger" disabled={disabled}
-                    aria-haspopup="dialog" onClick={() => settingsDialog.current?.showModal()}>
+                <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+                <PopoverTrigger asChild>
+                <button ref={settingsTrigger} type="button" className="advanced-settings-trigger" disabled={disabled}>
                     <Settings size={15} /><span>高级设置</span><span className="advanced-setting-value">比例 {ratio}</span><span className="advanced-setting-value">清晰度 {resolution}</span><ChevronDown size={14} />
                 </button>
-                <dialog ref={settingsDialog} className="main-settings-dialog" aria-labelledby={`${id}-settings-title`} onClick={(event) => { if (event.target === event.currentTarget) event.currentTarget.close(); }}>
-                    <div className="settings-dialog-head"><h3 id={`${id}-settings-title`}>高级设置</h3><button type="button" className="icon-btn" title="关闭高级设置" aria-label="关闭高级设置" onClick={() => settingsDialog.current?.close()}><X size={18} /></button></div>
+                </PopoverTrigger>
+                <PopoverContent className="main-settings-popover" side="top" align="start" sideOffset={8} collisionPadding={12}
+                    container={settingsTrigger.current?.closest<HTMLElement>(".studio-app") ?? undefined} aria-labelledby={`${id}-settings-title`}>
+                    <div className="settings-popover-head"><h3 id={`${id}-settings-title`}>高级设置</h3><button type="button" className="icon-btn" title="关闭高级设置" aria-label="关闭高级设置" onClick={() => setSettingsOpen(false)}><X size={18} /></button></div>
                     <fieldset className="main-fields" disabled={disabled}>
                 <div className="field">
                     <div className="f-label" id={`${id}-ratio`}>
                         图片比例
                     </div>
                     <div
-                        className="main-segmented"
+                        className="main-segmented settings-ratios"
                         role="radiogroup"
                         aria-labelledby={`${id}-ratio`}
                     >
@@ -434,7 +439,7 @@ export default function MainImageForm({
                         清晰度
                     </div>
                     <div
-                        className="main-segmented"
+                        className="main-segmented settings-resolutions"
                         role="radiogroup"
                         aria-labelledby={`${id}-resolution`}
                     >
@@ -452,8 +457,8 @@ export default function MainImageForm({
                     </div>
                 </div>
                     </fieldset>
-                    <button type="button" className="btn btn-lime settings-confirm" onClick={() => settingsDialog.current?.close()}>确定</button>
-                </dialog>
+                </PopoverContent>
+                </Popover>
                 <span className="cost-line" role="status">{billing.costText}</span>
                 {(billing.quote.isError || billing.balance.isError) && <button type="button" className="icon-btn" title="重新查询积分" aria-label="重新查询积分" onClick={() => { void billing.quote.refetch(); void billing.balance.refetch(); }}><RefreshCw size={14} /></button>}
                 <button
