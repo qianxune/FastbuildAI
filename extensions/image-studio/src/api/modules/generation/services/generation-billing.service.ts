@@ -10,7 +10,7 @@ import {
     ImageGenerationStatus,
 } from "../../../db/entities/image-generation.entity";
 import { quoteGenerationCredits } from "../../../shared/billing";
-import { GENERATION_FAILED } from "../constants/generation.constants";
+import { GENERATION_FAILED, publicGenerationError } from "../constants/generation.constants";
 
 @Injectable()
 export class GenerationBillingService {
@@ -65,6 +65,7 @@ export class GenerationBillingService {
         userId: string,
         id: string,
         status: ImageGenerationStatus.FAILED | ImageGenerationStatus.CANCELLED,
+        failureMessage = GENERATION_FAILED,
     ) {
         const repository = manager.getRepository(ImageGeneration);
         const generation = await repository.findOne({
@@ -103,7 +104,7 @@ export class GenerationBillingService {
         }
         generation.status = status;
         generation.images = [];
-        generation.error = status === ImageGenerationStatus.FAILED ? GENERATION_FAILED : null;
+        generation.error = status === ImageGenerationStatus.FAILED ? publicGenerationError(failureMessage) : null;
         return repository.save(generation);
     }
 }

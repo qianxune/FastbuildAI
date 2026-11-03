@@ -2,6 +2,7 @@
 
 import { GenerationImageService } from "../src/api/modules/generation/services/generation-image.service";
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "fs/promises";
+import { GENERATION_STORAGE_RESTRICTED } from "../src/api/modules/generation/constants/generation.constants";
 
 jest.mock("@buildingai/core/modules", () => ({ CloudStorageService: class {} }));
 jest.mock("@buildingai/db/@nestjs/typeorm", () => ({ InjectRepository: () => () => undefined }));
@@ -115,6 +116,17 @@ describe("generated image storage", () => {
         cloud.upload.mockRejectedValue(new Error("original upload failure"));
         cloud.deleteObject.mockRejectedValue(new Error("cleanup failure"));
         await expect(service.persist(id, [input])).rejects.toThrow("original upload failure");
+    });
+
+    it.each([{ statusCode: 451 }, { code: "UnavailableForLegalReasons" }])("reports COS restriction %p without leaking responses or bypassing storage", async (details) => {
+        const { service, cloud } = fixture();
+        const failure = Object.assign(new Error("private COS response and credentials"), details);
+        cloud.upload.mockRejectedValue(failure);
+        cloud.deleteObject.mockRejectedValue(new Error("cleanup unavailable"));
+        await expect(service.persist(id, [input])).rejects.toMatchObject({ message: GENERATION_STORAGE_RESTRICTED, cause: failure });
+        expect(cloud.upload).toHaveBeenCalledTimes(1);
+        expect(cloud.deleteObject).toHaveBeenCalledTimes(1);
+        expect(writeFile).not.toHaveBeenCalled();
     });
 
     it.each([null, { storageType: "oss" }])("rejects unavailable or unsupported storage without local fallback", async (config) => {

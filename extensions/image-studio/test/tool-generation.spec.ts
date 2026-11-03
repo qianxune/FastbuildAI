@@ -7,6 +7,7 @@ import { ToolWorkflowDto, ToolSuggestionDto } from "../src/api/modules/generatio
 import { GenerationService } from "../src/api/modules/generation/services/generation.service";
 import { TOOL_SUGGESTION_SYSTEM, type ToolWorkflowInput } from "../src/api/shared/tool-workflow";
 import { AddToolWorkflowInput1793448000000 } from "../src/api/db/migrations/1793448000000-0.1.3-add-tool-workflow-input";
+import { GENERATION_FAILED, GENERATION_STORAGE_RESTRICTED } from "../src/api/modules/generation/constants/generation.constants";
 
 jest.mock("@buildingai/db/@nestjs/typeorm", () => ({ InjectRepository: () => () => undefined }));
 jest.mock("@buildingai/db/typeorm", () => ({ Repository: class {}, TableColumn: class { constructor(value: unknown) { Object.assign(this, value); } } }));
@@ -94,6 +95,27 @@ describe("tool generation lifecycle", () => {
         jest.clearAllMocks();
         jest.mocked(generateImage).mockResolvedValue({ images: [{ base64: "image", mediaType: "image/png" }] } as never);
         jest.mocked(generateText).mockResolvedValue({ text: "Observations and suggestions" } as never);
+    });
+    it("retains a safe COS 451 reason through compensation and public records without retrying generation", async () => {
+        const state = fixture();
+        Object.assign(state.record, { toolKey: "watermark", count: 1, toolInput: input({ tool: "watermark", count: 1, authorized: true }) });
+        const failure = new Error(GENERATION_STORAGE_RESTRICTED, { cause: Object.assign(new Error("private cloud response"), { code: "UnavailableForLegalReasons", statusCode: 451 }) });
+        state.persist.mockRejectedValueOnce(failure);
+        await expect(state.service.processTask({ id: "task", userId: "owner" })).rejects.toThrow(GENERATION_FAILED);
+        expect(state.finishUnsuccessful).toHaveBeenCalledTimes(1);
+        expect(state.finishUnsuccessful).toHaveBeenCalledWith(state.manager, "owner", "task", ImageGenerationStatus.FAILED, GENERATION_STORAGE_RESTRICTED);
+        expect(state.cleanup).toHaveBeenCalledWith("task", []);
+        expect(state.repository.update).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: ImageGenerationStatus.COMPLETED }));
+        expect(state.service["publicRecord"]({ ...state.record, error: GENERATION_STORAGE_RESTRICTED } as never).error).toBe(GENERATION_STORAGE_RESTRICTED);
+        expect(state.service["publicRecord"]({ ...state.record, error: "private cloud response" } as never).error).toBe(GENERATION_FAILED);
+        expect(generateImage).toHaveBeenCalledTimes(1);
+    });
+    it("does not misclassify model failures as a COS restriction", async () => {
+        const state = fixture();
+        jest.mocked(generateImage).mockRejectedValueOnce(new Error(GENERATION_STORAGE_RESTRICTED));
+        await expect(state.service.processTask({ id: "task", userId: "owner" })).rejects.toThrow(GENERATION_FAILED);
+        expect(state.persist).not.toHaveBeenCalled();
+        expect(state.finishUnsuccessful).toHaveBeenCalledWith(state.manager, "owner", "task", ImageGenerationStatus.FAILED);
     });
     it("delegates thumbnails separately from original reads without database or queue work", async () => {
         const state = fixture();

@@ -8,6 +8,7 @@ import { User } from "@buildingai/db/entities";
 import type { EntityManager } from "@buildingai/db/typeorm";
 import { GenerationService } from "../src/api/modules/generation/services/generation.service";
 import { generateImage } from "ai";
+import { GENERATION_FAILED, GENERATION_STORAGE_RESTRICTED } from "../src/api/modules/generation/constants/generation.constants";
 
 jest.mock("@buildingai/core/modules", () => ({ BaseBillingService: class {} }));
 jest.mock("@buildingai/db/@nestjs/typeorm", () => ({ InjectRepository: () => () => undefined }));
@@ -180,6 +181,20 @@ describe("transactional image studio billing", () => {
         expect(await state.service.balance("owner")).toEqual({ balance: 100 });
         expect(state.deductUserPower).not.toHaveBeenCalled();
         expect(state.addUserPower).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        [GENERATION_STORAGE_RESTRICTED, GENERATION_STORAGE_RESTRICTED],
+        ["private COS response and credentials", GENERATION_FAILED],
+    ])("stores only an allowed failure reason and refunds once for %s", async (failure, expected) => {
+        const state = fixture();
+        await state.create();
+        await state.transaction(() => state.service.finishUnsuccessful(state.manager, "owner", "task-1", ImageGenerationStatus.FAILED, failure));
+        await state.fail();
+        expect(state.task()).toMatchObject({ status: ImageGenerationStatus.FAILED, billingStatus: "refunded", images: [], error: expected });
+        expect(state.addUserPower).toHaveBeenCalledTimes(1);
+        expect(state.balance()).toBe(100);
+        expect(generateImage).not.toHaveBeenCalled();
     });
 
     it("snapshots the price and uses the same transaction and task association for deduction", async () => {

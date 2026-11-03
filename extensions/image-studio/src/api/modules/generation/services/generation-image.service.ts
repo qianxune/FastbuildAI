@@ -10,7 +10,7 @@ import path from "path";
 import { Readable } from "stream";
 
 import type { GeneratedImage } from "../../../db/entities/image-generation.entity";
-import { GENERATION_FAILED } from "../constants/generation.constants";
+import { GENERATION_FAILED, GENERATION_STORAGE_RESTRICTED } from "../constants/generation.constants";
 
 const APP_IDENTIFIER = "image-studio";
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -216,6 +216,10 @@ export class GenerationImageService {
                     this.cloudStorageService.deleteObject(storageConfig, image.storage!.key),
                 ),
             );
+            const detail = error as { statusCode?: unknown; code?: unknown } | null;
+            if (detail?.statusCode === 451 || detail?.code === "UnavailableForLegalReasons") {
+                throw new Error(GENERATION_STORAGE_RESTRICTED, { cause: error });
+            }
             throw error;
         }
     }

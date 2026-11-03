@@ -17,9 +17,11 @@ import {
 } from "../../../shared/main-image";
 import {
     GENERATION_FAILED,
+    GENERATION_STORAGE_RESTRICTED,
     GENERATION_QUEUE,
     type GenerationJobData,
     MODEL_UNAVAILABLE,
+    publicGenerationError,
 } from "../constants/generation.constants";
 import { GenerationModelService } from "./generation-model.service";
 import { GenerationImageService } from "./generation-image.service";
@@ -609,7 +611,7 @@ export class GenerationService {
         } catch (error) {
             this.logFailure(data.id, stage, error);
             await this.generationImageService.cleanup(data.id, images);
-            await this.failTask(data);
+            await this.failTask(data, stage === "persist_images" && error instanceof Error ? error.message : GENERATION_FAILED);
             throw new Error(GENERATION_FAILED);
         }
         await this.generationImageService.cleanup(data.id, images);
@@ -656,15 +658,24 @@ export class GenerationService {
     }
 
     /** 在事务中终结未结束任务并退款，重复调用不会重复退还积分。 */
-    async failTask(data: GenerationJobData) {
-        await this.generationRepository.manager.transaction((manager) =>
-            this.generationBillingService.finishUnsuccessful(
+    async failTask(data: GenerationJobData, failureMessage = GENERATION_FAILED) {
+        await this.generationRepository.manager.transaction((manager) => {
+            if (failureMessage === GENERATION_STORAGE_RESTRICTED) {
+                return this.generationBillingService.finishUnsuccessful(
+                    manager,
+                    data.userId,
+                    data.id,
+                    ImageGenerationStatus.FAILED,
+                    failureMessage,
+                );
+            }
+            return this.generationBillingService.finishUnsuccessful(
                 manager,
                 data.userId,
                 data.id,
                 ImageGenerationStatus.FAILED,
-            ),
-        );
+            );
+        });
     }
 
     /** 根据队列作业编号查找任务数据，并对停滞任务执行失败补偿。 */
@@ -710,7 +721,7 @@ export class GenerationService {
     private publicRecord(generation: ImageGeneration) {
         return {
             ...generation,
-            error: generation.error ? GENERATION_FAILED : null,
+            error: generation.error ? publicGenerationError(generation.error) : null,
             images: generation.images.map((image, index) => ({
                 mediaType: image.mediaType,
                 url: this.generationImageService.url(generation.id, index),
