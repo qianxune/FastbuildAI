@@ -1,6 +1,7 @@
 import {
     acceptsAssetTransfer, buildSpecializedInput, createDetailPlan, draftPlanSource, normalizeRegion,
     regionFromPoints, specializedInstructionBudget, specializedModels, validateRoleSelection, validImageFile,
+    recordWatermarkEdit, stepWatermarkHistory, transformWatermarkMark, type WatermarkHistory,
     type SpecializedDraft,
 } from "../src/web/pages/specialized-workflow";
 import { validateToolWorkflow, DETAIL_MODULES, toolWorkflowPrompt } from "../src/api/shared/tool-workflow";
@@ -95,6 +96,16 @@ describe("specialized workflow payloads", () => {
         expect(toolWorkflowPrompt(input, 1)).toContain("Use red");
         sku.skuRegion = undefined; expect(() => buildSpecializedInput(sku, 5)).toThrow("区域");
     });
+    it("accepts ten SKU outputs with three stable regions and distinct per-output edits", () => {
+        const regions = Array.from({ length: 3 }, (_value, index) => ({ id: `region-${index + 1}`, region: { x: index * .2, y: .1, width: .1, height: .2 } }));
+        const input = { tool: "sku", modelId, assetIds: [assetIds[0], assetIds[1]], instructions: "", count: 10, ratio: "1:1",
+            design: { skuRegions: regions, skuVariants: Array.from({ length: 10 }, (_value, index) => ({ name: `SKU ${index + 1}`, instruction: "",
+                edits: regions.map(({ id }) => ({ regionId: id, instruction: `Output ${index + 1} ${id}`, ...(id === "region-1" ? { referenceAssetId: assetIds[1] } : {}) })) })) } };
+        expect(validateToolWorkflow(input as any)).toBeNull();
+        expect(toolWorkflowPrompt(input as any, 9)).toContain("Output 10 region-3");
+        expect(toolWorkflowPrompt(input as any, 9)).not.toContain("Output 1 region-3");
+        expect(toolWorkflowPrompt(input as any, 9)).toContain("Reference image 2");
+    });
     it("rejects duplicate roles, role maxima and model limits without truncation", () => {
         expect(validateRoleSelection("replica", [assetIds[0]], [assetIds[0]], 5)).toBeTruthy();
         expect(validateRoleSelection("fusion", [assetIds[0]], assetIds.slice(1), 5)).toBeTruthy();
@@ -130,6 +141,34 @@ const images = assetIds.map((id) => ({ id, width: 400, height: 300, mediaType: "
 const componentTokens = { AssetRolePicker: "AssetRolePicker", FusionPresetGallery: "FusionPresetGallery", SkuRegionEditor: "SkuRegionEditor" };
 const elementText = (node: any): string => Array.isArray(node) ? node.map(elementText).join("") : node && typeof node === "object" ? elementText(node.props?.children) : String(node ?? "");
 
+describe("watermark annotation history and geometry", () => {
+    const mark = { id: "mark-1", region: { x: .1, y: .2, width: .3, height: .2 }, points: [{ x: .2, y: .3 }] };
+    const empty: WatermarkHistory = { marks: [], past: [], future: [] };
+    it("records edits, undo/redo and discards redo after a new edit", () => {
+        const first = recordWatermarkEdit(empty, [mark]);
+        expect(stepWatermarkHistory(first, "undo").marks).toEqual([]);
+        expect(stepWatermarkHistory(stepWatermarkHistory(first, "undo"), "redo").marks).toEqual([mark]);
+        expect(recordWatermarkEdit(stepWatermarkHistory(first, "undo"), [{ ...mark, id: "mark-2" }]).future).toEqual([]);
+        expect(recordWatermarkEdit(first, first.marks)).toBe(first);
+        expect(recordWatermarkEdit(empty, Array(4).fill(mark))).toBe(empty);
+    });
+    it("moves marks and brush points within image bounds", () => {
+        const moved = transformWatermarkMark(mark, 2, -2);
+        expect(moved.region).toEqual({ x: .7, y: 0, width: .3, height: .2 });
+        expect(moved.points?.[0].x).toBeCloseTo(.8);
+        expect(moved.points?.[0].y).toBeCloseTo(.1);
+    });
+    it.each(["n", "ne", "e", "se", "s", "sw", "w", "nw"])("keeps %s resizing positive and bounded", (handle) => {
+        const resized = transformWatermarkMark(mark, -2, 2, handle).region;
+        expect(resized.width).toBeGreaterThanOrEqual(.0099);
+        expect(resized.height).toBeGreaterThanOrEqual(.0099);
+        expect(resized.x).toBeGreaterThanOrEqual(0);
+        expect(resized.y).toBeGreaterThanOrEqual(0);
+        expect(resized.x + resized.width).toBeLessThanOrEqual(1);
+        expect(resized.y + resized.height).toBeLessThanOrEqual(1);
+    });
+});
+
 function renderHarness(file: string, exportName: string, props: Record<string, any>, services: Record<string, unknown> = {}) {
     const state: any[] = [], refs: any[] = [];
     const effects: Array<{ dependencies?: unknown[]; cleanup?: () => void }> = [];
@@ -141,6 +180,7 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } });
     runInNewContext(compiled.outputText, { exports, Error, require: (name: string) => {
         if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
+        if (name === "react-dom") return { createPortal: (child: unknown) => child };
         if (name === "react") return {
             useState: (initial: unknown) => { const index = stateCursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial;
                 return [state[index], (value: any) => { state[index] = typeof value === "function" ? value(state[index]) : value; }]; },
@@ -174,6 +214,345 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
     }
     return { render, props, exports, unmount: () => effects.forEach((effect) => effect.cleanup?.()) };
 }
+
+describe("watermark canvas controls", () => {
+    function canvas(marks: WatermarkHistory["marks"] = [], sku = false) {
+        const release = jest.fn(), load = jest.fn().mockReturnValue(release), onChange = jest.fn(), onSelect = jest.fn(), onHistory = jest.fn(), onReady = jest.fn();
+        const view = renderHarness("watermark-editor", "WatermarkCanvas", { image: images[0], history: { marks, past: [], future: [] }, selected: "", disabled: false, onChange, onSelect, onHistory, onReady, ...(sku ? { variant: "sku" } : {}) }, { loadProductImage: load });
+        const stage = () => view.render().find((node) => node.props["aria-label"] === "原图标记区域")!;
+        const button = (label: string) => view.render().find((node) => node.type === "button" && node.props["aria-label"] === label)!;
+        const bounds = { left: 10, top: 20, width: 400, height: 300 };
+        const event = (x = 50, y = 50) => ({ clientX: x, clientY: y, pointerId: 1, button: 0, preventDefault: jest.fn(), stopPropagation: jest.fn() });
+        const ready = () => {
+            view.render(); load.mock.calls.at(-1)![1]("blob:protected");
+            view.render().find((node) => node.type === "img")!.props.onLoad();
+            stage().props.ref.current = { getBoundingClientRect: () => bounds, focus: jest.fn(), setPointerCapture: jest.fn() };
+        };
+        return { ...view, stage, button, event, ready, release, load, onChange, onSelect, onHistory, onReady };
+    }
+    it.each(["框选", "画笔", "圆选", "套索"])("keeps the three-region cap for SKU %s gestures", (mode) => {
+        const marks = [1, 2, 3].map((index) => ({ id: `region-${index}`, region: { x: .1, y: .1, width: .2, height: .2 } }));
+        const view = canvas(marks, true); view.ready(); view.button(mode).props.onClick();
+        view.stage().props.onPointerDown(view.event(50, 50)); view.stage().props.onPointerMove(view.event(120, 70));
+        view.stage().props.onPointerMove(view.event(100, 120)); view.stage().props.onPointerUp(view.event(200, 200));
+        expect(view.onChange).not.toHaveBeenCalled();
+    });
+    it.each([["圆选", "ellipse"], ["套索", "lasso"]])("creates bounded SKU %s guidance with visible shape metadata", (mode, shape) => {
+        const view = canvas([], true); view.ready(); view.button(mode!).props.onClick();
+        view.stage().props.onPointerDown(view.event(50, 50)); view.stage().props.onPointerMove(view.event(120, 60));
+        view.stage().props.onPointerMove(view.event(90, 100)); view.stage().props.onPointerUp(view.event(50, 50));
+        if (shape === "ellipse") { expect(view.onChange).not.toHaveBeenCalled(); view.stage().props.onPointerDown(view.event(50, 50)); view.stage().props.onPointerUp(view.event(120, 100)); }
+        const mark = view.onChange.mock.calls[0][0][0];
+        expect(mark.shape).toBe(shape); expect(mark.region.width).toBeGreaterThan(0); expect(mark.region.height).toBeGreaterThan(0);
+    });
+    it("uses SKU brush size and erases one selected region without deleting other edits", () => {
+        const view = canvas([], true); view.ready(); view.button("画笔").props.onClick();
+        view.render().find((node) => node.props["aria-label"] === "画笔大小")!.props.onChange({ target: { value: "64" } });
+        view.stage().props.onPointerDown(view.event(50, 50)); view.stage().props.onPointerUp(view.event(120, 100));
+        const mark = view.onChange.mock.calls[0][0][0]; expect(mark.brushWidth).toBeCloseTo(.16);
+        view.props.history.marks = [mark, { id: "keep", region: { x: .6, y: .6, width: .2, height: .2 } }];
+        view.button("擦除").props.onClick();
+        view.render().find((node) => node.props.className === "watermark-region")!.props.onPointerDown(view.event());
+        expect(view.onChange.mock.calls.at(-1)![0].map((value: { id: string }) => value.id)).toEqual(["keep"]);
+    });
+    it("renders a read-only SKU preview without editing controls or gestures", () => {
+        const view = canvas([], true); view.ready(); view.props.readOnly = true;
+        expect(view.render().some((node) => node.props["aria-label"] === "标记工具")).toBe(false);
+        view.stage().props.onPointerDown(view.event()); view.stage().props.onPointerUp(view.event(200, 200));
+        expect(view.onChange).not.toHaveBeenCalled();
+    });
+    it("requires protected loading and image decoding, releases reads and ignores stale callbacks", () => {
+        const view = canvas(); view.render();
+        expect(view.button("框选").props.disabled).toBe(true);
+        const stale = view.load.mock.calls[0][1]; view.props.image = images[1]; view.render();
+        expect(view.release).toHaveBeenCalledTimes(1);
+        stale("blob:old"); expect(view.render().some((node) => node.type === "img")).toBe(false);
+        view.ready(); expect(view.button("框选").props.disabled).toBe(false);
+        expect(view.onReady).toHaveBeenLastCalledWith(true);
+        view.unmount(); expect(view.release).toHaveBeenCalledTimes(2);
+        expect(view.onReady).toHaveBeenLastCalledWith(false);
+    });
+    it("records reverse rectangle drags but rejects clicks and tiny rectangles", () => {
+        const view = canvas(); view.ready();
+        view.stage().props.onPointerDown(view.event(330, 290));
+        view.stage().props.onPointerUp(view.event(90, 50));
+        expect(view.onChange.mock.calls[0][0][0].region).toEqual({ x: .2, y: .1, width: expect.closeTo(.6), height: .8 });
+        expect(view.onSelect).toHaveBeenCalledWith(expect.stringMatching(/^mark-/));
+        view.stage().props.onPointerDown(view.event()); view.stage().props.onPointerUp(view.event(51, 51));
+        expect(view.onChange).toHaveBeenCalledTimes(1);
+    });
+    it("records visible brush points and a bounded covering region", () => {
+        const view = canvas(); view.ready(); view.button("画笔").props.onClick();
+        view.stage().props.onPointerDown(view.event(10, 20)); view.stage().props.onPointerMove(view.event(90, 80)); view.stage().props.onPointerUp(view.event(130, 110));
+        const mark = view.onChange.mock.calls[0][0][0];
+        expect(mark.points).toHaveLength(3); expect(mark.brushWidth).toBeCloseTo(.03);
+        expect(mark.region.x).toBe(0); expect(mark.region.y).toBe(0);
+        expect(mark.region.width).toBeCloseTo(.315); expect(mark.region.height).toBeCloseTo(.32);
+    });
+    it.each(["disabled", "image"])("cancels an in-flight gesture after %s changes", (field) => {
+        const view = canvas(); view.ready(); view.stage().props.onPointerDown(view.event());
+        const finish = view.stage().props.onPointerUp;
+        view.props[field] = field === "disabled" ? true : images[1]; view.render();
+        finish(view.event(200, 200)); expect(view.onChange).not.toHaveBeenCalled();
+    });
+    it("caps creation at three and leaves hand gestures out of annotation history", () => {
+        const view = canvas(Array.from({ length: 3 }, (_value, index) => ({ id: `mark-${index}`, region: { x: .1, y: .1, width: .1, height: .1 } }))); view.ready();
+        view.stage().props.onPointerDown(view.event()); view.stage().props.onPointerUp(view.event(200, 200)); expect(view.onChange).not.toHaveBeenCalled();
+        view.button("画笔").props.onClick(); view.stage().props.onPointerDown(view.event()); view.stage().props.onPointerUp(view.event(200, 200)); expect(view.onChange).not.toHaveBeenCalled();
+        view.button("抓手").props.onClick(); view.stage().props.onPointerDown(view.event()); view.stage().props.onPointerUp(view.event(200, 200)); expect(view.onChange).not.toHaveBeenCalled();
+        view.props.selected = "mark-0";
+        view.render().find((node) => node.props["aria-label"] === "水印编辑画布")!.props.onKeyDown({ key: "Delete", target: { closest: () => null }, preventDefault: jest.fn() });
+        view.props.history.marks = view.onChange.mock.calls.at(-1)![0];
+        expect(view.props.history.marks).toHaveLength(2);
+        view.onChange.mockClear(); view.button("框选").props.onClick();
+        view.stage().props.onPointerDown(view.event()); view.stage().props.onPointerUp(view.event(200, 200));
+        view.props.history.marks = view.onChange.mock.calls.at(-1)![0];
+        expect(view.props.history.marks).toHaveLength(3);
+        view.stage().props.onPointerDown(view.event()); view.stage().props.onPointerUp(view.event(200, 200));
+        expect(view.onChange).toHaveBeenCalledTimes(1);
+    });
+    it("connects selection movement, eight resize handles, history and clear controls", () => {
+        const mark = { id: "mark-1", region: { x: .1, y: .2, width: .2, height: .2 } };
+        const view = canvas([mark]); view.props.selected = mark.id; view.props.history.past = [[]]; view.ready();
+        expect(view.render().filter((node) => node.props.className === "watermark-resize-handle")).toHaveLength(8);
+        const root = () => view.render().find((node) => node.props["aria-label"] === "水印编辑画布")!;
+        root().props.onKeyDown({ key: "ArrowRight", shiftKey: true, target: { closest: () => null }, preventDefault: jest.fn() });
+        expect(view.onChange.mock.calls[0][0][0].region.x).toBeCloseTo(.125);
+        view.button("撤销").props.onClick(); expect(view.onHistory).toHaveBeenCalledWith("undo");
+        view.button("清空全部标记").props.onClick(); expect(view.onChange).toHaveBeenLastCalledWith([]);
+        const handle = view.render().find((node) => node.props["data-handle"] === "se")!;
+        handle.props.onPointerDown(view.event(130, 140)); view.stage().props.onPointerUp(view.event(170, 170));
+        expect(view.onChange.mock.calls.at(-1)![0][0].region).toEqual({ x: .1, y: .2, width: expect.closeTo(.3), height: expect.closeTo(.3) });
+    });
+    it("selects and deletes numbered marks with protected original crop geometry", () => {
+        const mark = { id: "mark-1", region: { x: .1, y: .2, width: .2, height: .4 } }, onSelect = jest.fn(), onChange = jest.fn();
+        const view = renderHarness("watermark-editor", "WatermarkMarkList", { image: images[0], history: { marks: [mark], past: [], future: [] }, selected: mark.id, disabled: false, onSelect, onChange });
+        expect(elementText(view.render().find((node) => node.props.className === "specialized-section-heading"))).toContain("1 / 3");
+        view.render().find((node) => node.props.className === "watermark-mark-select")!.props.onClick(); expect(onSelect).toHaveBeenCalledWith(mark.id);
+        view.render().find((node) => node.props["aria-label"] === "删除标注 1")!.props.onClick(); expect(onChange).toHaveBeenCalledWith([]);
+        expect(view.render().find((node) => node.props.original)!.props.image).toEqual(images[0]);
+        expect(view.render().find((node) => node.props.style?.width === "500%")!.props.style.left).toBe("-50%");
+    });
+});
+
+function skuHarness() {
+    const onSubmit = jest.fn().mockResolvedValue(undefined), upload = jest.fn();
+    const billing = jest.fn().mockReturnValue({ ready: true, costText: "20 credits" });
+    const products = { data: [...images], isSuccess: true, isPending: false, isFetching: false, isError: false };
+    const capabilities = { tools: [{ key: "sku", status: "available", requiredCapabilities: ["reference-image"], modelIdsByCapability: { "reference-image": [modelId] } }],
+        models: [{ id: modelId, name: "Configured model", capabilities: ["reference-image"], maxReferenceImages: 5 }] } as GenerationCapabilities;
+    const view = renderHarness("sku-tool-form", "default", { tool: "sku", capabilities, locked: false, onSubmit }, {
+        useGenerationBilling: billing, useProductImagesQuery: () => products,
+        useUploadProductImageMutation: () => ({ isPending: false, mutateAsync: upload }),
+    });
+    const role = (label: string) => view.render().find((node) => node.type === "AssetRolePicker" && node.props.label === label)!.props;
+    const button = (label: string) => view.render().find((node) => node.type === "button" && (node.props["aria-label"] === label || elementText(node).includes(label)))!;
+    const set = (label: string, value: string) => view.render().find((node) => node.props["aria-label"] === label)!.props.onChange({ target: { value } });
+    const modal = () => view.render().find((node) => node.type === view.exports.SkuRegionsModal)!;
+    const ready = () => { view.render().find((node) => node.type === view.exports.SkuTemplatePreview)!.props.onReady(true); };
+    const marks = [1, 2, 3].map((index) => ({ id: `region-${index}`, region: { x: .1 * index, y: .1, width: .1, height: .2 } }));
+    const filled = () => { role("SKU 模板图").onChange([images[0]]); button("选择变体区域").props.onClick(); modal().props.onApply(marks); ready();
+        marks.forEach((_mark, index) => set(`SKU 1 变体区域 ${index + 1} 变化要求`, `SKU 1 region ${index + 1}`)); };
+    const submit = () => view.render().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+    const submitButton = () => view.render().find((node) => node.props.type === "submit")!;
+    return { ...view, onSubmit, upload, billing, products, capabilities, role, button, set, modal, ready, marks, filled, submit, submitButton };
+}
+
+describe("multi-region SKU editor", () => {
+    it("keeps the size-contained modal viewport out of flex shrink in an auto-height dialog", () => {
+        const css = readFileSync(path.resolve(__dirname, "../src/web/styles/specialized-forms.css"), "utf8");
+        const viewport = css.match(/\.sku-region-modal \.watermark-viewport \{([^}]+)\}/)![1]!;
+        expect(viewport).toContain("flex: 0 0 auto");
+        expect(viewport).toContain("height: min(58dvh, 640px)");
+        expect(css).toContain(".sku-region-modal .watermark-editor { height: auto; min-height: 0; }");
+    });
+
+    it("requires confirmed template regions before adding independent SKU entries", () => {
+        const view = skuHarness(); const add = view.button("添加 SKU");
+        expect(add.props.disabled).toBe(true); add.props.onClick();
+        expect(view.render().filter((node) => node.props.className === "sku-variant")).toHaveLength(1);
+        view.role("SKU 模板图").onChange([images[0]]);
+        expect(view.button("添加 SKU").props.disabled).toBe(true);
+        view.modal().props.onApply(view.marks);
+        expect(view.button("添加 SKU").props.disabled).toBe(false);
+        view.role("SKU 模板图").onChange([]); add.props.onClick();
+        expect(view.render().filter((node) => node.props.className === "sku-variant")).toHaveLength(1);
+    });
+
+    it("uploads and replaces each SKU reference independently while preserving regional text", async () => {
+        const view = skuHarness(); view.filled(); view.button("添加 SKU").props.onClick();
+        view.marks.forEach((_mark, index) => view.set(`SKU 2 变体区域 ${index + 1} 变化要求`, `second ${index + 1}`));
+        view.role("SKU 1 变体区域 1").onChange([images[1]]);
+        const second = view.role("SKU 2 变体区域 1"); expect(second.allowReplacement).toBe(true);
+        view.upload.mockResolvedValueOnce(images[2]);
+        await second.onFiles([{ type: "image/png", size: 100 }]);
+        view.upload.mockRejectedValueOnce(new Error("Upload failed"));
+        await view.role("SKU 1 变体区域 1").onFiles([{ type: "image/png", size: 100 }]);
+        expect(view.role("SKU 1 变体区域 1").images[0].id).toBe(images[1]!.id);
+        expect(view.role("SKU 2 变体区域 1").images[0].id).toBe(images[2]!.id);
+        view.upload.mockResolvedValueOnce(images[3]);
+        await view.role("SKU 1 变体区域 1").onFiles([{ type: "image/png", size: 100 }]);
+        expect(view.role("SKU 1 变体区域 1").images[0].id).toBe(images[3]!.id);
+        expect(view.role("SKU 2 变体区域 1").images[0].id).toBe(images[2]!.id);
+        await view.submit(); const input = view.onSubmit.mock.calls[0][0] as ToolWorkflowInput;
+        expect(input.assetIds).toEqual([images[0]!.id, images[3]!.id, images[2]!.id]);
+        expect(input.design!.skuVariants![0]!.edits![0]!.instruction).toBe("SKU 1 region 1");
+        expect(input.design!.skuVariants![1]!.edits![0]!.referenceAssetId).toBe(images[2]!.id);
+    });
+
+    it("opens the region dialog immediately after selecting or uploading a template", async () => {
+        const view = skuHarness();
+        view.role("SKU 模板图").onChange([images[0]]);
+        expect(view.modal().props.image.id).toBe(images[0]!.id);
+        view.modal().props.onClose();
+        expect(view.render().some((node) => node.type === view.exports.SkuRegionsModal)).toBe(false);
+        view.role("SKU 模板图").onChange([images[0]]);
+        expect(view.modal().props.image.id).toBe(images[0]!.id);
+        view.role("SKU 模板图").onChange([]);
+        expect(view.render().some((node) => node.type === view.exports.SkuRegionsModal)).toBe(false);
+        view.upload.mockResolvedValueOnce(images[1]);
+        await view.role("SKU 模板图").onFiles([{ type: "image/png", size: 100 }]);
+        expect(view.modal().props.image.id).toBe(images[1]!.id);
+    });
+
+    it("keeps selected single-reference uploads replaceable only for the opted-in picker", () => {
+        const onFiles = jest.fn();
+        const view = renderHarness("specialized-components", "AssetRolePicker", { label: "SKU reference", images: [images[1]], max: 1, disabled: false, onChange: jest.fn(), onFiles, allowReplacement: true });
+        const input = () => view.render().find((node) => node.props.type === "file")!;
+        const upload = () => view.render().find((node) => node.type === "button" && elementText(node).includes("重新上传"))!;
+        expect(upload().props.disabled).toBe(false); expect(input().props.disabled).toBe(false);
+        const files = [{ type: "image/png", size: 100 }];
+        input().props.onChange({ target: { files, value: "file" } }); expect(onFiles).toHaveBeenCalledWith(files);
+        view.props.disabled = true; expect(input().props.disabled).toBe(true);
+        view.props.disabled = false; view.props.allowReplacement = false; expect(input().props.disabled).toBe(true);
+        view.props.allowReplacement = true; view.props.max = 0; expect(input().props.disabled).toBe(true);
+    });
+
+    it.each([
+        ["four regions", (input: any) => { input.design.skuRegions.push({ id: "region-4", region: { x: .7, y: .1, width: .1, height: .2 } }); }],
+        ["duplicate regions", (input: any) => { input.design.skuRegions[1].id = input.design.skuRegions[0].id; }],
+        ["mixed legacy region", (input: any) => { input.design.skuRegion = input.design.skuRegions[0].region; }],
+        ["eleven outputs", (input: any) => { input.count = 11; input.design.skuVariants.push(input.design.skuVariants[0]); }],
+        ["mismatched output count", (input: any) => { input.count = 2; }],
+        ["missing regional edit", (input: any) => { input.design.skuVariants[0].edits.pop(); }],
+        ["duplicate regional edit", (input: any) => { input.design.skuVariants[0].edits[1].regionId = "region-1"; }],
+        ["unknown reference", (input: any) => { input.design.skuVariants[0].edits[0].referenceAssetId = images[1]!.id; }],
+        ["template as reference", (input: any) => { input.design.skuVariants[0].edits[0].referenceAssetId = input.assetIds[0]; }],
+        ["unassigned input reference", (input: any) => { input.assetIds.push(images[1]!.id); }],
+        ["empty regional requirement", (input: any) => { input.design.skuVariants[0].edits[0].instruction = " "; }],
+        ["oversize regional requirement", (input: any) => { input.design.skuVariants[0].edits[0].instruction = "x".repeat(301); }],
+        ["unknown nested key", (input: any) => { input.design.skuVariants[0].edits[0].mask = true; }],
+        ["out-of-bounds region", (input: any) => { input.design.skuRegions[0].region.width = 1; }],
+        ["nonfinite region", (input: any) => { input.design.skuRegions[0].region.x = NaN; }],
+        ["null edit", (input: any) => { input.design.skuVariants[0].edits[0] = null; }],
+        ["sparse regions", (input: any) => { delete input.design.skuRegions[0]; }],
+        ["sparse outputs", (input: any) => { delete input.design.skuVariants[0]; }],
+        ["cross-tool payload", (input: any) => { input.tool = "retouch"; input.productName = "Product"; }],
+    ] as const)("rejects %s without throwing", async (_name, mutate) => {
+        const view = skuHarness(); view.filled(); await view.submit();
+        const input = structuredClone(view.onSubmit.mock.calls[0][0]); mutate(input);
+        expect(() => validateToolWorkflow(input)).not.toThrow();
+        expect(validateToolWorkflow(input)).not.toBeNull();
+    });
+
+    it("requires a decoded template, confirmed regions and every regional requirement", async () => {
+        const view = skuHarness();
+        expect(view.submitButton().props.disabled).toBe(true);
+        view.filled();
+        expect(view.submitButton().props.disabled).toBe(false);
+        view.set("SKU 1 变体区域 3 变化要求", "");
+        expect(view.submitButton().props.disabled).toBe(true);
+        view.role("SKU 1 变体区域 3").onChange([images[1]]);
+        expect(view.submitButton().props.disabled).toBe(false);
+        await view.submit();
+        expect(view.onSubmit.mock.calls[0][0].design.skuVariants[0].edits[2].referenceAssetId).toBe(images[1]!.id);
+    });
+
+    it("submits ten independent SKU edits and deduplicates shared references", async () => {
+        const view = skuHarness(); view.filled();
+        for (let index = 2; index <= 10; index++) {
+            view.button("添加 SKU").props.onClick();
+            view.marks.forEach((_mark, region) => view.set(`SKU ${index} 变体区域 ${region + 1} 变化要求`, `SKU ${index} region ${region + 1}`));
+        }
+        view.role("SKU 1 变体区域 1").onChange([images[1]]);
+        view.role("SKU 10 变体区域 3").onChange([images[1]]);
+        expect(view.button("添加 SKU").props.disabled).toBe(true);
+        view.button("添加 SKU").props.onClick();
+        await view.submit();
+        const input = view.onSubmit.mock.calls[0][0] as ToolWorkflowInput;
+        expect(input.count).toBe(10); expect(input.design!.skuVariants).toHaveLength(10);
+        expect(input.assetIds).toEqual([images[0]!.id, images[1]!.id]);
+        expect(input.design!.skuRegions).toEqual(view.marks);
+        expect(input.design!.skuVariants![9]!.edits![2]!.instruction).toBe("SKU 10 region 3");
+        expect(view.billing).toHaveBeenLastCalledWith(modelId, 10, true, "sku");
+        expect(validateToolWorkflow(input)).toBeNull();
+    });
+
+    it("preserves stable SKU and region ownership after deletions and region reconciliation", async () => {
+        const view = skuHarness(); view.filled();
+        view.button("添加 SKU").props.onClick();
+        view.marks.forEach((_mark, index) => view.set(`SKU 2 变体区域 ${index + 1} 变化要求`, `second ${index + 1}`));
+        view.button("删除 SKU 1").props.onClick();
+        view.button("重新编辑").props.onClick();
+        const marks = [view.marks[1]!, { id: "region-4", region: { x: .7, y: .2, width: .1, height: .2 } }];
+        view.modal().props.onApply(marks);
+        expect(view.render().find((node) => node.props["aria-label"] === "SKU 1 变体区域 1 变化要求")!.props.value).toBe("second 2");
+        expect(view.render().find((node) => node.props["aria-label"] === "SKU 1 变体区域 2 变化要求")!.props.value).toBe("");
+        view.set("SKU 1 变体区域 2 变化要求", "new region"); await view.submit();
+        expect(view.onSubmit.mock.calls[0][0].design.skuVariants[0].name).toBe("SKU 2");
+        expect(view.onSubmit.mock.calls[0][0].design.skuVariants[0].edits.map((edit: {regionId: string}) => edit.regionId)).toEqual(["region-2", "region-4"]);
+    });
+
+    it("keeps the confirmed layout when the region modal is cancelled", () => {
+        const view = skuHarness(); view.filled(); view.button("重新编辑").props.onClick(); view.modal().props.onClose();
+        expect(view.render().some((node) => node.type === view.exports.SkuRegionsModal)).toBe(false);
+        expect(view.submitButton().props.disabled).toBe(false);
+    });
+
+    it("preserves a failed template replacement, and resets regions only after a successful replacement", async () => {
+        const view = skuHarness(); view.filled();
+        const input = () => view.render().find((node) => node.props["aria-label"] === "重新上传 SKU 模板图")!;
+        view.upload.mockRejectedValueOnce(new Error("Upload failed"));
+        input().props.onChange({ target: { files: [{ type: "image/png", size: 100 }], value: "file" } });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(view.role("SKU 模板图").images[0].id).toBe(images[0]!.id);
+        expect(view.submitButton().props.disabled).toBe(false);
+        view.upload.mockResolvedValueOnce(images[1]);
+        input().props.onChange({ target: { files: [{ type: "image/png", size: 100 }], value: "file" } });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(view.role("SKU 模板图").images[0].id).toBe(images[1]!.id);
+        expect(view.submitButton().props.disabled).toBe(true);
+        expect(view.render().some((node) => node.props["aria-label"] === "SKU 1 变体区域 1 变化要求")).toBe(false);
+    });
+
+    it("ignores stale edits and uploads after the workspace becomes locked", async () => {
+        const view = skuHarness(); view.filled();
+        const cached = view.role("SKU 模板图");
+        let resolve!: (image: ProductImage) => void;
+        view.upload.mockReturnValue(new Promise<ProductImage>((done) => { resolve = done; }));
+        const uploading = view.role("SKU 1 变体区域 1").onFiles([{ type: "image/png", size: 100 }]);
+        view.props.locked = true; view.render(); cached.onChange([images[1]]); resolve(images[1]!); await uploading;
+        expect(view.role("SKU 模板图").images[0].id).toBe(images[0]!.id);
+        expect(view.role("SKU 1 变体区域 1").images).toEqual([]);
+        await view.submit(); expect(view.onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("applies regional drafts only after decoded-image confirmation and rejects a fourth region", () => {
+        const onApply = jest.fn(), onClose = jest.fn();
+        const marks = [{ id: "region-1", region: { x: .1, y: .1, width: .2, height: .2 } }];
+        const view = renderHarness("sku-tool-form", "SkuRegionsModal", { image: images[0], regions: marks, disabled: false, onApply, onClose });
+        const canvas = () => view.render().find((node) => node.type === "WatermarkCanvas")!;
+        const confirm = () => view.render().find((node) => node.type === "button" && elementText(node).includes("确定"))!;
+        expect(confirm().props.disabled).toBe(true);
+        canvas().props.onReady(true);
+        const draft = [...marks, { id: "region-2", region: { x: .4, y: .1, width: .2, height: .2 } }];
+        canvas().props.onChange(draft); expect(onApply).not.toHaveBeenCalled();
+        canvas().props.onChange([...draft, ...draft]);
+        expect(canvas().props.history.marks).toEqual(draft);
+        confirm().props.onClick(); expect(onApply).toHaveBeenCalledWith(draft);
+        expect(marks).toHaveLength(1);
+    });
+});
 
 function formHarness(tool: SpecializedDraft["tool"], options: { ready?: boolean; locked?: boolean; unavailable?: boolean } = {}) {
     const onSubmit = jest.fn().mockResolvedValue(undefined), upload = jest.fn(), analyze = jest.fn().mockResolvedValue({ suggestions: "Unconfirmed visual advice" });
@@ -218,7 +597,7 @@ function formHarness(tool: SpecializedDraft["tool"], options: { ready?: boolean;
     return { ...view, onSubmit, upload, analyze, billing, products, capabilities, field, button, set, role, submitButton, submit, preset, filled };
 }
 
-function imageEditHarness(tool: "watermark" | "translate" | "retouch", options: { ready?: boolean; locked?: boolean; unavailable?: boolean } = {}) {
+function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "expand", options: { ready?: boolean; locked?: boolean; unavailable?: boolean } = {}) {
     const onSubmit = jest.fn().mockResolvedValue(undefined), upload = jest.fn();
     const products = { data: [...images], isSuccess: true, isPending: false, isFetching: false, isError: false };
     const uploadState = { isPending: false, mutateAsync: async (file: File) => {
@@ -247,6 +626,150 @@ function imageEditHarness(tool: "watermark" | "translate" | "retouch", options: 
 }
 
 describe("dedicated image editing", () => {
+    it("loads protected expansion originals, waits for decoding and ignores stale reads and DOM events", () => {
+        const release = jest.fn(), load = jest.fn().mockReturnValue(release), onReady = jest.fn();
+        const view = renderHarness("image-edit-form", "ExpansionPreview", { image: images[0], ratio: "1:1", scale: 80, position: "center", onReady }, { loadProductImage: load });
+        view.render(); expect(load).toHaveBeenCalledWith(images[0].id, expect.any(Function), expect.any(Function));
+        load.mock.calls[0][1]("blob:protected");
+        const oldImage = view.render().find((node) => node.type === "img")!;
+        expect(onReady).toHaveBeenLastCalledWith(false); oldImage.props.onLoad(); expect(onReady).toHaveBeenLastCalledWith(true);
+        const placement = view.render().find((node) => node.props.className === "expansion-preview-image")!;
+        expect(parseFloat(placement.props.style.width)).toBeCloseTo(80); expect(parseFloat(placement.props.style.height)).toBeCloseTo(60);
+        view.props.position = "bottom-right"; view.props.scale = 50; view.render(); expect(load).toHaveBeenCalledTimes(1);
+        view.props.image = images[1]; view.render(); expect(release).toHaveBeenCalledTimes(1);
+        load.mock.calls[0][1]("blob:stale"); oldImage.props.onLoad(); expect(onReady).toHaveBeenLastCalledWith(false);
+        expect(view.render().some((node) => node.type === "img")).toBe(false);
+        view.unmount(); expect(release).toHaveBeenCalledTimes(2);
+        load.mock.calls[1][1]("blob:after-unmount"); expect(onReady).toHaveBeenLastCalledWith(false);
+    });
+    it("handles expansion decoding errors with protected retry and labels empty examples honestly", () => {
+        const release = jest.fn(), load = jest.fn().mockReturnValue(release), onReady = jest.fn();
+        const view = renderHarness("image-edit-form", "ExpansionPreview", { image: images[0], ratio: "4:3", scale: 80, position: "center", onReady }, { loadProductImage: load });
+        view.render(); load.mock.calls[0][1]("blob:protected");
+        view.render().find((node) => node.type === "img")!.props.onError(); expect(onReady).toHaveBeenLastCalledWith(false);
+        view.render().find((node) => node.props["aria-label"] === "重新加载扩图原图")!.props.onClick(); view.render();
+        expect(load).toHaveBeenCalledTimes(2); expect(release).toHaveBeenCalledTimes(1);
+        load.mock.calls[1][1]("blob:retry"); view.render().find((node) => node.type === "img")!.props.onLoad(); expect(onReady).toHaveBeenLastCalledWith(true);
+        view.props.image = undefined; expect(view.render().map(elementText).join(" ")).toContain("素材示例");
+        expect(view.render().find((node) => node.type === "img")!.props.src).toBe("/extension/image-studio/images/mug-scene.jpg");
+    });
+    function expansionView(options: { ready?: boolean; locked?: boolean; unavailable?: boolean } = {}) {
+        const view = imageEditHarness("expand", options), onEditSource = jest.fn();
+        view.props.annotationTarget = {}; view.props.onEditSource = onEditSource;
+        const preview = () => view.render().find((node) => node.type?.name === "ExpansionPreview")!.props;
+        const radio = (label: string) => view.render().find((node) => node.props["aria-label"] === label)!;
+        return { ...view, preview, radio, onEditSource };
+    }
+    it("submits default expansion layout only after protected source readiness and uses actual billing", async () => {
+        const view = expansionView(); view.fill();
+        expect(view.picker().dropzone).toBe(true); expect(view.picker().max).toBe(1);
+        expect(view.submitButton().props.disabled).toBe(true); view.preview().onReady(true);
+        expect(view.radio("原图占比 80%").props.checked).toBe(true);
+        expect(view.radio("原图位置：居中").props.checked).toBe(true);
+        expect(view.render().filter((node) => node.props.type === "radio")).toHaveLength(13);
+        await view.submit();
+        expect(view.onSubmit).toHaveBeenCalledWith({ tool: "expand", modelId, assetIds: [assetIds[0]], instructions: "", count: 1, ratio: "4:3", expansion: "surround", design: { expandScale: 80, expandPosition: "center" } });
+        expect(view.billing).toHaveBeenLastCalledWith(modelId, 1, true);
+        expect(elementText(view.submitButton())).toContain("立即扩图实际报价 2 积分");
+    });
+    it.each(workflow.EXPAND_POSITIONS)("places the complete uncropped source at $id", (position) => {
+        const region = specialized.expansionRegion(400, 300, "1:1", 80, position.id)!;
+        const index = workflow.EXPAND_POSITIONS.indexOf(position);
+        expect(region.width).toBeCloseTo(.8); expect(region.height).toBeCloseTo(.6);
+        expect(region.x).toBeCloseTo(.2 * (index % 3) / 2); expect(region.y).toBeCloseTo(.4 * Math.floor(index / 3) / 2);
+        expect(region.x + region.width).toBeLessThanOrEqual(1); expect(region.y + region.height).toBeLessThanOrEqual(1);
+        for (const ratio of workflow.TOOL_RATIOS) for (const scale of [1, 50, 60, 80, 100]) {
+            const fitted = specialized.expansionRegion(300, 400, ratio, scale, position.id)!;
+            const [width, height] = ratio.split(":").map(Number);
+            expect(fitted.width * width / (fitted.height * height)).toBeCloseTo(300 / 400);
+            expect(fitted.x).toBeGreaterThanOrEqual(0); expect(fitted.y).toBeGreaterThanOrEqual(0);
+            expect(fitted.x + fitted.width).toBeLessThanOrEqual(1); expect(fitted.y + fitted.height).toBeLessThanOrEqual(1);
+        }
+    });
+    it("passes custom scale, anchor, ratio and instructions into the real expansion prompt", async () => {
+        const view = expansionView(); view.fill(); view.preview().onReady(true);
+        view.field("expand-scale").props.onChange({ target: { value: "37" } });
+        view.radio("原图位置：右下").props.onChange();
+        view.field("ratio").props.onChange({ target: { value: "16:9" } });
+        view.field("instructions").props.onChange({ target: { value: "Continue the kitchen countertop" } });
+        expect(view.preview()).toEqual(expect.objectContaining({ scale: 37, position: "bottom-right", ratio: "16:9" }));
+        await view.submit(); const request = view.onSubmit.mock.calls[0][0];
+        expect(validateToolWorkflow(request)).toBeNull(); expect(toolWorkflowPrompt(request)).toContain("37%");
+        expect(toolWorkflowPrompt(request)).toContain("bottom-right"); expect(toolWorkflowPrompt(request)).toContain("Continue the kitchen countertop");
+        expect(view.onEditSource).toHaveBeenCalled();
+    });
+    it.each(["", "0", "-1", "100", "101", "1.5", "Infinity"])("rejects invalid custom expansion scale %p without making a task", async (value) => {
+        const view = expansionView(); view.fill(); view.preview().onReady(true);
+        view.field("expand-scale").props.onChange({ target: { value } });
+        expect(view.submitButton().props.disabled).toBe(true); await view.submit(); expect(view.onSubmit).not.toHaveBeenCalled();
+        view.radio("原图占比 100%").props.onChange(); expect(view.submitButton().props.disabled).toBe(false);
+    });
+    it.each([{ ready: false }, { locked: true }, { unavailable: true }])("gates expansion without hiding controls %p", async (options) => {
+        const view = expansionView(options); view.fill(); view.preview().onReady(true);
+        expect(view.render().filter((node) => node.props.type === "radio")).toHaveLength(13);
+        expect(view.submitButton().props.disabled).toBe(true); await view.submit(); expect(view.onSubmit).not.toHaveBeenCalled();
+    });
+    it("preserves expansion layout after failed upload and resets it only on successful replacement", async () => {
+        const view = expansionView(); view.fill(); view.preview().onReady(true);
+        view.radio("原图占比 50%").props.onChange(); view.radio("原图位置：左上").props.onChange();
+        const replace = () => view.render().find((node) => node.props["aria-label"] === "重新上传扩图原图")!.props.onChange({ target: { files: [{ type: "image/png", size: 10 }], value: "selected" } });
+        view.upload.mockRejectedValueOnce(new Error("Upload failed")); replace(); await new Promise((resolve) => setImmediate(resolve));
+        expect(view.picker().images).toEqual([images[0]]); expect(view.preview()).toEqual(expect.objectContaining({ scale: 50, position: "top-left" }));
+        view.upload.mockResolvedValueOnce(images[1]); replace(); await new Promise((resolve) => setImmediate(resolve));
+        expect(view.picker().images).toEqual([images[1]]); expect(view.preview()).toEqual(expect.objectContaining({ scale: 80, position: "center" }));
+        expect(view.submitButton().props.disabled).toBe(true);
+    });
+    it("rejects a second source and ignores stale expansion callbacks after locking", () => {
+        const view = expansionView(); view.fill(); view.preview().onReady(true);
+        view.picker().onChange([images[0], images[1]]); expect(view.picker().images).toEqual([images[0]]);
+        const oldScale = view.field("expand-scale"), oldPosition = view.radio("原图位置：左上");
+        view.props.locked = true; view.render(); oldScale.props.onChange({ target: { value: "37" } }); oldPosition.props.onChange();
+        expect(view.preview()).toEqual(expect.objectContaining({ scale: 80, position: "center" }));
+        expect(view.onSubmit).not.toHaveBeenCalled();
+    });
+    function watermarkView() {
+        const view = imageEditHarness("watermark"), onEditSource = jest.fn();
+        view.props.annotationTarget = {}; view.props.onEditSource = onEditSource;
+        view.picker().onChange([images[0]]);
+        const editor = () => view.render().find((node) => node.type === "WatermarkCanvas")!.props;
+        const mark = { id: "mark-1", region: { x: .1, y: .2, width: .3, height: .4 } };
+        const fill = () => { editor().onChange([mark]); editor().onReady(true); view.field("rights").props.onChange({ target: { checked: true } }); };
+        return { ...view, editor, mark, fill, onEditSource };
+    }
+    it("submits canvas marks with actual billing and requires image readiness and authorization", async () => {
+        const view = watermarkView(); view.editor().onChange([view.mark]);
+        view.field("rights").props.onChange({ target: { checked: true } });
+        expect(view.submitButton().props.disabled).toBe(true);
+        view.editor().onReady(true); expect(view.submitButton().props.disabled).toBe(false);
+        await view.submit();
+        expect(view.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ tool: "watermark", count: 1, authorized: true, design: { watermarkRegions: [view.mark.region] } }));
+        expect(view.billing).toHaveBeenLastCalledWith(modelId, 1, true);
+        expect(view.render().some((node) => node.type === "SkuRegionEditor")).toBe(false);
+    });
+    it("records clear/undo/redo without model calls and resets history and rights on source change", () => {
+        const view = watermarkView(); view.fill(); view.editor().onChange([]);
+        view.editor().onHistory("undo"); expect(view.editor().history.marks).toEqual([view.mark]);
+        view.editor().onHistory("redo"); expect(view.editor().history.marks).toEqual([]);
+        view.editor().onHistory("undo"); view.picker().onChange([images[1]]);
+        expect(view.editor().history).toEqual({ marks: [], past: [], future: [] });
+        expect(view.field("rights").props.checked).toBe(false); expect(view.submitButton().props.disabled).toBe(true);
+        expect(view.onEditSource).toHaveBeenCalled(); expect(view.onSubmit).not.toHaveBeenCalled();
+    });
+    it("retains original marks after a failed replacement upload and resets only after success", async () => {
+        const view = watermarkView(); view.fill(); view.upload.mockRejectedValueOnce(new Error("Upload failed"));
+        const replace = () => view.render().find((node) => node.props["aria-label"] === "重新上传水印原图")!.props.onChange({ target: { files: [{ type: "image/png", size: 10 }], value: "selected" } });
+        replace(); await new Promise((resolve) => setImmediate(resolve));
+        expect(view.picker().images).toEqual([images[0]]); expect(view.editor().history.marks).toEqual([view.mark]);
+        expect(view.field("rights").props.checked).toBe(true);
+        view.upload.mockResolvedValueOnce(images[1]); replace(); await new Promise((resolve) => setImmediate(resolve));
+        expect(view.picker().images).toEqual([images[1]]); expect(view.editor().history.marks).toEqual([]);
+        expect(view.field("rights").props.checked).toBe(false);
+    });
+    it("ignores stale canvas callbacks after the parent locks", () => {
+        const view = watermarkView(); view.fill(); const oldEditor = view.editor();
+        view.props.locked = true; view.render(); oldEditor.onChange([]); oldEditor.onHistory("undo");
+        expect(view.editor().history.marks).toEqual([view.mark]); expect(view.submitButton().props.disabled).toBe(true);
+    });
     it("offers all six retouch radio modes and passes the selection to the actual workflow prompt", async () => {
         const view = imageEditHarness("retouch");
         expect(view.picker().dropzone).toBe(true); expect(view.picker().max).toBe(1);

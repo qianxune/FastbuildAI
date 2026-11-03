@@ -1,6 +1,6 @@
 import { TOOL_REGISTRY, type CapabilityModel, type GenerationCapabilities } from "../../api/shared/tools";
 import {
-    DETAIL_MODULES, validateToolWorkflow, type ToolDesign, type ToolWorkflowInput,
+    DETAIL_MODULES, EXPAND_POSITIONS, WATERMARK_MARK_LIMIT, validateToolWorkflow, type ToolDesign, type ToolWorkflowInput,
 } from "../../api/shared/tool-workflow";
 
 export const SPECIALIZED_TOOLS = ["detail", "replica", "creative", "fusion", "sku"] as const;
@@ -71,6 +71,57 @@ export function createDetailPlan(source: PlanSource): DetailPlan {
 }
 
 export type Region = NonNullable<ToolDesign["skuRegion"]>;
+export function expansionRegion(sourceWidth: number, sourceHeight: number, ratio: ToolWorkflowInput["ratio"], scale: number, position: NonNullable<ToolDesign["expandPosition"]>): Region | undefined {
+    if (![sourceWidth, sourceHeight, scale].every(Number.isFinite) || sourceWidth <= 0 || sourceHeight <= 0 || !Number.isInteger(scale) || scale < 1 || scale > 100) return undefined;
+    const index = EXPAND_POSITIONS.findIndex((item) => item.id === position);
+    const [outputWidth, outputHeight] = ratio.split(":").map(Number);
+    if (index < 0 || !outputWidth || !outputHeight) return undefined;
+    const relativeAspect = (sourceWidth / sourceHeight) / (outputWidth / outputHeight);
+    const width = Math.min(1, relativeAspect) * scale / 100;
+    const height = Math.min(1, 1 / relativeAspect) * scale / 100;
+    return { x: (1 - width) * (index % 3) / 2, y: (1 - height) * Math.floor(index / 3) / 2, width, height };
+}
+export interface WatermarkMark {
+    id: string;
+    region: Region;
+    points?: Array<{ x: number; y: number }>;
+    brushWidth?: number;
+    shape?: "ellipse" | "lasso";
+}
+export interface WatermarkHistory {
+    marks: WatermarkMark[];
+    past: WatermarkMark[][];
+    future: WatermarkMark[][];
+}
+export function recordWatermarkEdit(history: WatermarkHistory, marks: WatermarkMark[]): WatermarkHistory {
+    if (marks.length > WATERMARK_MARK_LIMIT || JSON.stringify(history.marks) === JSON.stringify(marks)) return history;
+    return { marks, past: [...history.past.slice(-49), history.marks], future: [] };
+}
+export function stepWatermarkHistory(history: WatermarkHistory, direction: "undo" | "redo"): WatermarkHistory {
+    if (direction === "undo") {
+        const marks = history.past.at(-1);
+        return marks ? { marks, past: history.past.slice(0, -1), future: [history.marks, ...history.future] } : history;
+    }
+    const marks = history.future[0];
+    return marks ? { marks, past: [...history.past, history.marks], future: history.future.slice(1) } : history;
+}
+export function transformWatermarkMark(mark: WatermarkMark, dx: number, dy: number, handle = "move"): WatermarkMark {
+    const bounded = (value: number, max: number) => Math.min(max, Math.max(0, value));
+    const original = mark.region;
+    let region: Region;
+    if (handle === "move") {
+        region = { ...original, x: bounded(original.x + dx, 1 - original.width), y: bounded(original.y + dy, 1 - original.height) };
+    } else {
+        let left = original.x, top = original.y, right = left + original.width, bottom = top + original.height;
+        if (handle.includes("w")) left = bounded(left + dx, right - 0.01);
+        if (handle.includes("e")) right = Math.min(1, Math.max(left + 0.01, right + dx));
+        if (handle.includes("n")) top = bounded(top + dy, bottom - 0.01);
+        if (handle.includes("s")) bottom = Math.min(1, Math.max(top + 0.01, bottom + dy));
+        region = { x: left, y: top, width: right - left, height: bottom - top };
+    }
+    return { ...mark, region, points: mark.points?.map((point) => ({ x: region.x + (point.x - original.x) / original.width * region.width,
+        y: region.y + (point.y - original.y) / original.height * region.height })) };
+}
 export function normalizeRegion(region: Region): Region {
     const bounded = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
     const x = bounded(region.x, 0, 0.99);
@@ -82,12 +133,12 @@ export function regionFromPoints(start: { x: number; y: number }, end: { x: numb
     return normalizeRegion({ x: Math.min(start.x, end.x), y: Math.min(start.y, end.y), width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) });
 }
 
-export function validateRoleSelection(tool: SpecializedTool, primary: string[], references: string[], limit: number): string | null {
+export function validateRoleSelection(tool: SpecializedTool, primary: string[], references: string[], limit: number, skuReferences = false): string | null {
     const all = [...primary, ...references];
     if (new Set(all).size !== all.length) return "同一素材不能重复或同时用于两个角色";
     if (all.length > limit) return `当前模型最多支持 ${limit} 张参考图，请移除部分素材或手动更换模型`;
     if (primary.length > (tool === "replica" ? 4 : tool === "creative" ? 0 : tool === "detail" ? 5 : 1)) return "商品图片超过当前角色上限";
-    if (references.length > (tool === "replica" ? 1 : tool === "creative" || tool === "fusion" ? 4 : 0)) return "参考图片超过当前角色上限";
+    if (references.length > (tool === "replica" ? 1 : tool === "creative" || tool === "fusion" || (tool === "sku" && skuReferences) ? 4 : 0)) return "参考图片超过当前角色上限";
     return null;
 }
 
@@ -109,8 +160,9 @@ export interface SpecializedDraft {
     plan?: DetailPlan;
     replicaMode: "style" | "faithful";
     fusionPreset: string;
-    skuVariants: Array<{ name: string; instruction: string }>;
+    skuVariants: NonNullable<ToolDesign["skuVariants"]>;
     skuRegion?: Region;
+    skuRegions?: ToolDesign["skuRegions"];
 }
 
 export function draftPlanSource(draft: SpecializedDraft): PlanSource {
@@ -128,7 +180,7 @@ export function specializedInstructionBudget(draft: Pick<SpecializedDraft, "tool
 }
 
 export function buildSpecializedInput(draft: SpecializedDraft, limit: number): ToolWorkflowInput {
-    const roleError = validateRoleSelection(draft.tool, draft.primary, draft.references, limit);
+    const roleError = validateRoleSelection(draft.tool, draft.primary, draft.references, limit, Boolean(draft.skuRegions));
     if (roleError) throw new Error(roleError);
     const design: ToolDesign = { ...(draft.brand.trim() ? { brand: draft.brand.trim() } : {}), platform: draft.platform, language: draft.language };
     let instructions = draft.instructions.trim();
@@ -151,9 +203,11 @@ export function buildSpecializedInput(draft: SpecializedDraft, limit: number): T
         design.productAssetIds = [...draft.primary]; design.fusionPreset = draft.fusionPreset;
     }
     if (draft.tool === "sku") {
-        if (!draft.skuRegion) throw new Error("请先选择模板编辑参考区域");
-        design.skuVariants = draft.skuVariants.map((variant) => ({ name: variant.name.trim(), instruction: variant.instruction.trim() }));
-        design.skuRegion = draft.skuRegion;
+        if (!draft.skuRegion && !draft.skuRegions?.length) throw new Error("请先选择模板编辑参考区域");
+        design.skuVariants = draft.skuVariants.map((variant) => ({ name: variant.name.trim(), instruction: variant.instruction.trim(),
+            ...(draft.skuRegions ? { edits: variant.edits?.map((edit) => ({ ...edit, instruction: edit.instruction.trim() })) } : {}) }));
+        if (draft.skuRegions) design.skuRegions = draft.skuRegions;
+        else design.skuRegion = draft.skuRegion;
         count = design.skuVariants.length;
     }
     const input: ToolWorkflowInput = { tool: draft.tool, modelId: draft.modelId, assetIds: [...draft.primary, ...draft.references],

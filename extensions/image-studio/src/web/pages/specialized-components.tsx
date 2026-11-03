@@ -1,5 +1,5 @@
 import { ArrowRight, Check, ImagePlus, LoaderCircle, Maximize, RefreshCw, Scan, Upload, X } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { FUSION_PRESETS } from "../../api/shared/tool-workflow";
 import { loadProductImage, loadProductThumbnail } from "../services/generation";
 import type { ProductImage } from "../services/types";
@@ -73,14 +73,54 @@ export interface AssetRolePickerProps {
     original?: boolean;
     previewRegion?: Region;
     dropzone?: boolean;
+    allowReplacement?: boolean;
+    appearance?: "default" | "links";
+    title?: ReactNode;
+    description?: ReactNode;
+    uploadLink?: boolean;
 }
 
-export function AssetRolePicker({ label, images, max, disabled, onChange, onFiles, original = false, previewRegion, dropzone = false }: AssetRolePickerProps) {
+export function AssetRolePicker({ label, images, max, disabled, onChange, onFiles, original = false, previewRegion, dropzone = false, allowReplacement = false,
+    appearance = "default", title, description, uploadLink = false }: AssetRolePickerProps) {
     const input = useRef<HTMLInputElement>(null);
     const [dragging, setDragging] = useState(false);
-    const unavailable = disabled || images.length >= max;
-    const materialPicker = <MaterialPicker selectedIds={images.map((image) => image.id)} max={max} disabled={disabled}
+    const replacing = allowReplacement && max === 1 && images.length === 1;
+    const unavailable = disabled || (images.length >= max && !replacing);
+    const materialPicker = <MaterialPicker selectedIds={images.map((image) => image.id)} max={max} disabled={disabled} label={appearance === "links" ? "从素材库导入" : undefined}
         onChange={(_ids, selected) => { if (!disabled) onChange(selected); }} />;
+    const fileInput = <input ref={input} type="file" hidden multiple={max > 1} accept="image/png,image/jpeg,image/webp" disabled={unavailable}
+        aria-label={`上传${label}`} onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; onFiles(files); }} />;
+    if (appearance === "links") return <section className="specialized-assets asset-links" aria-label={label} tabIndex={0} data-dragging={dragging}
+        onDragOver={(event) => {
+            if (!acceptsAssetTransfer(event.target as HTMLElement, unavailable) || !Array.from(event.dataTransfer.types).includes("Files")) return;
+            event.preventDefault(); event.stopPropagation(); setDragging(true);
+        }}
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as globalThis.Node | null)) setDragging(false); }}
+        onDrop={(event) => {
+            setDragging(false);
+            if (!acceptsAssetTransfer(event.target as HTMLElement, unavailable) || !event.dataTransfer.files.length) return;
+            event.preventDefault(); event.stopPropagation(); onFiles(Array.from(event.dataTransfer.files));
+        }}
+        onPaste={(event) => {
+            if (!acceptsAssetTransfer(event.target as HTMLElement, unavailable) || !event.clipboardData.files.length) return;
+            event.preventDefault(); event.stopPropagation(); onFiles(Array.from(event.clipboardData.files));
+        }}>
+        <div className="asset-links-heading"><h3>{title ?? label}</h3><div className="asset-links-actions">
+            {uploadLink && <button type="button" className="asset-link" disabled={unavailable} onClick={() => input.current?.click()}>{replacing ? "重新上传" : "上传参考图"}</button>}
+            {materialPicker}
+            <button type="button" className="asset-link" disabled={unavailable} title="在手机上可拍照或从相册选择" onClick={() => input.current?.click()}>手机上传</button>
+        </div></div>
+        {description}
+        {(images.length > 0 || dropzone) && <div className="asset-links-body">
+            {dropzone && !images.length && <button type="button" className="asset-links-dropzone" disabled={unavailable} onClick={() => input.current?.click()}><ImagePlus size={24} /><span>上传图片</span></button>}
+            {images.map((image) => <div key={image.id} className="specialized-thumbnail">
+                <ProtectedAsset image={image} />
+                <button type="button" className="specialized-remove" title={`移除${label}`} aria-label={`移除${label}`} disabled={disabled}
+                    onClick={() => onChange(images.filter((item) => item.id !== image.id))}><X size={14} /></button>
+            </div>)}
+        </div>}
+        {fileInput}
+    </section>;
     return <section className="specialized-assets" aria-label={label} tabIndex={0} data-dragging={dragging}
         onDragOver={(event) => {
             if (!acceptsAssetTransfer(event.target as HTMLElement, unavailable) || !Array.from(event.dataTransfer.types).includes("Files")) return;
@@ -107,9 +147,8 @@ export function AssetRolePicker({ label, images, max, disabled, onChange, onFile
                 onClick={() => onChange(images.filter((item) => item.id !== image.id))}><X size={15} /></button>
         </div>)}</div>
         <div className="specialized-asset-actions">
-            {!dropzone && <><button type="button" disabled={unavailable} onClick={() => input.current?.click()}><Upload size={16} />上传图片</button>{materialPicker}</>}
-            <input ref={input} type="file" hidden multiple={max > 1} accept="image/png,image/jpeg,image/webp" disabled={unavailable}
-                aria-label={`上传${label}`} onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; onFiles(files); }} />
+            {!dropzone && <><button type="button" disabled={unavailable} onClick={() => input.current?.click()}><Upload size={16} />{replacing ? "重新上传" : allowReplacement ? "上传参考图" : "上传图片"}</button>{materialPicker}</>}
+            {fileInput}
         </div>
         {!dropzone && !images.length && <div className="specialized-drop-hint"><ImagePlus size={22} /><span>PNG / JPEG / WebP · 每张不超过 10 MiB</span></div>}
     </section>;

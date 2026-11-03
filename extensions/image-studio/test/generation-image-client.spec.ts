@@ -7,11 +7,38 @@ jest.mock("@tanstack/react-query", () => ({
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiHttpClient } from "../src/web/services/base";
-import {
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { runInNewContext } from "node:vm";
+import * as ts from "typescript";
+
+const clientExports: Record<string, unknown> = {};
+const clientSource = readFileSync(path.join(__dirname, "../src/web/services/generation.ts"), "utf8");
+const compiledClient = ts.transpileModule(clientSource, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    transformers: { before: [(context) => (source) => {
+        const visit: ts.Visitor = (node) => ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword
+            ? ts.factory.createObjectLiteralExpression([ts.factory.createPropertyAssignment("env", ts.factory.createObjectLiteralExpression([
+                ts.factory.createPropertyAssignment("VITE_APP_WEB_API_PREFIX", ts.factory.createStringLiteral("api")),
+            ]))]) : ts.visitEachChild(node, visit, context);
+        return ts.visitNode(source, visit) as ts.SourceFile;
+    }] },
+});
+runInNewContext(compiledClient.outputText, {
+    exports: clientExports, Blob, URL, AbortController, FormData, Error,
+    require: (name: string) => {
+        if (name === "./base") return { apiHttpClient };
+        if (name === "@tanstack/react-query") return { useMutation, useQuery, useQueryClient };
+        if (name === "react") return { useEffect: jest.fn() };
+        if (name === "./works") return { collectGenerations: jest.fn() };
+        throw new Error(`Unexpected generation client dependency: ${name}`);
+    },
+});
+const {
     fetchGenerationImage, loadGenerationImage, isGenerationActive, useGenerationQuery,
     useGenerationHistoryQuery, useGenerateImageMutation, useRetryGenerationMutation,
-    useCancelGenerationMutation,
-} from "../src/web/services/generation";
+    useCancelGenerationMutation, useGenerationBilling, fetchGenerationQuote,
+} = clientExports as typeof import("../src/web/services/generation");
 
 describe("asynchronous generation client", () => {
     const invalidateQueries = jest.fn();
@@ -19,6 +46,7 @@ describe("asynchronous generation client", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        (useQuery as jest.Mock).mockReset().mockReturnValue({ data: undefined });
         (useQueryClient as jest.Mock).mockReturnValue({ invalidateQueries, setQueryData });
     });
 
@@ -68,6 +96,17 @@ describe("asynchronous generation client", () => {
         expect(setQueryData).toHaveBeenCalledWith(["image-studio", "generation", "task-id"], record);
         expect(invalidateQueries).toHaveBeenCalled();
     });
+    it("enables ten-output quotes only for SKU and keeps the quote cache scoped", async () => {
+        (useQuery as jest.Mock).mockImplementation((options) => ({ data: options.queryKey.includes("credit-balance") ? { balance: 100 } : { total: 30, unitPrice: 3, count: 10 }, isSuccess: true, isFetching: false }));
+        expect(useGenerationBilling("model", 10).ready).toBe(false);
+        expect((useQuery as jest.Mock).mock.calls[1][0].enabled).toBe(false);
+        expect(useGenerationBilling("model", 10, true, "sku").ready).toBe(true);
+        expect((useQuery as jest.Mock).mock.calls[3][0].enabled).toBe(true);
+        expect((useQuery as jest.Mock).mock.calls[3][0].queryKey.at(-1)).toBe("sku");
+        await fetchGenerationQuote("model", 10, "sku");
+        expect(apiHttpClient.get).toHaveBeenCalledWith("/generations/billing/quote", { params: { modelId: "model", count: 10, tool: "sku" } });
+        (useQuery as jest.Mock).mockReset();
+    });
 });
 
 describe("authenticated generation image client", () => {
@@ -87,11 +126,17 @@ describe("authenticated generation image client", () => {
     });
 
     it.each([
-        ["../secret", 0, "api"], [id, -1, "api"], [id, 4, "api"],
+        ["../secret", 0, "api"], [id, -1, "api"], [id, 10, "api"],
         [id, 0.5, "api"], [id, 0, "//external.test"], [id, 0, "../api"],
     ])("rejects noncanonical selectors before requesting", async (taskId, index, prefix) => {
         await expect(fetchGenerationImage(String(taskId), Number(index), String(prefix))).rejects.toThrow("图片加载失败");
         expect(get).not.toHaveBeenCalled();
+    });
+    it("loads the tenth protected SKU output through the authenticated instance", async () => {
+        const blob = new Blob(["image"], { type: "image/png" });
+        get.mockResolvedValue({ data: blob });
+        await expect(fetchGenerationImage(id, 9)).resolves.toBe(blob);
+        expect(get).toHaveBeenCalledWith(`/image-studio/api/generations/${id}/images/9`, expect.objectContaining({ responseType: "blob", withCredentials: false }));
     });
 
     it.each([

@@ -35,21 +35,22 @@ export function useCreditBalanceQuery() {
     });
 }
 
-export function fetchGenerationQuote(modelId: string, count: number) {
-    return apiHttpClient.get<GenerationQuote>("/generations/billing/quote", { params: { modelId, count } });
+export function fetchGenerationQuote(modelId: string, count: number, tool?: "sku") {
+    return apiHttpClient.get<GenerationQuote>("/generations/billing/quote", { params: { modelId, count, ...(tool ? { tool } : {}) } });
 }
 
-export function useGenerationBilling(modelId: string, count: number, enabled = true) {
+export function useGenerationBilling(modelId: string, count: number, enabled = true, tool?: "sku") {
     const balance = useCreditBalanceQuery();
-    const validCount = Number.isInteger(count) && count >= 1 && count <= 4;
+    const countLimit = tool === "sku" ? 10 : 4;
+    const validCount = Number.isInteger(count) && count >= 1 && count <= countLimit;
     const quote = useQuery({
-        queryKey: [...quoteKey, modelId, count],
-        queryFn: () => fetchGenerationQuote(modelId, count),
+        queryKey: [...quoteKey, modelId, count, ...(tool ? [tool] : [])],
+        queryFn: () => fetchGenerationQuote(modelId, count, tool),
         enabled: enabled && Boolean(modelId) && validCount,
     });
     const insufficient = quote.isSuccess && balance.isSuccess && quote.data.total > balance.data.balance;
     const ready = enabled && validCount && quote.isSuccess && !quote.isFetching && balance.isSuccess && !insufficient;
-    const costText = !validCount ? "请选择 1–4 张图片" : !modelId ? "请选择模型" :
+    const costText = !validCount ? `请选择 1–${countLimit} 张图片` : !modelId ? "请选择模型" :
         quote.isError ? "费用查询失败" : !quote.isSuccess || quote.isFetching ? "正在查询费用..." :
         balance.isError ? "余额查询失败" : !balance.isSuccess ? "正在查询余额..." :
         `${quote.data.total} 积分 · ${quote.data.unitPrice} 积分/张${insufficient ? " · 余额不足" : ""}`;
@@ -152,7 +153,7 @@ export async function fetchGenerationImage(
 ): Promise<Blob> {
     try {
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ||
-            !Number.isInteger(index) || index < 0 || index > 3) {
+            !Number.isInteger(index) || index < 0 || index > 9) {
             throw new Error();
         }
         const prefix = apiPrefix.replace(/^\/+|\/+$/g, "");

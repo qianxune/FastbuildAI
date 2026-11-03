@@ -126,6 +126,10 @@ export default function ImageStudioPage() {
     const [preferencesOpen, setPreferencesOpen] = useState(false);
     const [helpOpen, setHelpOpen] = useState(false);
     const [requestedMaterial, setRequestedMaterial] = useState<{ image: ProductImage; requestId: number } | null>(null);
+    const [annotationTarget, setAnnotationTarget] = useState<HTMLDivElement | null>(null);
+    const [watermarkEditing, setWatermarkEditing] = useState(false);
+    const [expansionEditing, setExpansionEditing] = useState(false);
+    const [skuEditing, setSkuEditing] = useState(false);
     const materialSequence = useRef(0);
     useDocumentHead({ title: showWorks ? "我的作品 — 出图AI" : "创作工作台 — 出图AI" });
 
@@ -160,6 +164,9 @@ export default function ImageStudioPage() {
           ? generateTool.variables?.tool ?? tool
           : retryPreparing ?? currentTask?.toolKey ?? "creative";
     const previewBusy = submitting ? pendingTool === tool : isGenerationActive(currentResult);
+    const showWatermarkEditor = tool === "watermark" && view === "create" && !previewBusy && (!currentResult || watermarkEditing);
+    const showExpansionEditor = tool === "expand" && view === "create" && !previewBusy && (!currentResult || expansionEditing);
+    const showSkuEditor = tool === "sku" && view === "create" && !previewBusy && (!currentResult || skuEditing);
     const locked = busy || remove.isPending || cancel.isPending;
     const pendingCount =
         generateMain.isPending && generateMain.variables
@@ -273,18 +280,25 @@ export default function ImageStudioPage() {
             setWorkflowError(null);
             setHistoryResult(null);
             setShowHistory(false);
+            if (input.tool === "watermark") setWatermarkEditing(false);
+            if (input.tool === "expand") setExpansionEditing(false);
+            if (input.tool === "sku") setSkuEditing(false);
             setResult(await generateTool.mutateAsync(input));
             setPage(1);
         } catch (error) {
+            if (input.tool === "watermark") setWatermarkEditing(true);
+            if (input.tool === "expand") setExpansionEditing(true);
+            if (input.tool === "sku") setSkuEditing(true);
             setWorkflowError(errorMessage(error));
             throw error;
         }
     };
 
     const canRetry = (item: ImageGeneration) => {
+        const sku = item.toolKey === "sku" && item.toolInput?.tool === "sku" && item.toolInput.design?.skuRegions !== undefined && validateToolWorkflow(item.toolInput) === null;
         if ((item.status !== "failed" && item.status !== "cancelled") ||
             !capabilities.isSuccess || capabilities.isFetching ||
-            !Number.isInteger(item.count) || item.count < 1 || item.count > 4) return false;
+            !Number.isInteger(item.count) || item.count < 1 || item.count > (sku ? 10 : 4)) return false;
         if (item.toolKey === "main") return supportsMainRetry(item, capabilities.data);
         if (item.toolInput !== undefined && item.toolInput !== null) {
             return isToolEditKey(item.toolKey ?? "") && Boolean(item.toolInput.tool === item.toolKey &&
@@ -301,9 +315,13 @@ export default function ImageStudioPage() {
         setWorkflowError(null);
         setRetryPreparing(item.toolKey ?? "creative");
         try {
-            const quote = await fetchGenerationQuote(item.modelId, item.count);
+            const quote = item.toolKey === "sku" && item.toolInput?.design?.skuRegions !== undefined
+                ? await fetchGenerationQuote(item.modelId, item.count, "sku") : await fetchGenerationQuote(item.modelId, item.count);
             if (!window.confirm(`本次重试费用为 ${quote.total} 积分，是否继续？`)) return;
             setTool(item.toolKey ?? "creative");
+            if (item.toolKey === "watermark") setWatermarkEditing(false);
+            if (item.toolKey === "expand") setExpansionEditing(false);
+            if (item.toolKey === "sku") setSkuEditing(false);
             setShowHistory(false);
             setHistoryResult(null);
             setResult(await retry.mutateAsync(item.id));
@@ -437,7 +455,7 @@ export default function ImageStudioPage() {
                 )} />}
 
                 {/* FORM COLUMN */}
-                <div className={`workspace-create${isSpecializedTool(tool) ? ` ${SPECIALIZED_WORKSPACE_LAYOUT[tool].className}` : ""}`}
+                <div className={`workspace-create${tool === "watermark" ? " watermark-workspace" : ""}${isSpecializedTool(tool) ? ` ${SPECIALIZED_WORKSPACE_LAYOUT[tool].className}` : ""}`}
                     data-tool={tool}
                     style={isSpecializedTool(tool) ? { "--workspace-form-width": `${SPECIALIZED_WORKSPACE_LAYOUT[tool].preferredFormWidth}px` } as CSSProperties : undefined}
                     hidden={view !== "create" && view !== "history"}>
@@ -475,10 +493,14 @@ export default function ImageStudioPage() {
                         return <div key={specializedTool} className="workspace-tool-form" data-tool-form={specializedTool} hidden={inactive} inert={inactive}>
                             <ToolForm tool={specializedTool} capabilities={capabilities.data ?? { models: [], tools: [] }}
                                 locked={inactive || locked || !capabilities.isSuccess || capabilities.isFetching}
+                                annotationTarget={specializedTool === "sku" ? (inactive ? null : annotationTarget) : undefined}
+                                onEditSource={specializedTool === "sku" ? () => { if (!inactive && !locked) setSkuEditing(true); } : undefined}
                                 defaultCount={preferences.value.count} onSubmit={startTool} />
                         </div>;
                     })}
-                    {tool !== "main" && !isSpecializedTool(tool) && <ToolForm tool={tool} capabilities={capabilities.data ?? { models: [], tools: [] }} locked={locked || view !== "create" || !capabilities.isSuccess || capabilities.isFetching} onSubmit={startTool} />}
+                    {tool !== "main" && !isSpecializedTool(tool) && <ToolForm tool={tool} capabilities={capabilities.data ?? { models: [], tools: [] }} locked={locked || view !== "create" || !capabilities.isSuccess || capabilities.isFetching}
+                        annotationTarget={tool === "watermark" || tool === "expand" ? annotationTarget : undefined} onEditSource={() => { if (tool === "expand") setExpansionEditing(true); else setWatermarkEditing(true); }}
+                        onSubmit={startTool} />}
                 </section>
 
                 {/* CANVAS */}
@@ -547,6 +569,9 @@ export default function ImageStudioPage() {
                                                     title={busy ? "当前任务结束后可打开历史详情" : "查看结果"}
                                                     onClick={() => {
                                                         setTool(item.toolKey ?? "creative");
+                                                        if (item.toolKey === "watermark") setWatermarkEditing(false);
+                                                        if (item.toolKey === "expand") setExpansionEditing(false);
+                                                        if (item.toolKey === "sku") setSkuEditing(false);
                                                         if (isGenerationActive(item)) {
                                                             setResult(item);
                                                             setHistoryResult(null);
@@ -727,7 +752,7 @@ export default function ImageStudioPage() {
                                 </div>
                             </div>
                         </div>
-                    ) : currentResult ? (
+                    ) : currentResult && !showWatermarkEditor && !showExpansionEditor && !showSkuEditor ? (
                         <div className="cstate show">
                             <div className="canvas-inner">
                                 <div className="res-bar">
@@ -830,7 +855,7 @@ export default function ImageStudioPage() {
                                 </div>
                             </div>
                         </div>
-                    ) : tool === "retouch" ? <RetouchPreview /> : (
+                    ) : showWatermarkEditor ? <div ref={setAnnotationTarget} className="watermark-canvas-host" /> : showExpansionEditor ? <div ref={setAnnotationTarget} className="expansion-canvas-host" /> : showSkuEditor ? <div ref={setAnnotationTarget} className="sku-canvas-host" /> : tool === "retouch" ? <RetouchPreview /> : (
                         <div className="cstate show preview-empty-state">
                             <div className="preview-empty-content">
                                 <div className="preview-empty-art" aria-hidden="true">

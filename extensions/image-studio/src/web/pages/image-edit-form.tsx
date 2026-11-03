@@ -1,12 +1,14 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@buildingai/ui/components/ui/popover";
-import { ChevronDown, ChevronsLeftRight, Eraser, Languages, LoaderCircle, Scan, Settings2, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowDownLeft, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUp, ArrowUpLeft, ArrowUpRight, ChevronDown, ChevronsLeftRight, Eraser, Languages, LoaderCircle, Maximize2, RefreshCw, Scan, Settings2, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { TOOL_REGISTRY } from "../../api/shared/tools";
-import { RETOUCH_MODES, TOOL_LANGUAGES, TOOL_RATIOS, TOOL_WORKFLOWS, validateToolWorkflow, type ToolWorkflowInput } from "../../api/shared/tool-workflow";
-import { useGenerationBilling, useProductImagesQuery, useUploadProductImageMutation } from "../services/generation";
+import { EXPAND_POSITIONS, RETOUCH_MODES, TOOL_LANGUAGES, TOOL_RATIOS, TOOL_WORKFLOWS, validateToolWorkflow, type ToolWorkflowInput } from "../../api/shared/tool-workflow";
+import { loadProductImage, useGenerationBilling, useProductImagesQuery, useUploadProductImageMutation } from "../services/generation";
 import type { ProductImage } from "../services/types";
 import { AssetRolePicker, SkuRegionEditor } from "./specialized-components";
-import { validImageFile, type Region } from "./specialized-workflow";
+import { expansionRegion, recordWatermarkEdit, stepWatermarkHistory, validImageFile, type Region, type WatermarkHistory, type WatermarkMark } from "./specialized-workflow";
+import { WatermarkCanvas, WatermarkMarkList } from "./watermark-editor";
 import type { ToolFormProps } from "./tool-form";
 import "../styles/specialized-forms.css";
 import "../styles/image-edit-form.css";
@@ -26,7 +28,40 @@ export function RetouchPreview() {
     </div></div>;
 }
 
-export default function ImageEditForm({ tool, capabilities, locked, onSubmit }: Omit<ToolFormProps, "tool"> & { tool: "watermark" | "translate" | "retouch" }) {
+export function ExpansionPreview({ image, ratio, scale, position, onReady }: {
+    image?: ProductImage; ratio: ToolWorkflowInput["ratio"]; scale: number;
+    position: typeof EXPAND_POSITIONS[number]["id"]; onReady: (ready: boolean) => void;
+}) {
+    const [loaded, setLoaded] = useState<{ id: string; url: string; version: number }>();
+    const loadVersion = useRef(0);
+    const [failed, setFailed] = useState(false);
+    const [attempt, setAttempt] = useState(0);
+    useEffect(() => {
+        let active = true;
+        const version = ++loadVersion.current;
+        setLoaded(undefined); setFailed(false); onReady(false);
+        if (!image) return;
+        const release = loadProductImage(image.id, (url) => { if (active) setLoaded({ id: image.id, url, version }); }, () => { if (active) { setFailed(true); onReady(false); } });
+        return () => { active = false; ++loadVersion.current; release(); onReady(false); };
+    }, [image?.id, attempt, onReady]);
+    const region = image ? expansionRegion(image.width, image.height, ratio, scale, position) : undefined;
+    const [width = 1, height = 1] = ratio.split(":").map(Number);
+    return <div className="expansion-preview">
+        <header><h3>{image ? "扩图布局预览" : "智能扩图"}</h3><span>{image ? ratio : "素材示例"}</span></header>
+        <div className="expansion-preview-viewport">
+            {image ? <figure className="expansion-preview-stage" aria-label="扩图布局预览" style={{ aspectRatio: `${width} / ${height}`, width: `min(100%, 600px, ${60 * width / height}cqh)` }}>
+                {failed ? <button type="button" className="expansion-preview-reload" aria-label="重新加载扩图原图" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={18} />加载失败，重试</button> : loaded?.id === image.id && region ?
+                    <div className="expansion-preview-image" style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }}>
+                        <img key={loaded.url} src={loaded.url} alt={image.name || "扩图原图"} draggable={false} onLoad={() => { if (loaded.version === loadVersion.current) onReady(true); }} onError={() => { if (loaded.version === loadVersion.current) { setFailed(true); onReady(false); } }} />
+                    </div> : <span className="specialized-loading" role="status" aria-label={region ? "扩图原图加载中" : "请填写有效的原图占比"}><LoaderCircle size={22} /></span>}
+            </figure> : <figure className="expansion-preview-example"><img src="/extension/image-studio/images/mug-scene.jpg" alt="智能扩图素材示例" /></figure>}
+        </div>
+    </div>;
+}
+
+const EXPAND_ICONS = [ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, Scan, ArrowRight, ArrowDownLeft, ArrowDown, ArrowDownRight];
+
+export default function ImageEditForm({ tool, capabilities, locked, onSubmit, annotationTarget, onEditSource }: Omit<ToolFormProps, "tool"> & { tool: "watermark" | "translate" | "retouch" | "expand" }) {
     const id = useId();
     const [images, setImages] = useState<ProductImage[]>([]);
     const [modelChoice, setModelChoice] = useState("");
@@ -36,6 +71,15 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit }: 
     const [authorized, setAuthorized] = useState(false);
     const [region, setRegion] = useState<Region>();
     const [regionOpen, setRegionOpen] = useState(false);
+    const [markHistory, setMarkHistory] = useState<WatermarkHistory>({ marks: [], past: [], future: [] });
+    const [selectedMark, setSelectedMark] = useState("");
+    const [sourceReady, setSourceReady] = useState(false);
+    const sourcePicker = useRef<HTMLInputElement>(null);
+    const canvasLayout = tool === "watermark" && annotationTarget !== undefined;
+    const expansionLayout = tool === "expand" && annotationTarget !== undefined;
+    const [expandScale, setExpandScale] = useState(80);
+    const [customScale, setCustomScale] = useState(false);
+    const [expandPosition, setExpandPosition] = useState<typeof EXPAND_POSITIONS[number]["id"]>("center");
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [instructions, setInstructions] = useState("");
     const [retouchMode, setRetouchMode] = useState<typeof RETOUCH_MODES[number]["id"]>("overall");
@@ -65,18 +109,23 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit }: 
         if (current.current.images.some((image) => !products.data.some((item) => item.id === image.id))) {
             current.current = { ...current.current, images: [] };
             setImages([]); setRegion(undefined); setRegionOpen(false); setAuthorized(false);
+            setMarkHistory({ marks: [], past: [], future: [] }); setSelectedMark(""); setSourceReady(false);
+            if (canvasLayout || expansionLayout) onEditSource?.();
         }
     }, [products.data, products.isSuccess, products.isPending, products.isFetching, products.isError, pending, upload.isPending]);
     const input: ToolWorkflowInput = { tool, modelId: model?.id ?? "", assetIds: images.map((image) => image.id), instructions: instructions.trim(), count: 1, ratio,
-        ...(tool === "watermark" ? { authorized, design: { watermarkRegion: region } } : tool === "retouch" ? { design: { retouchMode } } : { targetLanguage: language, design: { protectSubject } }) };
-    const validation = validateToolWorkflow(input);
-    const canSubmit = !busy && capable && billing.ready && validation === null;
+        ...(tool === "watermark" ? { authorized, design: canvasLayout ? { watermarkRegions: markHistory.marks.map((mark) => mark.region) } : { watermarkRegion: region } } : tool === "retouch" ? { design: { retouchMode } } : tool === "expand" ? { expansion: "surround", design: { expandScale, expandPosition } } : { targetLanguage: language, design: { protectSubject } }) };
+    const validation = tool === "expand" && customScale && (!Number.isInteger(expandScale) || expandScale < 1 || expandScale > 99) ? "自定义原图占比须为 1–99 的整数" : validateToolWorkflow(input);
+    const canSubmit = !busy && capable && billing.ready && validation === null && (!(canvasLayout || expansionLayout) || sourceReady);
 
     function replaceImages(next: ProductImage[], internal = false) {
         if (!mounted.current || current.current.locked || (!internal && (busy || operation.current))) return;
         if (next.length > 1) { setError("每次只能编辑 1 张图片"); return; }
         if (next[0]?.id !== current.current.images[0]?.id) {
             setRegion(undefined); setRegionOpen(false); setAuthorized(false);
+            setMarkHistory({ marks: [], past: [], future: [] }); setSelectedMark(""); setSourceReady(false);
+            if (tool === "expand") { setExpandScale(80); setCustomScale(false); setExpandPosition("center"); }
+            if (canvasLayout || expansionLayout) onEditSource?.();
             if (next[0]) {
                 const sourceRatio = next[0].width / next[0].height;
                 const distance = (value: typeof TOOL_RATIOS[number]) => { const [width, height] = value.split(":").map(Number); return width && height ? Math.abs(Math.log(sourceRatio / (width / height))) : Infinity; };
@@ -87,10 +136,10 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit }: 
         setImages(next); setError("");
     }
 
-    async function uploadFiles(files: File[]) {
+    async function uploadFiles(files: File[], replace = false) {
         const file = files[0];
         if (!file || busy || operation.current || current.current.locked) return;
-        if (files.length !== 1 || current.current.images.length) { setError("每次只能编辑 1 张图片，请先移除当前图片"); return; }
+        if (files.length !== 1 || (!replace && current.current.images.length)) { setError("每次只能编辑 1 张图片，请先移除当前图片"); return; }
         if (!validImageFile(file)) { setError("请选择不超过 10 MiB 的 PNG、JPEG 或 WebP 图片"); return; }
         operation.current = true; setPending(true); setError("");
         const uploadModel = { ...liveModel.current };
@@ -115,28 +164,66 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit }: 
         finally { operation.current = false; if (mounted.current) setPending(false); }
     }
 
-    return <form className={`ftpl show specialized-form image-edit-form image-edit-${tool}`} aria-label={TOOL_WORKFLOWS[tool].name} data-workflow={tool} onSubmit={submit} noValidate>
-        {tool !== "retouch" && <header className="specialized-heading"><h2>{TOOL_WORKFLOWS[tool].name}</h2>{tool === "watermark" ? <Eraser size={22} /> : <Languages size={22} />}</header>}
+    function changeMarks(marks: WatermarkMark[]) {
+        if (busy || operation.current || current.current.locked || !mounted.current) return;
+        setMarkHistory((history) => recordWatermarkEdit(history, marks));
+        if (!marks.some((mark) => mark.id === selectedMark)) setSelectedMark("");
+        if (canvasLayout) onEditSource?.();
+    }
+    const editorProps = { image: images[0], history: markHistory, selected: selectedMark, disabled: busy, onChange: changeMarks,
+        onSelect: (id: string) => { if (!busy && !current.current.locked) { setSelectedMark(id); if (canvasLayout) onEditSource?.(); } },
+        onHistory: (direction: "undo" | "redo") => { if (!busy && !current.current.locked && !operation.current) { setMarkHistory((history) => stepWatermarkHistory(history, direction)); setSelectedMark(""); } }, onReady: setSourceReady };
+
+    function changeExpansion(scale: number, position: typeof expandPosition, custom = customScale) {
+        if (busy || operation.current || current.current.locked || !mounted.current) return;
+        setExpandScale(scale); setExpandPosition(position); setCustomScale(custom);
+        if (expansionLayout) onEditSource?.();
+    }
+
+    return <form className={`ftpl show specialized-form image-edit-form image-edit-${tool}${canvasLayout ? " watermark-side-form" : ""}`} aria-label={TOOL_WORKFLOWS[tool].name} data-workflow={tool} onSubmit={submit} noValidate>
+        {canvasLayout && annotationTarget && createPortal(<WatermarkCanvas {...editorProps} />, annotationTarget)}
+        {expansionLayout && annotationTarget && createPortal(<ExpansionPreview image={images[0]} ratio={ratio} scale={expandScale} position={expandPosition} onReady={setSourceReady} />, annotationTarget)}
+        {tool !== "retouch" && tool !== "expand" && !canvasLayout && <header className="specialized-heading"><h2>{TOOL_WORKFLOWS[tool].name}</h2>{tool === "watermark" ? <Eraser size={22} /> : <Languages size={22} />}</header>}
         {!capable && <p className="specialized-message" role="status">当前模型不可用于参考图编辑，请选择可用模型或联系管理员配置。</p>}
         <fieldset className="specialized-fields" disabled={busy}>
-            <section className="specialized-band"><AssetRolePicker label={tool === "retouch" ? "上传图片" : "待编辑图片"} images={images} max={1} disabled={busy} original dropzone={tool === "retouch"} previewRegion={tool === "watermark" ? region : undefined}
-                onChange={(next) => replaceImages(next)} onFiles={uploadFiles} /></section>
+            <section className="specialized-band"><AssetRolePicker label={tool === "retouch" || tool === "expand" || canvasLayout ? "上传图片" : "待编辑图片"} images={images} max={1} disabled={busy} original={!canvasLayout} dropzone={tool === "retouch" || tool === "expand"} previewRegion={tool === "watermark" && !canvasLayout ? region : undefined}
+                onChange={(next) => replaceImages(next)} onFiles={uploadFiles} />
+                {(canvasLayout || expansionLayout) && images.length > 0 && <div className="watermark-source-actions">
+                    <button type="button" disabled={busy} onClick={() => onEditSource?.()}><Scan size={14} />重新编辑</button>
+                    <button type="button" disabled={busy} onClick={() => sourcePicker.current?.click()}><RefreshCw size={14} />重新上传</button>
+                </div>}
+                {(canvasLayout || expansionLayout) && <input ref={sourcePicker} type="file" hidden accept="image/png,image/jpeg,image/webp" aria-label={tool === "expand" ? "重新上传扩图原图" : "重新上传水印原图"} disabled={busy}
+                    onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = "";
+                        if (busy || operation.current || current.current.locked || !files.length) return;
+                        if (files.length !== 1 || !files[0] || !validImageFile(files[0])) { setError("请选择不超过 10 MiB 的 PNG、JPEG 或 WebP 图片"); return; }
+                        void uploadFiles(files, true);
+                    }} />}
+            </section>
             {tool === "retouch" && <section className="specialized-band"><h3 id={`${id}-mode-label`}>精修模式</h3><div className="retouch-modes" role="radiogroup" aria-labelledby={`${id}-mode-label`}>
                 {RETOUCH_MODES.map((mode) => <label key={mode.id} className="retouch-mode"><input type="radio" name={`${id}-retouch-mode`} value={mode.id} checked={retouchMode === mode.id} aria-label={mode.label} onChange={() => setRetouchMode(mode.id)} /><span>{mode.label}</span></label>)}
             </div></section>}
+            {tool === "expand" && <>
+                <section className="specialized-band"><h3>原图占比</h3><div className="expansion-scale-presets" role="radiogroup" aria-label="原图占比">
+                    {[100, 80, 60, 50].map((value) => <label key={value} className="retouch-mode"><input type="radio" name={`${id}-expand-scale`} aria-label={`原图占比 ${value}%`} checked={!customScale && expandScale === value} onChange={() => changeExpansion(value, expandPosition, false)} /><span>{value}%</span></label>)}
+                </div><label className="expansion-custom-scale" htmlFor={`${id}-expand-scale`}><input id={`${id}-expand-scale`} type="number" min={1} max={99} step={1} aria-label="自定义原图占比" aria-invalid={customScale && (!Number.isInteger(expandScale) || expandScale < 1 || expandScale > 99)} placeholder="自定义" value={customScale && Number.isFinite(expandScale) ? expandScale : ""} onChange={(event) => changeExpansion(event.target.value === "" ? NaN : Number(event.target.value), expandPosition, true)} /><span>%</span></label></section>
+                <section className="specialized-band"><h3>原图位置</h3><div className="expansion-position-grid" role="radiogroup" aria-label="原图位置">{EXPAND_POSITIONS.map((position, index) => {
+                    const Icon = EXPAND_ICONS[index] ?? Scan;
+                    return <label key={position.id} className="retouch-mode" title={position.label}><input type="radio" name={`${id}-expand-position`} aria-label={`原图位置：${position.label}`} checked={expandPosition === position.id} onChange={() => changeExpansion(expandScale, position.id)} /><span><Icon size={18} /></span></label>;
+                })}</div></section>
+            </>}
             {tool === "watermark" ? <section className="specialized-band">
-                <div className="specialized-section-heading"><h3>水印区域</h3><div className="image-edit-region-actions">
+                {canvasLayout ? <WatermarkMarkList {...editorProps} /> : <><div className="specialized-section-heading"><h3>水印区域</h3><div className="image-edit-region-actions">
                     <button type="button" disabled={busy || !images.length} title="区域作为模型编辑参考，不是像素蒙版" onClick={() => setRegionOpen(true)}><Scan size={16} />{region ? "重新框选" : "框选区域"}</button>
                     {region && <button type="button" disabled={busy} title="清除水印区域" aria-label="清除水印区域" onClick={() => setRegion(undefined)}><Trash2 size={16} /></button>}
                 </div></div>
-                <p className="specialized-note" role="status">{region ? `已选区域 · ${Math.round(region.width * 100)}% × ${Math.round(region.height * 100)}%` : "尚未选择区域"}</p>
+                <p className="specialized-note" role="status">{region ? `已选区域 · ${Math.round(region.width * 100)}% × ${Math.round(region.height * 100)}%` : "尚未选择区域"}</p></>}
                 <label className="image-edit-check"><input id={`${id}-rights`} type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} />我拥有图片权利或已获去水印授权</label>
             </section> : tool === "translate" ? <section className="specialized-band">
                 <label className="specialized-field" htmlFor={`${id}-language`}>目标语言<select id={`${id}-language`} aria-label="目标语言" value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}>
                     {TOOL_LANGUAGES.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
                 <label className="image-edit-check" title="保留商品及包装上的文字，仅翻译周边排版文字"><input id={`${id}-protect`} type="checkbox" checked={protectSubject} onChange={(event) => setProtectSubject(event.target.checked)} />保护商品主体</label>
             </section> : null}
-            <section className="specialized-band"><label className="specialized-field" htmlFor={`${id}-instructions`}>补充要求（选填）<textarea id={`${id}-instructions`} rows={3} maxLength={1500} value={instructions} onChange={(event) => setInstructions(event.target.value)} /></label></section>
+            <section className="specialized-band"><label className="specialized-field" htmlFor={`${id}-instructions`}>补充要求（选填）<textarea id={`${id}-instructions`} rows={3} maxLength={1500} value={instructions} onChange={(event) => { if (!busy && !current.current.locked) { setInstructions(event.target.value); if (expansionLayout) onEditSource?.(); } }} /></label></section>
         </fieldset>
         {regionOpen && images[0] && <SkuRegionEditor key={images[0].id} title="框选水印区域" image={images[0]} region={region} disabled={busy}
             onChange={(next) => { if (!busy && !current.current.locked) setRegion(next); }} onClose={() => setRegionOpen(false)} />}
@@ -150,13 +237,13 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit }: 
                         <label htmlFor={`${id}-model`}>生成模型<select id={`${id}-model`} aria-label="生成模型" value={model?.id ?? ""} onChange={(event) => setModelChoice(event.target.value)}>
                             {!model && <option value="">请选择模型</option>}{model && !capable && <option value={model.id}>{model.name}（不可用）</option>}
                             {models.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                        <label htmlFor={`${id}-ratio`}>图片比例<select id={`${id}-ratio`} aria-label="图片比例" value={ratio} onChange={(event) => setRatio(event.target.value as typeof ratio)}>
+                        <label htmlFor={`${id}-ratio`}>图片比例<select id={`${id}-ratio`} aria-label="图片比例" value={ratio} onChange={(event) => { if (!busy && !current.current.locked) { setRatio(event.target.value as typeof ratio); if (expansionLayout) onEditSource?.(); } }}>
                             {TOOL_RATIOS.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
                     </fieldset>
                 </PopoverContent>
             </Popover>
-            <div className="specialized-submit-row">{tool !== "retouch" && <span className="specialized-cost" role="status">{billing.costText}</span>}<button type="submit" className="specialized-primary" disabled={!canSubmit}>
-                {pending ? <LoaderCircle size={17} /> : tool === "watermark" ? <Eraser size={17} /> : tool === "retouch" ? <Sparkles size={17} /> : <Languages size={17} />}{tool === "watermark" ? "开始去水印" : tool === "retouch" ? "立即生成" : "开始翻译"}{tool === "retouch" && <small>{billing.costText}</small>}</button></div>
+            <div className="specialized-submit-row">{tool !== "retouch" && tool !== "expand" && <span className="specialized-cost" role="status">{billing.costText}</span>}<button type="submit" className="specialized-primary" disabled={!canSubmit}>
+                {pending ? <LoaderCircle size={17} /> : tool === "watermark" ? <Eraser size={17} /> : tool === "retouch" ? <Sparkles size={17} /> : tool === "expand" ? <Maximize2 size={17} /> : <Languages size={17} />}{tool === "watermark" ? "开始去水印" : tool === "retouch" ? "立即生成" : tool === "expand" ? "立即扩图" : "开始翻译"}{(tool === "retouch" || tool === "expand") && <small>{billing.costText}</small>}</button></div>
         </footer>
         {error && <p className="specialized-message specialized-error" role="alert">{error}</p>}
     </form>;

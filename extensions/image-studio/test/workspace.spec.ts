@@ -500,6 +500,48 @@ function workspace() {
 }
 
 describe("workspace integration", () => {
+    it("quotes and retries ten SKU outputs only when the stored regional contract is valid", async () => {
+        const view = workspace();
+        view.capability.tools.push({ key: "sku", status: "available", requiredCapabilities: ["reference-image"], modelIdsByCapability: { "reference-image": [modelId] }, limits: { maxInputImages: 5 } });
+        const toolInput: workflow.ToolWorkflowInput = { tool: "sku", modelId, count: 10, assetIds: [image(1).id], instructions: "", ratio: "1:1", design: {
+            skuRegions: [{ id: "region-1", region: { x: .1, y: .1, width: .2, height: .2 } }],
+            skuVariants: Array.from({ length: 10 }, (_value, index) => ({ name: `SKU ${index + 1}`, instruction: "", edits: [{ regionId: "region-1", instruction: "Make green" }] })),
+        } };
+        Object.assign(view.active, { toolKey: "sku", toolInput, modelId, count: 10, status: "failed" }); view.items.push(view.active);
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("history", "sku");
+        const retry = () => view.render().find((node) => node.type === "button" && text(node) === "重试")!;
+        expect(retry().props.disabled).toBe(false);
+        view.active.toolInput = { ...toolInput, count: 1 }; expect(retry().props.disabled).toBe(true);
+        view.active.toolInput = toolInput; expect(retry().props.disabled).toBe(false);
+        retry().props.onClick(); await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(view.quote).toHaveBeenCalledWith(modelId, 10, "sku");
+        expect(view.retryMutation.mutateAsync).toHaveBeenCalledWith("active");
+    });
+
+    it.each(["watermark", "expand", "sku"] as const)("returns to %s editing on submission failure, but opens history as a result", async (tool) => {
+        const view = workspace();
+        view.capability.tools.push({ key: tool, status: "available", requiredCapabilities: ["reference-image"],
+            modelIdsByCapability: { "reference-image": [modelId] }, limits: { maxInputImages: 1 } });
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("create", tool);
+        const host = tool === "expand" ? "expansion-canvas-host" : tool === "sku" ? "sku-canvas-host" : "watermark-canvas-host";
+        const form = () => view.render().find((node) => node.type === "./tool-form" && node.props.tool === tool)!;
+        const payload: workflow.ToolWorkflowInput = { tool, modelId, assetIds: [image(1).id], instructions: "", count: 1, ratio: "1:1",
+            ...(tool === "sku" ? { design: { skuRegions: [{ id: "region-1", region: { x: .1, y: .1, width: .2, height: .2 } }], skuVariants: [{ name: "Green", instruction: "", edits: [{ regionId: "region-1", instruction: "Make green" }] }] } } :
+                tool === "expand" ? { expansion: "surround", design: { expandScale: 80, expandPosition: "center" } } : { authorized: true, design: { watermarkRegions: [{ x: 0.1, y: 0.1, width: 0.2, height: 0.2 }] } }) };
+        view.active.status = "completed";
+        await form().props.onSubmit(payload);
+        expect(view.render().some((node) => node.props.className === host)).toBe(false);
+        form().props.onEditSource();
+        expect(view.render().some((node) => node.props.className === host)).toBe(true);
+        view.toolMutation.mutateAsync.mockRejectedValueOnce(new Error("Submit failed"));
+        await expect(form().props.onSubmit(payload)).rejects.toThrow("Submit failed");
+        expect(view.render().some((node) => node.props.className === host)).toBe(true);
+        view.items.push({ ...view.active, status: "completed", prompt: "Watermark history" });
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("history");
+        view.render().find((node) => node.props.className === "history-open")!.props.onClick();
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("create", tool);
+        expect(view.render().some((node) => node.props.className === host)).toBe(false);
+    });
     it.each(["detail", "replica", "creative", "fusion", "sku", "retouch"])("does not carry main results into the %s column", async (tool) => {
         const view = workspace();
         view.active.status = "completed";
@@ -512,7 +554,7 @@ describe("workspace integration", () => {
         const rendered = view.render();
         expect(rendered.some((node) => node.props.generationId === "active")).toBe(false);
         expect(rendered.some((node) => node.props.className === "result-prompt")).toBe(false);
-        expect(rendered.some((node) => tool === "retouch" ? node.type === "RetouchPreview" : String(node.props.className).includes("preview-empty-state"))).toBe(true);
+        expect(rendered.some((node) => tool === "retouch" ? node.type === "RetouchPreview" : tool === "sku" ? node.props.className === "sku-canvas-host" : String(node.props.className).includes("preview-empty-state"))).toBe(true);
         expect(rendered.find((node) => node.props.className === "canvas")!.props["data-empty"]).toBe(true);
         navigate("main");
         expect(view.render().some((node) => node.props.generationId === "active")).toBe(true);

@@ -10,7 +10,7 @@ type Node = { type: any; props: Record<string, any> };
 const modelId = "11111111-1111-4111-8111-111111111111";
 const assetId = "22222222-2222-4222-8222-222222222222";
 
-function harness(tool: ToolKey = "expand", options: { ready?: boolean; locked?: boolean; unavailable?: boolean; assetCount?: number; observer?: unknown } = {}) {
+function harness(tool: ToolKey = "expand", options: { ready?: boolean; locked?: boolean; unavailable?: boolean; assetCount?: number; observer?: unknown; legacy?: boolean } = {}) {
     const state: any[] = [];
     const refs: any[] = [];
     const effects: Array<() => unknown> = [];
@@ -42,6 +42,7 @@ function harness(tool: ToolKey = "expand", options: { ready?: boolean; locked?: 
             if (name === "../../api/shared/tool-workflow") return workflow;
             if (name === "./specialized-workflow") return specializedWorkflow;
             if (name === "./specialized-tool-form") return { default: (props: Node["props"]) => jsx("specialized-form", props) };
+            if (name === "./sku-tool-form") return { default: (props: Node["props"]) => jsx("specialized-form", props) };
             if (name === "./image-edit-form") return { default: (props: Node["props"]) => jsx("image-edit-form", props) };
             if (name === "../../api/shared/tools") return { TOOL_REGISTRY };
             if (name === "../services/generation") return {
@@ -57,7 +58,7 @@ function harness(tool: ToolKey = "expand", options: { ready?: boolean; locked?: 
         cursor = 0;
         refCursor = 0;
         const outer = exports.default({ tool, capabilities: { tools: [{ key: tool, status: tool === "cutout" || options.unavailable ? "unavailable" : "available", requiredCapabilities: TOOL_REGISTRY[tool].requiredCapabilities, modelIdsByCapability: { "reference-image": [modelId], "multi-image": [modelId], vision: [modelId] } }], models: [{ id: modelId, name: "Seedream", capabilities: ["reference-image", "multi-image", "vision"], maxReferenceImages: 5 }] }, locked: options.locked ?? false, onSubmit });
-        const root = typeof outer.type === "function" ? outer.type(outer.props) : outer;
+        const root = tool === "expand" && options.legacy !== false ? exports.ToolWorkspace(outer.props) : typeof outer.type === "function" ? outer.type(outer.props) : outer;
         const nodes: Node[] = [];
         const visit = (value: any) => {
             if (Array.isArray(value)) return value.forEach(visit);
@@ -115,6 +116,10 @@ describe("tool form contracts", () => {
     it.each(["watermark", "translate", "retouch"] as const)("dispatches %s to the dedicated single-image form", (tool) => {
         const view = harness(tool, { locked: true });
         expect(view.render().find((node) => node.type === "image-edit-form")!.props).toEqual(expect.objectContaining({ tool, locked: true, onSubmit: view.onSubmit }));
+    });
+    it("dispatches expansion to the dedicated form while preserving legacy workspace tests", () => {
+        const view = harness("expand", { locked: true, legacy: false });
+        expect(view.render().find((node) => node.type === "image-edit-form")!.props).toEqual(expect.objectContaining({ tool: "expand", locked: true, onSubmit: view.onSubmit }));
     });
     it.each(["detail", "replica", "creative", "fusion", "sku"] as const)("dispatches %s to the specialized form with the parent contract", (tool) => {
         const view = harness(tool, { locked: true });

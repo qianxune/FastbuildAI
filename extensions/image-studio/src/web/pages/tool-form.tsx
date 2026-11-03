@@ -11,6 +11,7 @@ import {
 import { useToolSuggestionsMutation } from "../services/tool-generation";
 import ImageEditForm from "./image-edit-form";
 import SpecializedToolForm from "./specialized-tool-form";
+import SkuToolForm from "./sku-tool-form";
 import { isSpecializedTool } from "./specialized-workflow";
 
 export interface ToolFormProps {
@@ -18,6 +19,8 @@ export interface ToolFormProps {
     capabilities: GenerationCapabilities;
     locked: boolean;
     defaultCount?: number;
+    annotationTarget?: HTMLElement | null;
+    onEditSource?: () => void;
     onSubmit: (input: ToolWorkflowInput) => Promise<void>;
 }
 
@@ -71,7 +74,8 @@ function ProductThumbnail({ id }: { id: string }) {
 }
 
 export default function ToolForm(props: ToolFormProps) {
-    if (props.tool === "watermark" || props.tool === "translate" || props.tool === "retouch") return <ImageEditForm key={props.tool} {...props} tool={props.tool} />;
+    if (props.tool === "sku") return <SkuToolForm key={props.tool} {...props} />;
+    if (props.tool === "watermark" || props.tool === "translate" || props.tool === "retouch" || props.tool === "expand") return <ImageEditForm key={props.tool} {...props} tool={props.tool} />;
     if (isSpecializedTool(props.tool)) return <SpecializedToolForm key={props.tool} {...props} tool={props.tool} />;
     if (!isToolEditKey(props.tool) && props.tool !== "suggest") {
         return <section className="ftpl show main-product-form" aria-label="工具不可用">
@@ -84,7 +88,7 @@ export default function ToolForm(props: ToolFormProps) {
     return <ToolWorkspace key={props.tool} {...props} />;
 }
 
-function ToolWorkspace({ tool, capabilities, locked, onSubmit }: ToolFormProps) {
+export function ToolWorkspace({ tool, capabilities, locked, onSubmit }: ToolFormProps) {
     const workflow = TOOL_WORKFLOWS[tool as keyof typeof TOOL_WORKFLOWS];
     const suggestion = tool === "suggest";
     const availability = capabilities.tools.find((item) => item.key === tool);
