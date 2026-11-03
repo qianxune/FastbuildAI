@@ -10,6 +10,7 @@ import {
     ImageGenerationStatus,
 } from "../../../db/entities/image-generation.entity";
 import { quoteGenerationCredits } from "../../../shared/billing";
+import { validateToolWorkflow, type ToolWorkflowInput } from "../../../shared/tool-workflow";
 import { GENERATION_FAILED, publicGenerationError } from "../constants/generation.constants";
 
 @Injectable()
@@ -33,7 +34,9 @@ export class GenerationBillingService {
     ) {
         let amount: number;
         try {
-            amount = quoteGenerationCredits(rule, input.count).total;
+            const sku = input.toolKey === "sku" && input.toolInput?.design?.skuRegions !== undefined && input.toolInput.count === input.count
+                && validateToolWorkflow(input.toolInput as ToolWorkflowInput) === null;
+            amount = quoteGenerationCredits(rule, input.count, sku ? "sku" : undefined).total;
         } catch {
             throw HttpErrorFactory.badRequest("所选模型的积分价格配置无效，请联系管理员");
         }

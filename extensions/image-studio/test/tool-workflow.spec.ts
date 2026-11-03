@@ -14,6 +14,32 @@ export function toolInput(overrides: Partial<ToolWorkflowInput> = {}): ToolWorkf
 }
 
 describe("tool workflow contract", () => {
+    it("validates expansion scale and placement and sends them to the actual prompt", () => {
+        const input = toolInput({ tool: "expand", productName: undefined, count: 1, expansion: "surround",
+            design: { expandScale: 80, expandPosition: "bottom-right" } } as never);
+        expect(validateToolWorkflow(input)).toBeNull();
+        expect(toolWorkflowPrompt(input)).toContain("80%");
+        expect(toolWorkflowPrompt(input)).toContain("bottom-right");
+        expect(toolWorkflowPrompt(input)).toContain("not pixel-locked outpainting");
+        for (const expandScale of [0, 101, 1.5, NaN, Infinity, "80"]) {
+            expect(validateToolWorkflow({ ...input, design: { ...input.design, expandScale } } as never)).not.toBeNull();
+        }
+        expect(validateToolWorkflow({ ...input, design: { ...input.design, expandPosition: "invalid" } } as never)).not.toBeNull();
+        expect(validateToolWorkflow({ ...input, count: 2 })).not.toBeNull();
+        expect(validateToolWorkflow(toolInput({ tool: "expand", expansion: "horizontal" }))).toBeNull();
+    });
+    it("accepts multiple watermark regions and applies each without losing legacy guidance", () => {
+        const regions = [{ x: 0.1, y: 0.7, width: 0.6, height: 0.1 }, { x: 0.2, y: 0.2, width: 0.4, height: 0.1 }, { x: 0.6, y: 0.4, width: 0.2, height: 0.1 }];
+        const input = toolInput({ tool: "watermark", productName: undefined, count: 1, authorized: true, design: { watermarkRegions: regions } } as never);
+        expect(validateToolWorkflow(input)).toBeNull();
+        for (const region of regions) expect(toolWorkflowPrompt(input)).toContain(JSON.stringify(region));
+        expect(toolWorkflowPrompt(input)).toContain("not a mask or pixel lock");
+        expect(validateToolWorkflow({ ...input, authorized: false })).not.toBeNull();
+        expect(validateToolWorkflow({ ...input, count: 2 })).not.toBeNull();
+    });
+    it.each([[], Array(4).fill({ x: 0, y: 0, width: 1, height: 1 }), [null], [{ x: 0.9, y: 0, width: 0.2, height: 1 }]].map((watermarkRegions) => ({ watermarkRegions })))("rejects invalid watermark region lists $watermarkRegions", ({ watermarkRegions }) => {
+        expect(validateToolWorkflow(toolInput({ tool: "watermark", count: 1, authorized: true, design: { watermarkRegions } } as never))).not.toBeNull();
+    });
     it.each(RETOUCH_MODES)("validates and applies the $label retouch mode without changing legacy requests", (mode) => {
         const input = toolInput({ tool: "retouch", productName: undefined, count: 1, design: { retouchMode: mode.id } });
         expect(validateToolWorkflow(input)).toBeNull();

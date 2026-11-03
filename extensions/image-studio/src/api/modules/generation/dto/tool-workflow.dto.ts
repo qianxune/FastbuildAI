@@ -53,7 +53,7 @@ export class ToolWorkflowDto implements ToolWorkflowInput {
 
     @IsInt()
     @Min(1)
-    @Max(4)
+    @Max(10)
     count!: number;
 
     @IsIn(TOOL_RATIOS)

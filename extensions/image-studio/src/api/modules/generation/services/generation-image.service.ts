@@ -108,11 +108,12 @@ export class GenerationImageService {
     async persist(
         generationId: string,
         images: Array<{ base64: string; mediaType: string }>,
+        tool?: "sku",
     ): Promise<GeneratedImage[]> {
         if (
             !new RegExp(`^${UUID_PATTERN}$`, "i").test(generationId) ||
             images.length < 1 ||
-            images.length > 4
+            images.length > (tool === "sku" ? 10 : 4)
         ) {
             throw new Error(GENERATION_FAILED);
         }
@@ -267,7 +268,7 @@ export class GenerationImageService {
             !new RegExp(`^${UUID_PATTERN}$`, "i").test(id) ||
             !Number.isInteger(index) ||
             index < 0 ||
-            index >= 4 ||
+            index >= 10 ||
             !Object.hasOwn(IMAGE_EXTENSIONS, image.mediaType)
         ) {
             throw HttpErrorFactory.notFound("图片不存在或格式不受支持");

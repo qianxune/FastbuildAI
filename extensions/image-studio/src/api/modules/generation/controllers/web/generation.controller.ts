@@ -3,6 +3,7 @@ import type { UserPlayground } from "@buildingai/db";
 import { Playground } from "@buildingai/decorators/playground.decorator";
 import { SkipTransform } from "@buildingai/decorators/skip-transform.decorator";
 import {
+    BadRequestException,
     Body,
     Delete,
     Get,
@@ -65,8 +66,10 @@ export class GenerationController {
     async quote(
         @Query("modelId", ParseUUIDPipe) modelId: string,
         @Query("count", ParseIntPipe) count: number,
+        @Query("tool") tool?: string,
     ) {
-        return this.generationService.quote(modelId, count);
+        if (tool !== undefined && tool !== "sku") throw new BadRequestException("不支持的报价工作流");
+        return tool === "sku" ? this.generationService.quote(modelId, count, tool) : this.generationService.quote(modelId, count);
     }
 
     /** 接收单张不超过十 MiB 的商品图，不接受额外表单字段。 */

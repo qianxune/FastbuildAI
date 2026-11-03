@@ -87,6 +87,18 @@ describe("generated image storage", () => {
         );
         expect(readFile).not.toHaveBeenCalled();
     });
+    it("persists, reads and removes ten SKU images without broadening ordinary storage batches", async () => {
+        const { service, cloud } = fixture();
+        const batch = Array.from({ length: 10 }, () => input);
+        await expect(service.persist(id, batch)).rejects.toThrow();
+        const images = await service.persist(id, batch, "sku");
+        expect(images).toHaveLength(10);
+        expect(await service.read(id, 9, images[9]!)).toEqual({ buffer, mediaType: "image/png" });
+        await expect(service.read(id, 10, images[9]!)).rejects.toThrow();
+        await expect(service.persist(id, [...batch, input], "sku")).rejects.toThrow();
+        await service.remove(id, images);
+        expect(cloud.deleteObject).toHaveBeenCalledTimes(10);
+    });
 
     it("deletes only the recorded cloud objects on removal and cancellation cleanup", async () => {
         const { service, cloud } = fixture();

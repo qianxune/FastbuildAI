@@ -1,15 +1,18 @@
+import { SKU_LIMIT } from "./tool-workflow";
+
 export interface GenerationQuote {
     unitPrice: number;
     count: number;
     total: number;
 }
 
-/** 校验一至四张图片的整数单价并计算总积分，拒绝无效配置及超出数据库整数范围的金额。 */
+/** 按工作流数量上限计算总积分，拒绝无效单价及超出数据库整数范围的金额。 */
 export function quoteGenerationCredits(
     rule: { power: number } | null | undefined,
     count: number,
+    tool?: "sku",
 ): GenerationQuote {
-    if (!Number.isInteger(count) || count < 1 || count > 4) {
+    if (!Number.isInteger(count) || count < 1 || count > (tool === "sku" ? SKU_LIMIT : 4)) {
         throw new Error("Invalid image count");
     }
     if (!rule || !Number.isSafeInteger(rule.power) || rule.power < 0) {

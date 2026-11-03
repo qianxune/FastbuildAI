@@ -58,6 +58,12 @@ describe("image studio credit quotes", () => {
     it("allows an explicitly configured free model", () => {
         expect(quoteGenerationCredits({ power: 0 }, 4).total).toBe(0);
     });
+    it("prices ten SKU outputs only in the explicit SKU quote scope", () => {
+        expect(quoteGenerationCredits({ power: 3 }, 10, "sku")).toEqual({ unitPrice: 3, count: 10, total: 30 });
+        expect(() => quoteGenerationCredits({ power: 3 }, 10)).toThrow();
+        expect(() => quoteGenerationCredits({ power: 3 }, 11, "sku")).toThrow();
+        expect(() => quoteGenerationCredits({ power: 2147483647 }, 10, "sku")).toThrow();
+    });
 
     it.each([undefined, null, { power: -1 }, { power: 0.5 }, { power: NaN }])(
         "rejects invalid pricing %p",
@@ -181,6 +187,18 @@ describe("transactional image studio billing", () => {
         expect(await state.service.balance("owner")).toEqual({ balance: 100 });
         expect(state.deductUserPower).not.toHaveBeenCalled();
         expect(state.addUserPower).not.toHaveBeenCalled();
+    });
+    it("charges ten validated SKU edits together and refunds the entire mocked task", async () => {
+        const state = fixture();
+        const modelId = "11111111-1111-4111-8111-111111111111";
+        const assetId = "22222222-2222-4222-8222-222222222222";
+        const toolInput = { tool: "sku" as const, modelId, assetIds: [assetId], instructions: "", count: 10, ratio: "1:1" as const,
+            design: { skuRegions: [{ id: "region-1", region: { x: .1, y: .1, width: .2, height: .2 } }],
+                skuVariants: Array.from({ length: 10 }, (_value, index) => ({ name: `SKU ${index + 1}`, instruction: "", edits: [{ regionId: "region-1", instruction: "Make green" }] })) } };
+        await state.transaction(() => state.service.createTask(state.manager, { userId: "owner", count: 10, toolKey: "sku", toolInput, status: ImageGenerationStatus.QUEUED }, { power: 3 }));
+        expect(state.balance()).toBe(70); expect(state.task()!.billingAmount).toBe(30);
+        await state.fail(); expect(state.balance()).toBe(100);
+        expect(state.addUserPower).toHaveBeenCalledTimes(1);
     });
 
     it.each([

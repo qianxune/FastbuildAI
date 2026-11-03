@@ -155,8 +155,8 @@ export class GenerationService {
     }
 
     /** 按指定模型与图片数量查询报价，不创建任务或扣费。 */
-    async quote(modelId: string, count: number) {
-        return this.generationModelService.quote(modelId, count);
+    async quote(modelId: string, count: number, tool?: "sku") {
+        return tool === "sku" ? this.generationModelService.quote(modelId, count, tool) : this.generationModelService.quote(modelId, count);
     }
 
     /** 按创建时间倒序分页查询当前用户的生成记录，并转换为公开响应。 */
@@ -592,12 +592,14 @@ export class GenerationService {
             stage = "generate_image";
             const result = await this.infer(generation, prepared);
             stage = "persist_images";
+            const sku = generation.toolKey === "sku" && generation.toolInput?.design?.skuRegions !== undefined;
             images = await this.generationImageService.persist(
                 data.id,
                 result.images.map((image) => ({
                     base64: image.base64,
                     mediaType: image.mediaType,
                 })),
+                ...(sku ? ["sku" as const] : []),
             );
             stage = "complete_task";
             const completed = await this.generationRepository.update(

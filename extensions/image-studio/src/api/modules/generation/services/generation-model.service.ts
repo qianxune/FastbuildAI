@@ -217,7 +217,7 @@ export class GenerationModelService {
     }
 
     /** 校验模型启用状态并按图片数量计算积分报价，不调用模型或扣费。 */
-    async quote(modelId: string, count: number) {
+    async quote(modelId: string, count: number, tool?: "sku") {
         const model = await this.modelRepository.findOne({
             where: {
                 id: modelId,
@@ -229,7 +229,7 @@ export class GenerationModelService {
         });
         if (!model) throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
         try {
-            return quoteGenerationCredits(model.billingRule, count);
+            return quoteGenerationCredits(model.billingRule, count, tool);
         } catch {
             throw HttpErrorFactory.badRequest("所选模型的积分价格配置无效，请联系管理员");
         }
