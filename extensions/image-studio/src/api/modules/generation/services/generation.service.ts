@@ -27,6 +27,8 @@ import { GenerationModelService } from "./generation-model.service";
 import { GenerationImageService } from "./generation-image.service";
 import { ProductImageService, type ProductImageMetadata, type ProductImageUpload } from "./product-image.service";
 import { GenerationBillingService } from "./generation-billing.service";
+import { CutoutService, cutoutSourceSize } from "./cutout.service";
+import { LOCAL_CUTOUT_MODEL_ID } from "../../../shared/tools";
 
 import {
     GeneratedImage,
@@ -53,6 +55,7 @@ export class GenerationService {
         private readonly generationQueue: Queue<GenerationJobData>,
         private readonly productImageService: ProductImageService,
         private readonly generationBillingService: GenerationBillingService,
+        private readonly cutoutService: CutoutService,
     ) {}
 
     /** 返回工具及模型能力清单，不发起模型推理。 */
@@ -394,14 +397,18 @@ export class GenerationService {
     async submitTool(userId: string, input: ToolWorkflowInput) {
         const error = validateToolWorkflow(input);
         if (error) throw HttpErrorFactory.badRequest(error);
-        const { imageModel, model } = await this.generationModelService.prepare(input.modelId);
-        if (input.assetIds.length > toolReferenceLimit(imageModel))
+        const local = input.tool === "cutout";
+        if (local && !await CutoutService.ready()) throw HttpErrorFactory.badRequest("本地抠图模型未就绪，请联系管理员完成模型下载");
+        const prepared = local ? undefined : await this.generationModelService.prepare(input.modelId);
+        const model = prepared?.model ?? { id: LOCAL_CUTOUT_MODEL_ID, name: "BiRefNet Lite（本地）", billingRule: { power: 0 } };
+        if (prepared && input.assetIds.length > toolReferenceLimit(prepared.imageModel))
             throw HttpErrorFactory.badRequest("所选模型不支持所需数量的参考图，请选择支持多图输入的 Seedream 模型");
         const generation = await this.withProductLock(userId, async (repository) => {
-            await this.readProductImages(userId, input.assetIds);
+            const references = await this.readProductImages(userId, input.assetIds);
+            const dimensions = local ? await cutoutSourceSize(references[0]!) : undefined;
             return this.generationBillingService.createTask(repository.manager, {
                 userId, toolKey: input.tool, toolInput: input, prompt: toolWorkflowPrompt(input),
-                modelId: model.id, modelName: model.name, size: toolWorkflowSize(input), quality: "2K", style: "product",
+                modelId: model.id, modelName: model.name, size: dimensions ? `${dimensions.width}x${dimensions.height}` : toolWorkflowSize(input), quality: local ? "原图" : "2K", style: "product",
                 count: input.count, status: ImageGenerationStatus.QUEUED, images: [], error: null,
             }, model.billingRule);
         });
@@ -414,6 +421,15 @@ export class GenerationService {
             throw HttpErrorFactory.badRequest(GENERATION_FAILED);
         }
         return this.publicRecord(generation);
+    }
+
+    private async inferCutout(generation: ImageGeneration) {
+        const input = generation.toolInput;
+        if (!input || input.tool !== "cutout" || validateToolWorkflow(input) || generation.modelId !== LOCAL_CUTOUT_MODEL_ID
+            || generation.modelId !== input.modelId || generation.count !== 1) throw new Error(GENERATION_FAILED);
+        const source = await this.readProductImage(generation.userId, input.assetIds[0]!);
+        const output = await this.cutoutService.generate(source, input.design!.backgroundColor!);
+        return { images: [{ base64: output.toString("base64"), mediaType: "image/png" }] };
     }
 
     /** 从当前用户的私有目录读取商品参考图。 */
@@ -585,12 +601,12 @@ export class GenerationService {
             const generation = await this.findOwned(data.userId, data.id);
             if (generation.status !== ImageGenerationStatus.PROCESSING) return;
             stage = "prepare_model";
-            const prepared = await this.generationModelService.prepare(generation.modelId);
+            const prepared = generation.toolKey === "cutout" ? undefined : await this.generationModelService.prepare(generation.modelId);
             stage = "check_task";
             const current = await this.findOwned(data.userId, data.id);
             if (current.status !== ImageGenerationStatus.PROCESSING) return;
             stage = "generate_image";
-            const result = await this.infer(generation, prepared);
+            const result = generation.toolKey === "cutout" ? await this.inferCutout(generation) : await this.infer(generation, prepared!);
             stage = "persist_images";
             const sku = generation.toolKey === "sku" && generation.toolInput?.design?.skuRegions !== undefined;
             images = await this.generationImageService.persist(

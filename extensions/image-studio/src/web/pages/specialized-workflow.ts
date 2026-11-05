@@ -1,4 +1,5 @@
 import { TOOL_REGISTRY, type CapabilityModel, type GenerationCapabilities } from "../../api/shared/tools";
+import type { ProductImage } from "../services/types";
 import {
     DETAIL_MODULES, EXPAND_POSITIONS, WATERMARK_MARK_LIMIT, validateToolWorkflow, type ToolDesign, type ToolWorkflowInput,
 } from "../../api/shared/tool-workflow";
@@ -87,6 +88,8 @@ export interface WatermarkMark {
     points?: Array<{ x: number; y: number }>;
     brushWidth?: number;
     shape?: "ellipse" | "lasso";
+    instruction?: string;
+    referenceAsset?: ProductImage;
 }
 export interface WatermarkHistory {
     marks: WatermarkMark[];

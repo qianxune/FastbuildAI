@@ -15,13 +15,16 @@ export interface WatermarkEditorProps {
     onChange: (marks: WatermarkMark[]) => void;
     onHistory: (direction: "undo" | "redo") => void;
     onReady?: (ready: boolean) => void;
-    variant?: "sku";
+    variant?: "sku" | "redraw" | "cutout";
     readOnly?: boolean;
+    instruction?: string;
+    onInstructionChange?: (value: string) => void;
 }
 
-export function WatermarkMarkList({ image, history, selected, disabled, onSelect, onChange }: WatermarkEditorProps) {
-    return <section className="watermark-mark-section" aria-label="水印标记">
-        <div className="specialized-section-heading"><h3>水印标记</h3><span>{history.marks.length} / {WATERMARK_MARK_LIMIT}</span></div>
+export function WatermarkMarkList({ image, history, selected, disabled, onSelect, onChange, variant }: WatermarkEditorProps) {
+    const label = variant === "redraw" ? "重绘区域" : "水印标记";
+    return <section className="watermark-mark-section" aria-label={label}>
+        <div className="specialized-section-heading"><h3>{label}</h3><span>{history.marks.length} / {WATERMARK_MARK_LIMIT}</span></div>
         {!history.marks.length && <div className="watermark-mark-empty"><Scan size={22} /><span>暂无标记</span></div>}
         <div className="watermark-mark-list">{history.marks.map((mark, index) => <div key={mark.id} className="watermark-mark-row" data-selected={selected === mark.id}>
             <button type="button" className="watermark-mark-select" disabled={disabled} aria-pressed={selected === mark.id} onClick={() => onSelect(mark.id)}>
@@ -50,9 +53,10 @@ function draftMark(draft: Draft): WatermarkMark {
         ...(draft.mode === "lasso" ? { shape: "lasso" as const } : {}) };
 }
 
-export function WatermarkCanvas({ image, history, selected, disabled, onSelect, onChange, onHistory, onReady, variant, readOnly = false }: WatermarkEditorProps) {
-    const [mode, setMode] = useState<"hand" | "brush" | "rectangle" | "eraser" | "ellipse" | "lasso">("rectangle");
-    const [brushSize, setBrushSize] = useState(variant === "sku" ? 30 : 12);
+export function WatermarkCanvas({ image, history, selected, disabled, onSelect, onChange, onHistory, onReady, variant, readOnly = false, instruction, onInstructionChange }: WatermarkEditorProps) {
+    const [mode, setMode] = useState<"hand" | "brush" | "rectangle" | "eraser" | "ellipse" | "lasso">(variant === "redraw" ? "brush" : "rectangle");
+    const [brushSize, setBrushSize] = useState(variant === "sku" || variant === "redraw" ? 30 : 12);
+    const [cursor, setCursor] = useState<Point>();
     const [zoom, setZoom] = useState(1);
     const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
     const [draft, setDraft] = useState<Draft>();
@@ -88,7 +92,9 @@ export function WatermarkCanvas({ image, history, selected, disabled, onSelect, 
     }
     function begin(event: PointerEvent, mark?: WatermarkMark, handle = "move") {
         if (event.button !== 0 || blocked || current.current.disabled || current.current.imageId !== image?.id || mode === "hand" || draft || !image || !stage.current) return;
-        if (mode === "eraser") { event.preventDefault(); event.stopPropagation(); if (mark) onChange(history.marks.filter((item) => item.id !== mark.id)); return; }
+        const markId = mark?.id;
+        if (mode === "eraser") { event.preventDefault(); event.stopPropagation(); if (markId) onChange(history.marks.filter((item) => item.id !== markId)); return; }
+        if (variant === "redraw" && mode === "brush") mark = undefined;
         if (!mark && history.marks.length >= WATERMARK_MARK_LIMIT) return;
         event.preventDefault(); event.stopPropagation(); stage.current.focus(); stage.current.setPointerCapture(event.pointerId);
         const start = point(event), bounds = stage.current.getBoundingClientRect();
@@ -130,14 +136,15 @@ export function WatermarkCanvas({ image, history, selected, disabled, onSelect, 
             event.preventDefault(); setDraft(undefined); setMode(({ h: "hand", e: "eraser", r: "rectangle", o: "ellipse", b: "brush", l: "lasso" } as const)[key as "h" | "e" | "r" | "o" | "b" | "l"]);
         } else if (key === "escape") { setDraft(undefined); onSelect(""); }
     }
-    return <div className="watermark-editor" aria-label={variant === "sku" ? "SKU 区域画布" : "水印编辑画布"} onKeyDown={keyboard}>
+    return <div className={`watermark-editor${variant === "redraw" ? " redraw-editor" : variant === "cutout" ? " cutout-editor" : ""}`} aria-label={variant === "sku" ? "SKU 区域画布" : variant === "redraw" ? "局部重绘画布" : variant === "cutout" ? "抠图原图预览" : "水印编辑画布"} onKeyDown={keyboard}>
         {!readOnly && <div className="watermark-tools" role="group" aria-label="标记工具">
-            {([{ id: "hand", label: "抓手", icon: Hand, title: "拖动查看图片" }, { id: "brush", label: "画笔", icon: Paintbrush, title: "画笔标记：按笔迹覆盖范围指导模型，不是像素蒙版" },
-                { id: "rectangle", label: "框选", icon: Scan, title: variant === "sku" ? "框选变体区域" : "框选水印区域" },
+            {([{ id: "hand", label: "抓手", icon: Hand, title: "拖动查看图片" }, { id: "brush", label: variant === "redraw" ? "涂抹" : "画笔", icon: Paintbrush, title: "画笔标记：按笔迹覆盖范围指导模型，不是像素蒙版" },
+                { id: "rectangle", label: "框选", icon: Scan, title: variant === "sku" ? "框选变体区域" : variant === "redraw" ? "框选重绘区域" : "框选水印区域" },
+                ...(variant === "redraw" ? [{ id: "eraser", label: "擦除", icon: Eraser, title: "删除笔迹所在区域" }] as const : []),
                 ...(variant === "sku" ? [{ id: "eraser", label: "擦除", icon: Eraser, title: "删除选中的区域" }, { id: "ellipse", label: "圆选", icon: Circle, title: "圆形选区：按外接矩形指导模型" },
                     { id: "lasso", label: "套索", icon: Lasso, title: "套索选区：按覆盖范围指导模型" }] as const : [])] as const).map((item) => <button key={item.id} type="button" title={item.title} aria-label={item.label}
                     aria-pressed={mode === item.id} disabled={blocked} onClick={() => { setDraft(undefined); setMode(item.id); }}><item.icon size={15} /><span>{item.label}</span></button>)}
-            {variant === "sku" && <label className="sku-brush-size">大小<input type="range" min={2} max={80} step={1} value={brushSize} aria-label="画笔大小" disabled={blocked}
+            {(variant === "sku" || variant === "redraw") && <label className="sku-brush-size">大小<input type="range" min={2} max={80} step={1} value={brushSize} aria-label="画笔大小" disabled={blocked}
                 onChange={(event) => { const value = Number(event.target.value); if (Number.isInteger(value) && value >= 2 && value <= 80) setBrushSize(value); }} /><output>{brushSize}</output></label>}
         </div>}
         <div ref={viewport} className="watermark-viewport" data-mode={mode}
@@ -152,26 +159,35 @@ export function WatermarkCanvas({ image, history, selected, disabled, onSelect, 
                 const limitX = (bounds.width + imageBounds.width) / 2 - 40, limitY = (bounds.height + imageBounds.height) / 2 - 40;
                 setPan({ x: Math.max(-limitX, Math.min(limitX, drag.origin.x + event.clientX - drag.start.x)), y: Math.max(-limitY, Math.min(limitY, drag.origin.y + event.clientY - drag.start.y)) });
             }} onPointerUp={() => { panDrag.current = undefined; }} onPointerCancel={() => { panDrag.current = undefined; }}>
-            {!image ? <div className="watermark-canvas-empty"><ImagePlus size={42} /><h3>去除水印</h3></div> :
+            {!image ? <div className={`watermark-canvas-empty${variant === "redraw" || variant === "cutout" ? " regional-edit-example" : ""}`}>
+                {variant === "redraw" || variant === "cutout" ? <img src="/extension/image-studio/images/mug-scene.jpg" alt="商品素材示例" /> : <ImagePlus size={42} />}
+                <h3>{variant === "redraw" ? "局部重绘" : variant === "cutout" ? "一键抠图" : "去除水印"}</h3></div> :
                 failed ? <button type="button" className="watermark-load-error" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={18} />重新加载原图</button> :
                 !loaded || loaded.id !== image.id ? <span role="status" className="watermark-canvas-empty"><LoaderCircle className="spin" size={26} />原图加载中</span> :
                 <div ref={stage} className="watermark-image-stage" tabIndex={0} role="group" aria-label="原图标记区域" data-mode={mode}
                     style={{ aspectRatio: `${image.width} / ${image.height}`, width: `min(100%, ${480 * image.width / image.height}px, 640px, calc(100cqh * ${image.width / image.height}))`, transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
-                    onPointerDown={(event) => begin(event)} onPointerMove={(event) => { const next = advance(event); if (next) setDraft(next); }}
+                    onPointerDown={(event) => begin(event)} onPointerMove={(event) => { if (variant === "redraw" && mode === "brush" && !blocked) setCursor(point(event)); const next = advance(event); if (next) setDraft(next); }}
+                    onPointerLeave={() => setCursor(undefined)}
                     onPointerUp={finish} onPointerCancel={() => setDraft(undefined)} onLostPointerCapture={() => setDraft(undefined)}>
-                    <img src={loaded.url} alt={image.name || (variant === "sku" ? "SKU 模板图" : "待去水印原图")} draggable={false}
+                    <img src={loaded.url} alt={image.name || (variant === "sku" ? "SKU 模板图" : variant === "redraw" ? "待重绘原图" : variant === "cutout" ? "待抠图原图" : "待去水印原图")} draggable={false}
                         onLoad={() => { if (loaded.version === loadVersion.current) setDecoded(image.id); }} onError={() => { if (loaded.version === loadVersion.current) { setFailed(true); setDecoded(""); } }} />
                     <svg className="watermark-brush-layer" viewBox={`0 0 ${image.width} ${image.height}`} aria-hidden="true">{visibleMarks.filter((mark) => mark.points).map((mark) =>
                         <polyline key={mark.id} points={mark.points!.map((position) => `${position.x * image.width},${position.y * image.height}`).join(" ")}
-                            fill="none" stroke="currentColor" strokeWidth={mark.shape === "lasso" ? 2 : (mark.brushWidth ?? .02) * image.width} strokeLinecap="round" strokeLinejoin="round" />)}</svg>
+                            fill="none" stroke="currentColor" strokeWidth={mark.shape === "lasso" ? 2 : (mark.brushWidth ?? .02) * image.width} strokeLinecap="round" strokeLinejoin="round"
+                            style={variant === "redraw" ? { pointerEvents: mode === "eraser" && !blocked ? "stroke" : "none" } : undefined}
+                            onPointerDown={variant === "redraw" ? (event) => { if (mode === "eraser") begin(event, mark); } : undefined} />)}</svg>
                     {visibleMarks.map((mark, index) => <div key={mark.id} className="watermark-region" data-selected={selected === mark.id || mark.id === "draft"}
-                        style={{ left: `${mark.region.x * 100}%`, top: `${mark.region.y * 100}%`, width: `${mark.region.width * 100}%`, height: `${mark.region.height * 100}%`, borderRadius: mark.shape === "ellipse" ? "50%" : undefined, pointerEvents: mode === "hand" || readOnly ? "none" : undefined }}
+                        data-brush={variant === "redraw" && Boolean(mark.points) && !mark.shape}
+                        style={{ left: `${mark.region.x * 100}%`, top: `${mark.region.y * 100}%`, width: `${mark.region.width * 100}%`, height: `${mark.region.height * 100}%`, borderRadius: mark.shape === "ellipse" ? "50%" : undefined, pointerEvents: mode === "hand" || readOnly || (variant === "redraw" && mark.points && !mark.shape) ? "none" : undefined }}
                         onPointerDown={(event) => begin(event, mark)}>
                         <button type="button" className="watermark-region-number" title={`选择标注 ${index + 1}`} aria-label={`选择标注 ${index + 1}`} disabled={blocked}
+                            style={variant === "redraw" && mark.points?.[0] && !mark.shape ? { left: `${(mark.points[0].x - mark.region.x) / mark.region.width * 100}%`, top: `${(mark.points[0].y - mark.region.y) / mark.region.height * 100}%`, transform: "translate(-50%, -50%)", pointerEvents: mode === "hand" || readOnly ? "none" : "auto" } : undefined}
                             onPointerDown={(event) => event.stopPropagation()} onClick={() => { onSelect(mark.id); stage.current?.focus(); }}>{index + 1}</button>
-                        {selected === mark.id && !blocked && ["n", "ne", "e", "se", "s", "sw", "w", "nw"].map((handle) => <span key={handle} className="watermark-resize-handle" data-handle={handle}
+                        {selected === mark.id && !blocked && !(variant === "redraw" && mark.points && !mark.shape) && ["n", "ne", "e", "se", "s", "sw", "w", "nw"].map((handle) => <span key={handle} className="watermark-resize-handle" data-handle={handle}
                             onPointerDown={(event) => begin(event, mark, handle)} />)}
                     </div>)}
+                    {variant === "redraw" && mode === "brush" && cursor && !blocked && <span className="redraw-brush-cursor" aria-hidden="true"
+                        style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%`, width: brushSize / zoom, height: brushSize / zoom }} />}
                 </div>}
         </div>
         {!readOnly && <div className="watermark-view-tools" role="group" aria-label="画布操作">

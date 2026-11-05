@@ -6,7 +6,7 @@ import {
 } from "../src/web/pages/specialized-workflow";
 import { validateToolWorkflow, DETAIL_MODULES, toolWorkflowPrompt } from "../src/api/shared/tool-workflow";
 import type { GenerationCapabilities } from "../src/api/shared/tools";
-import { TOOL_REGISTRY } from "../src/api/shared/tools";
+import { TOOL_REGISTRY, LOCAL_CUTOUT_MODEL_ID } from "../src/api/shared/tools";
 import * as workflow from "../src/api/shared/tool-workflow";
 import * as specialized from "../src/web/pages/specialized-workflow";
 import { readFileSync } from "node:fs";
@@ -194,7 +194,7 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
             },
         };
         if (name === "../../api/shared/tool-workflow") return workflow;
-        if (name === "../../api/shared/tools") return { TOOL_REGISTRY };
+        if (name === "../../api/shared/tools") return { TOOL_REGISTRY, LOCAL_CUTOUT_MODEL_ID };
         if (name === "./specialized-workflow") return specialized;
         if (name === "./specialized-components") return componentTokens;
         if (name === "./material-picker") return { default: "MaterialPicker", MaterialDialog: "MaterialDialog" };
@@ -230,6 +230,43 @@ describe("watermark canvas controls", () => {
         };
         return { ...view, stage, button, event, ready, release, load, onChange, onSelect, onHistory, onReady };
     }
+    it("retains redraw brush and eraser without the old bottom description", () => {
+        const view = canvas(); view.props.variant = "redraw"; view.props.instruction = "Change to black"; view.props.onInstructionChange = jest.fn();
+        view.props.history.marks = [{ id: "redraw-1", region: { x: .1, y: .2, width: .3, height: .3 } }]; view.props.selected = "redraw-1";
+        view.ready(); view.button("涂抹").props.onClick();
+        expect(view.button("擦除").props.disabled).toBe(false);
+        expect(view.render().some((node) => node.type === "textarea" || node.props.className === "redraw-prompt-panel")).toBe(false);
+        view.stage().props.onPointerMove(view.event(90, 80));
+        expect(view.render().some((node) => node.props.className === "redraw-brush-cursor")).toBe(true);
+        expect(view.props.onInstructionChange).not.toHaveBeenCalled();
+    });
+    it("renders redraw paint without a filled rectangle or resize handles and starts at size 30", () => {
+        const mark = { id: "paint-1", region: { x: .1, y: .2, width: .3, height: .3 }, points: [{ x: .2, y: .3 }, { x: .3, y: .4 }], brushWidth: .075 };
+        const view = canvas([mark]); view.props.variant = "redraw"; view.props.selected = mark.id; view.ready();
+        expect(view.button("涂抹").props["aria-pressed"]).toBe(true);
+        expect(view.render().find((node) => node.props["aria-label"] === "画笔大小")!.props.value).toBe(30);
+        const region = view.render().find((node) => node.props.className === "watermark-region")!;
+        expect(region.props["data-brush"]).toBe(true);
+        expect(region.props.style.pointerEvents).toBe("none");
+        expect(view.render().some((node) => node.props.className === "watermark-resize-handle")).toBe(false);
+        expect(view.button("选择标注 1")).toBeDefined();
+        view.button("擦除").props.onClick();
+        const stroke = view.render().find((node) => node.type === "polyline")!;
+        expect(stroke.props.style.pointerEvents).toBe("stroke");
+        stroke.props.onPointerDown(view.event(90, 80));
+        expect(view.onChange).toHaveBeenCalledWith([]);
+        view.props.disabled = true; view.render(); stroke.props.onPointerDown(view.event(90, 80));
+        expect(view.onChange).toHaveBeenCalledTimes(1);
+    });
+    it("retains redraw rectangle handles and legacy watermark brush selection", () => {
+        const mark = { id: "region-1", region: { x: .1, y: .2, width: .3, height: .3 } };
+        const redraw = canvas([mark]); redraw.props.variant = "redraw"; redraw.props.selected = mark.id; redraw.ready();
+        expect(redraw.render().filter((node) => node.props.className === "watermark-resize-handle")).toHaveLength(8);
+        const watermark = canvas([{ ...mark, points: [{ x: .2, y: .3 }], brushWidth: .02 }]);
+        watermark.props.selected = mark.id; watermark.ready();
+        expect(watermark.button("画笔")).toBeDefined();
+        expect(watermark.render().filter((node) => node.props.className === "watermark-resize-handle")).toHaveLength(8);
+    });
     it.each(["框选", "画笔", "圆选", "套索"])("keeps the three-region cap for SKU %s gestures", (mode) => {
         const marks = [1, 2, 3].map((index) => ({ id: `region-${index}`, region: { x: .1, y: .1, width: .2, height: .2 } }));
         const view = canvas(marks, true); view.ready(); view.button(mode).props.onClick();
@@ -597,7 +634,7 @@ function formHarness(tool: SpecializedDraft["tool"], options: { ready?: boolean;
     return { ...view, onSubmit, upload, analyze, billing, products, capabilities, field, button, set, role, submitButton, submit, preset, filled };
 }
 
-function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "expand", options: { ready?: boolean; locked?: boolean; unavailable?: boolean } = {}) {
+function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "expand" | "redraw" | "cutout", options: { ready?: boolean; locked?: boolean; unavailable?: boolean } = {}) {
     const onSubmit = jest.fn().mockResolvedValue(undefined), upload = jest.fn();
     const products = { data: [...images], isSuccess: true, isPending: false, isFetching: false, isError: false };
     const uploadState = { isPending: false, mutateAsync: async (file: File) => {
@@ -606,8 +643,9 @@ function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "expand"
         finally { uploadState.isPending = false; }
     } };
     const billing = jest.fn().mockReturnValue({ ready: options.ready ?? true, costText: "实际报价 2 积分" });
-    const capabilities = { tools: [{ key: tool, status: options.unavailable ? "unavailable" : "available", modelIdsByCapability: { "reference-image": [modelId] } }],
-        models: [{ id: modelId, name: "Seedream", capabilities: ["reference-image"], maxReferenceImages: 5 }] } as GenerationCapabilities;
+    const selectedModelId = tool === "cutout" ? LOCAL_CUTOUT_MODEL_ID : modelId;
+    const capabilities = { tools: [{ key: tool, status: options.unavailable ? "unavailable" : "available", modelIdsByCapability: { "reference-image": [selectedModelId], segmentation: [selectedModelId] } }],
+        models: [{ id: selectedModelId, name: tool === "cutout" ? "BiRefNet Lite" : "Seedream", capabilities: tool === "cutout" ? ["segmentation"] : ["reference-image"], maxReferenceImages: 5 }] } as GenerationCapabilities;
     const view = renderHarness("image-edit-form", "default", { tool, capabilities, locked: options.locked ?? false, onSubmit }, {
         useGenerationBilling: billing, useProductImagesQuery: () => products, useUploadProductImageMutation: () => uploadState,
     });
@@ -626,6 +664,65 @@ function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "expand"
 }
 
 describe("dedicated image editing", () => {
+    it("requires redraw source readiness, regions and explicit edits and submits their exact metadata", async () => {
+        const view = imageEditHarness("redraw"); view.props.annotationTarget = {};
+        view.picker().onChange([images[0]]);
+        expect(view.picker().appearance).toBe("links"); expect(view.picker().allowReplacement).toBe(true);
+        const canvas = () => view.render().find((node) => node.type === "WatermarkCanvas")!.props;
+        const regions = [{ id: "redraw-1", region: { x: .1, y: .2, width: .3, height: .4 } }];
+        canvas().onChange(regions); canvas().onReady(true);
+        expect(view.submitButton().props.disabled).toBe(true);
+        view.field("instructions-redraw-1").props.onChange({ target: { value: "Change to black" } }); await view.submit();
+        expect(view.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ tool: "redraw", modelId, count: 1, instructions: "", design: { redrawRegions: [regions[0]!.region], redrawEdits: [{ instruction: "Change to black" }] } }));
+        expect(view.submitButton().props.form).toBe("test-image-edit");
+        view.picker().onChange([images[1]]); expect(canvas().history.marks).toEqual([]); expect(view.field("instructions")).toBeUndefined();
+        expect(view.submitButton().props.disabled).toBe(true);
+    });
+    it("keeps independent redraw descriptions and shared references aligned through deletion and undo", async () => {
+        const view = imageEditHarness("redraw"); view.props.annotationTarget = {}; view.picker().onChange([images[0]]);
+        const canvas = () => view.render().find((node) => node.type === "WatermarkCanvas")!.props;
+        const role = (index: number) => view.render().find((node) => node.type === "AssetRolePicker" && node.props.label === `标注${index}参考图`)!.props;
+        canvas().onChange([1, 2].map((index) => ({ id: `mark-${index}`, region: { x: index * .2, y: .2, width: .1, height: .3 } }))); canvas().onReady(true);
+        view.field("instructions-mark-1").props.onChange({ target: { value: "Red handle" } });
+        view.field("instructions-mark-2").props.onChange({ target: { value: "Blue pocket" } });
+        role(1).onChange([images[1]]); role(2).onChange([images[1]]);
+        await view.submit();
+        expect(view.onSubmit.mock.calls[0][0].assetIds).toEqual([images[0]!.id, images[1]!.id]);
+        expect(view.onSubmit.mock.calls[0][0].design.redrawEdits).toEqual([
+            { instruction: "Red handle", referenceAssetId: images[1]!.id }, { instruction: "Blue pocket", referenceAssetId: images[1]!.id },
+        ]);
+        canvas().onChange([canvas().history.marks[1]]); await view.submit();
+        expect(view.onSubmit.mock.calls[1][0].design.redrawEdits).toEqual([{ instruction: "Blue pocket", referenceAssetId: images[1]!.id }]);
+        canvas().onHistory("undo"); expect(view.field("instructions-mark-1").props.value).toBe("Red handle");
+        expect(role(1).images[0].id).toBe(images[1]!.id);
+        expect(view.render().filter((node) => node.type === "textarea")).toHaveLength(2);
+        expect(canvas().onInstructionChange).toBeUndefined();
+        view.capabilities.models[0]!.maxReferenceImages = 1; expect(view.submitButton().props.disabled).toBe(true);
+    });
+    it("preserves redraw metadata on failed reference upload and rejects stale locked callbacks", async () => {
+        const view = imageEditHarness("redraw"); view.props.annotationTarget = {}; view.picker().onChange([images[0]]);
+        const canvas = () => view.render().find((node) => node.type === "WatermarkCanvas")!.props;
+        canvas().onChange([{ id: "mark-1", region: { x: .2, y: .2, width: .2, height: .3 } }]); canvas().onReady(true);
+        const role = () => view.render().find((node) => node.type === "AssetRolePicker" && node.props.label === "标注1参考图")!.props;
+        view.field("instructions-mark-1").props.onChange({ target: { value: "Keep the text" } }); role().onChange([images[1]]);
+        view.upload.mockRejectedValueOnce(new Error("reference upload failed")); await role().onFiles([{ type: "image/png", size: 100 }]);
+        expect(view.field("instructions-mark-1").props.value).toBe("Keep the text"); expect(role().images[0].id).toBe(images[1]!.id);
+        const oldField = view.field("instructions-mark-1"), oldRole = role(); view.props.locked = true; view.render();
+        oldField.props.onChange({ target: { value: "stale" } }); oldRole.onChange([]); await oldRole.onFiles([{ type: "image/png", size: 100 }]);
+        expect(view.field("instructions-mark-1").props.value).toBe("Keep the text"); expect(role().images[0].id).toBe(images[1]!.id); expect(view.upload).toHaveBeenCalledTimes(1);
+    });
+    it("submits transparent or validated custom cutout without quality/ratio or text editing controls", async () => {
+        const view = imageEditHarness("cutout"); view.props.annotationTarget = {}; view.fill();
+        const canvas = () => view.render().find((node) => node.type === "WatermarkCanvas")!.props;
+        expect(canvas().readOnly).toBe(true); expect(view.submitButton().props.disabled).toBe(true); canvas().onReady(true);
+        expect(view.render().filter((node) => node.props.type === "radio")).toHaveLength(6);
+        expect(view.render().some((node) => node.props.id === "test-ratio" || node.props.id === "test-instructions")).toBe(false);
+        await view.submit(); expect(view.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, instructions: "", count: 1, design: { backgroundColor: null } }));
+        view.field("custom-color").props.onChange({ target: { value: "#112233" } }); await view.submit();
+        expect(view.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ design: { backgroundColor: "#112233" } }));
+        const oldColor = view.field("custom-color"); view.props.locked = true; view.render(); oldColor.props.onChange({ target: { value: "#ff0000" } });
+        expect(view.field("custom-color").props.value).toBe("#112233"); expect(view.submitButton().props.disabled).toBe(true);
+    });
     it("loads protected expansion originals, waits for decoding and ignores stale reads and DOM events", () => {
         const release = jest.fn(), load = jest.fn().mockReturnValue(release), onReady = jest.fn();
         const view = renderHarness("image-edit-form", "ExpansionPreview", { image: images[0], ratio: "1:1", scale: 80, position: "center", onReady }, { loadProductImage: load });

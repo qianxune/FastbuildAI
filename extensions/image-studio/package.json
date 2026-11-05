@@ -51,6 +51,7 @@
         "@buildingai/utils": "workspace:*",
         "@buildingai/web-core": "workspace:*",
         "@buildingai/web-types": "workspace:*",
+        "@huggingface/transformers": "3.8.1",
         "@nestjs/bullmq": "catalog:api",
         "@nestjs/platform-express": "catalog:api",
         "@tanstack/react-query": "^5.90.21",

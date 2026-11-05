@@ -74,7 +74,7 @@ export interface AssetRolePickerProps {
     previewRegion?: Region;
     dropzone?: boolean;
     allowReplacement?: boolean;
-    appearance?: "default" | "links";
+    appearance?: "default" | "links" | "compact";
     title?: ReactNode;
     description?: ReactNode;
     uploadLink?: boolean;
@@ -86,10 +86,16 @@ export function AssetRolePicker({ label, images, max, disabled, onChange, onFile
     const [dragging, setDragging] = useState(false);
     const replacing = allowReplacement && max === 1 && images.length === 1;
     const unavailable = disabled || (images.length >= max && !replacing);
-    const materialPicker = <MaterialPicker selectedIds={images.map((image) => image.id)} max={max} disabled={disabled} label={appearance === "links" ? "从素材库导入" : undefined}
+    const materialPicker = <MaterialPicker selectedIds={images.map((image) => image.id)} max={max} disabled={disabled} label={appearance === "links" ? "从素材库导入" : appearance === "compact" ? "素材库" : undefined}
         onChange={(_ids, selected) => { if (!disabled) onChange(selected); }} />;
     const fileInput = <input ref={input} type="file" hidden multiple={max > 1} accept="image/png,image/jpeg,image/webp" disabled={unavailable}
         aria-label={`上传${label}`} onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; onFiles(files); }} />;
+    if (appearance === "compact") return <div className="asset-compact" role="group" aria-label={label}>
+        {images[0] ? <div className="asset-compact-upload"><ProtectedAsset image={images[0]} /><button type="button" className="asset-compact-replace" disabled={unavailable} aria-label={`上传${label}`} title="重新上传参考图" onClick={() => input.current?.click()}><RefreshCw size={12} /></button></div>
+            : <button type="button" className="asset-compact-upload" disabled={unavailable} aria-label={`上传${label}`} title="上传参考图" onClick={() => input.current?.click()}><ImagePlus size={18} /><span>上传图片</span></button>}
+        {images[0] && <button type="button" className="asset-compact-remove" aria-label={`移除${label}`} title="移除参考图" disabled={disabled} onClick={() => onChange([])}><X size={12} /></button>}
+        <div className="asset-compact-material">{materialPicker}</div>{fileInput}
+    </div>;
     if (appearance === "links") return <section className="specialized-assets asset-links" aria-label={label} tabIndex={0} data-dragging={dragging}
         onDragOver={(event) => {
             if (!acceptsAssetTransfer(event.target as HTMLElement, unavailable) || !Array.from(event.dataTransfer.types).includes("Files")) return;

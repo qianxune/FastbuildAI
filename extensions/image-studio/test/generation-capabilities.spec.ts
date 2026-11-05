@@ -18,6 +18,8 @@ import { GenerationController } from "../src/api/modules/generation/controllers/
 import { GenerationProcessor } from "../src/api/modules/generation/generation.processor";
 import { GenerationImageService } from "../src/api/modules/generation/services/generation-image.service";
 import { GenerationModelService } from "../src/api/modules/generation/services/generation-model.service";
+import { CutoutService } from "../src/api/modules/generation/services/cutout.service";
+import { LOCAL_CUTOUT_MODEL_ID } from "../src/api/shared/tools";
 import { GenerationBillingService } from "../src/api/modules/generation/services/generation-billing.service";
 import type { ProductImageService } from "../src/api/modules/generation/services/product-image.service";
 import {
@@ -46,6 +48,10 @@ jest.mock("@buildingai/errors", () => ({
 }));
 jest.mock("@buildingai/utils", () => ({ getProviderSecret: jest.fn() }));
 jest.mock("ai", () => ({ generateImage: jest.fn(), generateText: jest.fn() }));
+jest.mock("../src/api/modules/generation/services/cutout.service", () => ({
+    CutoutService: class { static ready = jest.fn().mockResolvedValue(false); },
+    CUTOUT_MODEL: "onnx-community/BiRefNet_lite-ONNX",
+}));
 jest.mock("fs/promises", () => ({
     lstat: jest.fn(),
     mkdir: jest.fn(),
@@ -261,6 +267,7 @@ describe("generation capabilities", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        jest.mocked(CutoutService.ready).mockResolvedValue(false);
         find.mockResolvedValue([configuredModel()]);
         supports.mockReturnValue(true);
         image.mockReturnValue({ model: { specificationVersion: "v3", doGenerate: jest.fn() } });
@@ -272,6 +279,30 @@ describe("generation capabilities", () => {
         getProviderMock.mockReturnValue({ supports, image, languageModel } as unknown as ReturnType<
             typeof getProvider
         >);
+    });
+
+    it("advertises local cutout only when pinned weights are ready, independent of paid models", async () => {
+        find.mockResolvedValue([]);
+        expect((await service.capabilities()).tools.find((tool) => tool.key === "cutout")).toMatchObject({ status: "unavailable", reason: "unsupported_capabilities" });
+        jest.mocked(CutoutService.ready).mockResolvedValue(true);
+        const result = await service.capabilities();
+        expect(result.models).toEqual([expect.objectContaining({ id: LOCAL_CUTOUT_MODEL_ID, capabilities: ["segmentation"], maxReferenceImages: 1 })]);
+        expect(result.tools.find((tool) => tool.key === "cutout")).toMatchObject({ status: "available", reason: null,
+            modelIdsByCapability: { segmentation: [LOCAL_CUTOUT_MODEL_ID] }, limits: { maxInputImages: 1, sizes: null } });
+        expect(result.tools.find((tool) => tool.key === "creative")?.status).toBe("unavailable");
+        expect(getProviderMock).not.toHaveBeenCalled(); expect(generateImage).not.toHaveBeenCalled();
+    });
+
+    it("quotes one ready local cutout for zero credits and never prepares provider secrets", async () => {
+        jest.mocked(CutoutService.ready).mockResolvedValue(true);
+        await expect(service.quote(LOCAL_CUTOUT_MODEL_ID, 1)).resolves.toMatchObject({ total: 0 });
+        await expect(service.quote(LOCAL_CUTOUT_MODEL_ID, 2)).rejects.toThrow();
+        await expect(service.quote(LOCAL_CUTOUT_MODEL_ID, 1, "sku")).rejects.toThrow();
+        await expect(service.prepare(LOCAL_CUTOUT_MODEL_ID)).rejects.toThrow();
+        jest.mocked(CutoutService.ready).mockResolvedValue(false);
+        await expect(service.quote(LOCAL_CUTOUT_MODEL_ID, 1)).rejects.toThrow();
+        expect(getProviderConfig).not.toHaveBeenCalled(); expect(getProviderAdapter).not.toHaveBeenCalled();
+        expect(generateImage).not.toHaveBeenCalled();
     });
 
     it("advertises only text-to-image for an actual image adapter", async () => {
@@ -306,7 +337,7 @@ describe("generation capabilities", () => {
         }
         expect(result.tools.find((tool) => tool.key === "cutout")).toMatchObject({
             status: "unavailable",
-            reason: "tool_disabled",
+            reason: "unsupported_capabilities",
             modelIdsByCapability: { segmentation: [] },
         });
     });
@@ -322,7 +353,7 @@ describe("generation capabilities", () => {
         const multi = await service.capabilities();
         expect(multi.models[0].capabilities).toEqual(["text-to-image", "reference-image", "multi-image"]);
         expect(multi.tools.find((tool) => tool.key === "fusion")).toMatchObject({ status: "available", limits: { maxInputImages: 5 } });
-        expect(multi.tools.find((tool) => tool.key === "cutout")).toMatchObject({ status: "unavailable", reason: "tool_disabled" });
+        expect(multi.tools.find((tool) => tool.key === "cutout")).toMatchObject({ status: "unavailable", reason: "unsupported_capabilities" });
         expect(generateImage).not.toHaveBeenCalled();
     });
 
@@ -447,7 +478,7 @@ describe("generation capabilities", () => {
         find.mockResolvedValue([]);
         const result = await service.capabilities();
         expect(result.models).toEqual([]);
-        expect(result.tools).toHaveLength(12);
+        expect(result.tools).toHaveLength(13);
         expect(result.tools.every((tool) => tool.status === "unavailable")).toBe(true);
     });
 });

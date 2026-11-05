@@ -27,7 +27,8 @@ export const TOOL_REGISTRY = {
     },
     sku: { status: "intended", requiredCapabilities: ["reference-image"] },
     retouch: { status: "intended", requiredCapabilities: ["reference-image"] },
-    cutout: { status: "disabled", requiredCapabilities: ["segmentation"] },
+    redraw: { status: "intended", requiredCapabilities: ["reference-image"] },
+    cutout: { status: "intended", requiredCapabilities: ["segmentation"] },
     watermark: { status: "intended", requiredCapabilities: ["reference-image"] },
     expand: { status: "intended", requiredCapabilities: ["reference-image"] },
     translate: { status: "intended", requiredCapabilities: ["reference-image"] },
@@ -35,6 +36,7 @@ export const TOOL_REGISTRY = {
 } as const satisfies Record<string, ToolDefinition>;
 
 export type ToolKey = keyof typeof TOOL_REGISTRY;
+export const LOCAL_CUTOUT_MODEL_ID = "00000000-0000-4000-8000-000000000001";
 
 export const TOOL_KEYS = Object.keys(TOOL_REGISTRY) as ToolKey[];
 

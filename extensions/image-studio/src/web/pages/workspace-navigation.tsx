@@ -1,20 +1,20 @@
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@buildingai/ui/components/ui/dialog";
-import { ChevronDown, CircleHelp, Eraser, Expand, FolderOpen, History, Image, Images, Languages, Layers3, LayoutDashboard, Lightbulb, Package, Scan, Scissors, Settings, Sparkles, Wand2, type LucideIcon } from "lucide-react";
+import { ChevronDown, CircleHelp, Eraser, Expand, FolderOpen, History, Image, Images, Languages, Layers3, LayoutDashboard, Lightbulb, Package, Paintbrush, Scan, Scissors, Settings, Sparkles, Wand2, type LucideIcon } from "lucide-react";
 import type { ToolKey } from "../../api/shared/tools";
 
 export type WorkspaceView = "create" | "works" | "materials" | "history";
 export const TOOL_LABELS: Record<ToolKey, string> = {
     main: "商品主图", detail: "商品详情", replica: "爆款复刻", creative: "创意生图",
     fusion: "多图融合", sku: "商品SKU图", retouch: "产品精修", cutout: "一键抠图",
-    watermark: "去除水印", expand: "智能扩图", translate: "图片翻译", suggest: "产品建议",
+    watermark: "去除水印", expand: "智能扩图", translate: "图片翻译", suggest: "产品建议", redraw: "局部重绘",
 };
 const TOOL_ICONS: Record<ToolKey, LucideIcon> = {
     main: Image, detail: Scan, replica: Layers3, creative: Sparkles, fusion: Images, sku: Package,
-    retouch: Wand2, cutout: Scissors, watermark: Eraser, expand: Expand, translate: Languages, suggest: Lightbulb,
+    retouch: Wand2, cutout: Scissors, watermark: Eraser, expand: Expand, translate: Languages, suggest: Lightbulb, redraw: Paintbrush,
 };
 const GROUPS: { name: string; tools: ToolKey[] }[] = [
     { name: "电商生图", tools: ["main", "detail", "replica", "creative", "fusion", "sku"] },
-    { name: "AI 修图", tools: ["retouch", "cutout", "watermark", "expand", "translate"] },
+    { name: "AI 修图", tools: ["retouch", "redraw", "cutout", "watermark", "expand", "translate"] },
 ];
 
 interface NavigationProps {

@@ -73,15 +73,20 @@ function ProductThumbnail({ id }: { id: string }) {
     </span>;
 }
 
+const UNAVAILABLE_MESSAGES: Partial<Record<ToolKey, { title: string; description: string }>> = {
+    cutout: { title: "透明抠图暂不可用", description: "当前未接入透明分割引擎。白底图不等于透明抠图，请联系管理员接入支持透明通道输出的引擎。" },
+};
+
 export default function ToolForm(props: ToolFormProps) {
     if (props.tool === "sku") return <SkuToolForm key={props.tool} {...props} />;
-    if (props.tool === "watermark" || props.tool === "translate" || props.tool === "retouch" || props.tool === "expand") return <ImageEditForm key={props.tool} {...props} tool={props.tool} />;
+    if (props.tool === "watermark" || props.tool === "translate" || props.tool === "retouch" || props.tool === "expand" || props.tool === "redraw" || props.tool === "cutout") return <ImageEditForm key={props.tool} {...props} tool={props.tool} />;
     if (isSpecializedTool(props.tool)) return <SpecializedToolForm key={props.tool} {...props} tool={props.tool} />;
     if (!isToolEditKey(props.tool) && props.tool !== "suggest") {
+        const message = UNAVAILABLE_MESSAGES[props.tool];
         return <section className="ftpl show main-product-form" aria-label="工具不可用">
             <div className="workflow-message error" role="status">
-                {props.tool === "cutout" ? "透明抠图暂不可用" : "当前没有可用的工具模型"}
-                {props.tool === "cutout" && <p>当前未接入透明分割引擎。白底图不等于透明抠图，请联系管理员接入支持透明通道输出的引擎。</p>}
+                {message?.title ?? "当前没有可用的工具模型"}
+                {message && <p>{message.description}</p>}
             </div>
         </section>;
     }

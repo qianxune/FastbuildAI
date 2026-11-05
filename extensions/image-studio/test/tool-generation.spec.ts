@@ -8,6 +8,8 @@ import { GenerationService } from "../src/api/modules/generation/services/genera
 import { EXPAND_POSITIONS, RETOUCH_MODES, TOOL_SUGGESTION_SYSTEM, type ToolWorkflowInput } from "../src/api/shared/tool-workflow";
 import { AddToolWorkflowInput1793448000000 } from "../src/api/db/migrations/1793448000000-0.1.3-add-tool-workflow-input";
 import { GENERATION_FAILED, GENERATION_STORAGE_RESTRICTED } from "../src/api/modules/generation/constants/generation.constants";
+import { LOCAL_CUTOUT_MODEL_ID } from "../src/api/shared/tools";
+import { CutoutService } from "../src/api/modules/generation/services/cutout.service";
 
 jest.mock("@buildingai/db/@nestjs/typeorm", () => ({ InjectRepository: () => () => undefined }));
 jest.mock("@buildingai/db/typeorm", () => ({ Repository: class {}, TableColumn: class { constructor(value: unknown) { Object.assign(this, value); } } }));
@@ -18,6 +20,8 @@ jest.mock("../src/api/modules/generation/services/generation-model.service", () 
 jest.mock("../src/api/modules/generation/services/generation-image.service", () => ({ GenerationImageService: class {} }));
 jest.mock("../src/api/modules/generation/services/product-image.service", () => ({ ProductImageService: class {} }));
 jest.mock("../src/api/modules/generation/services/generation-billing.service", () => ({ GenerationBillingService: class {} }));
+jest.mock("../src/api/modules/generation/services/cutout.service", () => ({ CutoutService: class { static ready = jest.fn().mockResolvedValue(true); },
+    cutoutSourceSize: jest.fn().mockResolvedValue({ width: 64, height: 96 }) }));
 
 const modelId = "11111111-1111-4111-8111-111111111111";
 const assetId = "22222222-2222-4222-8222-222222222222";
@@ -40,6 +44,10 @@ const designRequests: ToolWorkflowInput[] = [
     input({ tool: "translate", productName: undefined, count: 1, targetLanguage: "日本語", design: { protectSubject: true } }),
     ...EXPAND_POSITIONS.map((position) => input({ tool: "expand", productName: undefined, count: 1, ratio: "16:9", expansion: "surround", design: { expandScale: 37, expandPosition: position.id } })),
     ...RETOUCH_MODES.map((mode) => input({ tool: "retouch", productName: undefined, count: 1, design: { retouchMode: mode.id } })),
+    input({ tool: "redraw", productName: undefined, count: 1, instructions: "", assetIds: [assetId, secondAsset], design: {
+        redrawRegions: [{ x: .1, y: .2, width: .3, height: .4 }], redrawEdits: [{ instruction: "Replace only the pocket", referenceAssetId: secondAsset }],
+    } }),
+    input({ tool: "redraw", productName: undefined, count: 1, instructions: "Change the bag to black", design: { redrawRegions: [{ x: .1, y: .2, width: .3, height: .4 }] } }),
 ];
 
 function fixture() {
@@ -63,8 +71,9 @@ function fixture() {
     const cleanup = jest.fn().mockResolvedValue(undefined);
     const materials = { read, readThumbnail, readForAnalysis, remove, groups: jest.fn().mockResolvedValue(["Shop"]),
         updateMetadata: jest.fn(), createGroup: jest.fn(), changeGroup: jest.fn() };
-    const service = new GenerationService(repository as never, { prepare, prepareVision } as never, { persist, cleanup, url: () => "protected" } as never, { add } as never, materials as never, { createTask, finishUnsuccessful } as never);
-    return { service, record, repository, manager, builder, prepare, imageModel, read, readThumbnail, readForAnalysis, remove, createTask, finishUnsuccessful, add, persist, cleanup, prepareVision, materials };
+    const localGenerate = jest.fn().mockResolvedValue(Buffer.from("transparent-png"));
+    const service = new GenerationService(repository as never, { prepare, prepareVision } as never, { persist, cleanup, url: () => "protected" } as never, { add } as never, materials as never, { createTask, finishUnsuccessful } as never, { generate: localGenerate } as never);
+    return { service, record, repository, manager, builder, prepare, imageModel, read, readThumbnail, readForAnalysis, remove, createTask, finishUnsuccessful, add, persist, cleanup, prepareVision, materials, localGenerate };
 }
 
 describe("tool DTO whitelist", () => {
@@ -121,6 +130,51 @@ describe("tool generation lifecycle", () => {
         jest.clearAllMocks();
         jest.mocked(generateImage).mockResolvedValue({ images: [{ base64: "image", mediaType: "image/png" }] } as never);
         jest.mocked(generateText).mockResolvedValue({ text: "Observations and suggestions" } as never);
+    });
+    it("creates free original-size cutout and persists local PNG without public model inference", async () => {
+        const state = fixture();
+        const request = input({ tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, productName: undefined,
+            count: 1, instructions: "", design: { backgroundColor: null } });
+        const result = await state.service.submitTool("owner", request);
+        expect(result.modelId).toBe(LOCAL_CUTOUT_MODEL_ID);
+        expect(state.createTask).toHaveBeenCalledWith(state.manager, expect.objectContaining({ toolKey: "cutout", toolInput: request, size: "64x96", quality: "原图", count: 1 }), { power: 0 });
+        Object.assign(state.record, { toolKey: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, count: 1, toolInput: request });
+        await state.service.processTask({ id: "task", userId: "owner" });
+        expect(state.localGenerate).toHaveBeenCalledWith(Buffer.from("owned"), null);
+        expect(state.persist).toHaveBeenCalledWith("task", [{ base64: Buffer.from("transparent-png").toString("base64"), mediaType: "image/png" }]);
+        expect(state.prepare).not.toHaveBeenCalled(); expect(generateImage).not.toHaveBeenCalled(); expect(generateText).not.toHaveBeenCalled();
+    });
+    it("rejects unavailable local weights before creating or queuing a task", async () => {
+        const state = fixture();
+        jest.mocked(CutoutService.ready).mockResolvedValueOnce(false);
+        await expect(state.service.submitTool("owner", input({ tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID,
+            count: 1, instructions: "", design: { backgroundColor: "#ffffff" } }))).rejects.toThrow("模型未就绪");
+        expect(state.createTask).not.toHaveBeenCalled(); expect(state.add).not.toHaveBeenCalled(); expect(state.localGenerate).not.toHaveBeenCalled();
+    });
+    it("processes redraw regions with the existing no-retry reference-image model", async () => {
+        const state = fixture();
+        const request = designRequests[designRequests.length - 1]!;
+        Object.assign(state.record, { toolKey: "redraw", count: 1, toolInput: request });
+        await state.service.processTask({ id: "task", userId: "owner" });
+        expect(generateImage).toHaveBeenCalledTimes(1);
+        expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({ n: 1, maxRetries: 0,
+            prompt: { text: expect.stringContaining(JSON.stringify(request.design!.redrawRegions![0])), images: [Buffer.from("owned")] } }));
+        expect(state.localGenerate).not.toHaveBeenCalled();
+    });
+    it("reads both owned redraw images in order and sends the linked regional reference to the model", async () => {
+        const state = fixture(), request = designRequests.find((item) => item.design?.redrawEdits)!;
+        state.read.mockImplementation(async (_owner, id) => Buffer.from(id));
+        Object.assign(state.record, { toolKey: "redraw", count: 1, toolInput: request });
+        await state.service.processTask({ id: "task", userId: "owner" });
+        expect(state.read).toHaveBeenCalledWith("owner", secondAsset);
+        expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({ n: 1, maxRetries: 0,
+            prompt: { text: expect.stringContaining("Reference image 2 applies only to this region"), images: [Buffer.from(assetId), Buffer.from(secondAsset)] } }));
+    });
+    it("rejects redraw references exceeding the actual provider limit before billing", async () => {
+        const state = fixture(), request = designRequests.find((item) => item.design?.redrawEdits)!;
+        state.imageModel.provider = "openai";
+        await expect(state.service.submitTool("owner", request)).rejects.toThrow();
+        expect(state.createTask).not.toHaveBeenCalled(); expect(state.add).not.toHaveBeenCalled();
     });
     it("retains a safe COS 451 reason through compensation and public records without retrying generation", async () => {
         const state = fixture();

@@ -1,5 +1,5 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@buildingai/ui/components/ui/popover";
-import { ArrowDown, ArrowDownLeft, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUp, ArrowUpLeft, ArrowUpRight, ChevronDown, ChevronsLeftRight, Eraser, Languages, LoaderCircle, Maximize2, RefreshCw, Scan, Settings2, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowDownLeft, ArrowDownRight, ArrowLeft, ArrowRight, ArrowUp, ArrowUpLeft, ArrowUpRight, Check, ChevronDown, ChevronsLeftRight, Eraser, Languages, LoaderCircle, Maximize2, Paintbrush, Palette, RefreshCw, Scan, Scissors, Settings2, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { TOOL_REGISTRY } from "../../api/shared/tools";
@@ -60,8 +60,10 @@ export function ExpansionPreview({ image, ratio, scale, position, onReady }: {
 }
 
 const EXPAND_ICONS = [ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, Scan, ArrowRight, ArrowDownLeft, ArrowDown, ArrowDownRight];
+const CUTOUT_COLORS = [{ name: "透明", value: null }, { name: "白色", value: "#ffffff" }, { name: "浅蓝", value: "#c4e0f4" },
+    { name: "蓝色", value: "#287be5" }, { name: "红色", value: "#e73535" }, { name: "深红", value: "#a52639" }];
 
-export default function ImageEditForm({ tool, capabilities, locked, onSubmit, annotationTarget, onEditSource }: Omit<ToolFormProps, "tool"> & { tool: "watermark" | "translate" | "retouch" | "expand" }) {
+export default function ImageEditForm({ tool, capabilities, locked, onSubmit, annotationTarget, onEditSource }: Omit<ToolFormProps, "tool"> & { tool: "watermark" | "translate" | "retouch" | "expand" | "redraw" | "cutout" }) {
     const id = useId();
     const [images, setImages] = useState<ProductImage[]>([]);
     const [modelChoice, setModelChoice] = useState("");
@@ -75,8 +77,12 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
     const [selectedMark, setSelectedMark] = useState("");
     const [sourceReady, setSourceReady] = useState(false);
     const sourcePicker = useRef<HTMLInputElement>(null);
-    const canvasLayout = tool === "watermark" && annotationTarget !== undefined;
+    const regionalLayout = tool === "redraw" || tool === "cutout";
+    const canvasLayout = (tool === "watermark" && annotationTarget !== undefined) || tool === "redraw";
     const expansionLayout = tool === "expand" && annotationTarget !== undefined;
+    const [backgroundColor, setBackgroundColor] = useState<string | null>(null);
+    const [customBackground, setCustomBackground] = useState(false);
+    const [customColor, setCustomColor] = useState("#4090ff");
     const [expandScale, setExpandScale] = useState(80);
     const [customScale, setCustomScale] = useState(false);
     const [expandPosition, setExpandPosition] = useState<typeof EXPAND_POSITIONS[number]["id"]>("center");
@@ -88,8 +94,8 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
     const settingsTrigger = useRef<HTMLButtonElement>(null);
     const operation = useRef(false);
     const mounted = useRef(true);
-    const current = useRef({ images, locked });
-    current.current = { images, locked };
+    const current = useRef({ images, locked, marks: markHistory.marks });
+    current.current = { images, locked, marks: markHistory.marks };
     useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
     const products = useProductImagesQuery();
     const upload = useUploadProductImageMutation();
@@ -110,22 +116,30 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
             current.current = { ...current.current, images: [] };
             setImages([]); setRegion(undefined); setRegionOpen(false); setAuthorized(false);
             setMarkHistory({ marks: [], past: [], future: [] }); setSelectedMark(""); setSourceReady(false);
-            if (canvasLayout || expansionLayout) onEditSource?.();
+            if (canvasLayout || expansionLayout || regionalLayout) onEditSource?.();
         }
     }, [products.data, products.isSuccess, products.isPending, products.isFetching, products.isError, pending, upload.isPending]);
-    const input: ToolWorkflowInput = { tool, modelId: model?.id ?? "", assetIds: images.map((image) => image.id), instructions: instructions.trim(), count: 1, ratio,
-        ...(tool === "watermark" ? { authorized, design: canvasLayout ? { watermarkRegions: markHistory.marks.map((mark) => mark.region) } : { watermarkRegion: region } } : tool === "retouch" ? { design: { retouchMode } } : tool === "expand" ? { expansion: "surround", design: { expandScale, expandPosition } } : { targetLanguage: language, design: { protectSubject } }) };
-    const validation = tool === "expand" && customScale && (!Number.isInteger(expandScale) || expandScale < 1 || expandScale > 99) ? "自定义原图占比须为 1–99 的整数" : validateToolWorkflow(input);
-    const canSubmit = !busy && capable && billing.ready && validation === null && (!(canvasLayout || expansionLayout) || sourceReady);
+    const referenceAssets = tool === "redraw" ? markHistory.marks.flatMap((mark) => mark.referenceAsset ? [mark.referenceAsset.id] : []) : [];
+    const assetIds = [...new Set([...images.map((image) => image.id), ...referenceAssets])];
+    const input: ToolWorkflowInput = { tool, modelId: model?.id ?? "", assetIds, instructions: tool === "cutout" || tool === "redraw" ? "" : instructions.trim(), count: 1, ratio,
+        ...(tool === "redraw" ? { design: { redrawRegions: markHistory.marks.map((mark) => mark.region), redrawEdits: markHistory.marks.map((mark) => ({ instruction: mark.instruction?.trim() ?? "", ...(mark.referenceAsset ? { referenceAssetId: mark.referenceAsset.id } : {}) })) } } : tool === "cutout" ? { design: { backgroundColor } }
+            : tool === "watermark" ? { authorized, design: canvasLayout ? { watermarkRegions: markHistory.marks.map((mark) => mark.region) } : { watermarkRegion: region } } : tool === "retouch" ? { design: { retouchMode } } : tool === "expand" ? { expansion: "surround", design: { expandScale, expandPosition } } : { targetLanguage: language, design: { protectSubject } }) };
+    const validation = tool === "redraw" && assetIds.length > (model?.maxReferenceImages ?? 1) ? "当前模型参考图数量不足，请移除参考图或在高级设置中更换模型"
+        : tool === "redraw" && products.isSuccess && products.data && referenceAssets.some((assetId) => !products.data.some((image) => image.id === assetId)) ? "参考素材已失效，请重新选择"
+        : tool === "expand" && customScale && (!Number.isInteger(expandScale) || expandScale < 1 || expandScale > 99) ? "自定义原图占比须为 1–99 的整数" : validateToolWorkflow(input);
+    const canSubmit = !busy && capable && billing.ready && validation === null && (!(canvasLayout || expansionLayout || regionalLayout) || sourceReady);
 
     function replaceImages(next: ProductImage[], internal = false) {
         if (!mounted.current || current.current.locked || (!internal && (busy || operation.current))) return;
         if (next.length > 1) { setError("每次只能编辑 1 张图片"); return; }
         if (next[0]?.id !== current.current.images[0]?.id) {
+            current.current = { ...current.current, marks: [] };
             setRegion(undefined); setRegionOpen(false); setAuthorized(false);
             setMarkHistory({ marks: [], past: [], future: [] }); setSelectedMark(""); setSourceReady(false);
             if (tool === "expand") { setExpandScale(80); setCustomScale(false); setExpandPosition("center"); }
-            if (canvasLayout || expansionLayout) onEditSource?.();
+            if (tool === "redraw") setInstructions("");
+            if (tool === "cutout") { setBackgroundColor(null); setCustomBackground(false); }
+            if (canvasLayout || expansionLayout || regionalLayout) onEditSource?.();
             if (next[0]) {
                 const sourceRatio = next[0].width / next[0].height;
                 const distance = (value: typeof TOOL_RATIOS[number]) => { const [width, height] = value.split(":").map(Number); return width && height ? Math.abs(Math.log(sourceRatio / (width / height))) : Infinity; };
@@ -136,20 +150,27 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
         setImages(next); setError("");
     }
 
-    async function uploadFiles(files: File[], replace = false) {
+    async function uploadFiles(files: File[], replace = false, markId?: string) {
         const file = files[0];
         if (!file || busy || operation.current || current.current.locked) return;
-        if (files.length !== 1 || (!replace && current.current.images.length)) { setError("每次只能编辑 1 张图片，请先移除当前图片"); return; }
+        if (markId && !current.current.marks.some((mark) => mark.id === markId)) return;
+        if (files.length !== 1 || (!markId && !replace && current.current.images.length)) { setError("每次只能编辑 1 张图片，请先移除当前图片"); return; }
         if (!validImageFile(file)) { setError("请选择不超过 10 MiB 的 PNG、JPEG 或 WebP 图片"); return; }
         operation.current = true; setPending(true); setError("");
         const uploadModel = { ...liveModel.current };
+        const sourceId = current.current.images[0]?.id;
         try {
             const image = await upload.mutateAsync(file);
             if (!mounted.current) return;
             if (current.current.locked || liveModel.current.id !== uploadModel.id || liveModel.current.capable !== uploadModel.capable) {
                 setError("图片已上传至素材库；当前状态已变化，请稍后重新选择素材"); return;
             }
-            replaceImages([image], true);
+            if (markId) {
+                if (sourceId !== current.current.images[0]?.id || !current.current.marks.some((mark) => mark.id === markId)) {
+                    setError("图片已上传至素材库；原图或标注已变化，请重新选择参考图"); return;
+                }
+                changeMarkDetails(markId, { referenceAsset: image }, true);
+            } else replaceImages([image], true);
         } catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : "上传失败，请稍后重试"); }
         finally { operation.current = false; if (mounted.current) setPending(false); }
     }
@@ -157,7 +178,7 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
     async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (busy || operation.current || current.current.locked) return;
-        if (!canSubmit) { setError(validation || (!capable ? "请选择支持参考图编辑的可用模型" : billing.costText)); return; }
+        if (!canSubmit) { setError(validation || (!capable ? tool === "cutout" ? "本地分割模型尚未就绪" : "请选择支持参考图编辑的可用模型" : !sourceReady && regionalLayout ? "原图尚未加载完成" : billing.costText)); return; }
         operation.current = true; setPending(true); setError("");
         try { await onSubmit(input); }
         catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : "提交失败，请稍后重试"); }
@@ -166,13 +187,30 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
 
     function changeMarks(marks: WatermarkMark[]) {
         if (busy || operation.current || current.current.locked || !mounted.current) return;
+        current.current = { ...current.current, marks };
         setMarkHistory((history) => recordWatermarkEdit(history, marks));
         if (!marks.some((mark) => mark.id === selectedMark)) setSelectedMark("");
         if (canvasLayout) onEditSource?.();
     }
+    function changeMarkDetails(markId: string, patch: Pick<WatermarkMark, "instruction" | "referenceAsset">, internal = false) {
+        if (!mounted.current || current.current.locked || (!internal && (busy || operation.current))) return;
+        if (!current.current.marks.some((mark) => mark.id === markId)) return;
+        const marks = current.current.marks.map((mark) => mark.id === markId ? { ...mark, ...patch } : mark);
+        const references = new Set(marks.flatMap((mark) => mark.referenceAsset ? [mark.referenceAsset.id] : []));
+        if (references.has(current.current.images[0]?.id ?? "")) { setError("请上传不同于原图的标注参考图"); return; }
+        if (references.size + 1 > (model?.maxReferenceImages ?? 1)) { setError("当前模型参考图数量不足，请更换模型或移除参考图"); return; }
+        current.current = { ...current.current, marks };
+        setMarkHistory((history) => recordWatermarkEdit(history, marks)); setError(""); onEditSource?.();
+    }
+    function changeInstructions(value: string) {
+        if (busy || current.current.locked || operation.current || !mounted.current) return;
+        setInstructions(value); if (regionalLayout || expansionLayout) onEditSource?.();
+    }
     const editorProps = { image: images[0], history: markHistory, selected: selectedMark, disabled: busy, onChange: changeMarks,
         onSelect: (id: string) => { if (!busy && !current.current.locked) { setSelectedMark(id); if (canvasLayout) onEditSource?.(); } },
-        onHistory: (direction: "undo" | "redo") => { if (!busy && !current.current.locked && !operation.current) { setMarkHistory((history) => stepWatermarkHistory(history, direction)); setSelectedMark(""); } }, onReady: setSourceReady };
+        onHistory: (direction: "undo" | "redo") => { if (!busy && !current.current.locked && !operation.current) { setMarkHistory((history) => stepWatermarkHistory(history, direction)); setSelectedMark(""); } }, onReady: setSourceReady,
+        ...(tool === "redraw" ? { variant: "redraw" as const }
+            : tool === "cutout" ? { variant: "cutout" as const, readOnly: true } : {}) };
 
     function changeExpansion(scale: number, position: typeof expandPosition, custom = customScale) {
         if (busy || operation.current || current.current.locked || !mounted.current) return;
@@ -180,25 +218,70 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
         if (expansionLayout) onEditSource?.();
     }
 
-    return <form className={`ftpl show specialized-form image-edit-form image-edit-${tool}${canvasLayout ? " watermark-side-form" : ""}`} aria-label={TOOL_WORKFLOWS[tool].name} data-workflow={tool} onSubmit={submit} noValidate>
-        {canvasLayout && annotationTarget && createPortal(<WatermarkCanvas {...editorProps} />, annotationTarget)}
+    function changeBackground(value: string | null, custom = false) {
+        if (busy || current.current.locked || operation.current || !mounted.current || (value !== null && !/^#[0-9a-f]{6}$/i.test(value))) return;
+        setBackgroundColor(value); setCustomBackground(custom); if (custom && value) setCustomColor(value); onEditSource?.();
+    }
+    const footer = <footer className={`specialized-footer${regionalLayout ? " regional-action-bar" : ""}`}>
+        <Popover open={settingsOpen} onOpenChange={setSettingsOpen} modal={false}>
+            <PopoverTrigger asChild><button ref={settingsTrigger} type="button" className="image-edit-settings-trigger" disabled={busy}><Settings2 size={16} />高级设置<span>{tool === "cutout" ? "原图" : ratio}</span><ChevronDown size={14} /></button></PopoverTrigger>
+            <PopoverContent className="main-settings-popover image-edit-settings" side="top" align="start" sideOffset={8} collisionPadding={12}
+                container={settingsTrigger.current?.closest<HTMLElement>(".studio-app") ?? undefined} aria-label="编辑高级设置">
+                <header><h3>高级设置</h3><button type="button" aria-label="关闭高级设置" title="关闭高级设置" onClick={() => setSettingsOpen(false)}><X size={16} /></button></header>
+                <fieldset disabled={busy}>
+                    <label htmlFor={`${id}-model`}>{tool === "cutout" ? "本地引擎" : "生成模型"}<select id={`${id}-model`} aria-label="生成模型" value={model?.id ?? ""} onChange={(event) => setModelChoice(event.target.value)}>
+                        {!model && <option value="">请选择模型</option>}{model && !capable && <option value={model.id}>{model.name}（不可用）</option>}
+                        {models.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                    {tool === "cutout" ? <div className="cutout-output-size"><span>输出尺寸</span><strong>{images[0] ? `${images[0].width} × ${images[0].height}` : "原图尺寸"}</strong><span>PNG</span></div>
+                        : <label htmlFor={`${id}-ratio`}>图片比例<select id={`${id}-ratio`} aria-label="图片比例" value={ratio} onChange={(event) => { if (!busy && !current.current.locked) { setRatio(event.target.value as typeof ratio); if (expansionLayout || regionalLayout) onEditSource?.(); } }}>
+                            {TOOL_RATIOS.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
+                </fieldset>
+            </PopoverContent>
+        </Popover>
+        {regionalLayout && <span className="regional-output-summary">{tool === "cutout" ? images[0] ? `${images[0].width} × ${images[0].height} · PNG` : "原图 · PNG" : `${ratio} · 2K`}</span>}
+        <div className="specialized-submit-row">{tool !== "retouch" && tool !== "expand" && !regionalLayout && <span className="specialized-cost" role="status">{billing.costText}</span>}<button type="submit" form={`${id}-image-edit`} className="specialized-primary" disabled={!canSubmit}>
+            {pending ? <LoaderCircle size={17} /> : tool === "watermark" ? <Eraser size={17} /> : tool === "retouch" ? <Sparkles size={17} /> : tool === "expand" ? <Maximize2 size={17} /> : tool === "redraw" ? <Paintbrush size={17} /> : tool === "cutout" ? <Scissors size={17} /> : <Languages size={17} />}
+            {tool === "watermark" ? "开始去水印" : tool === "retouch" ? "立即生成" : tool === "expand" ? "立即扩图" : tool === "redraw" ? "立即重绘" : tool === "cutout" ? "立即抠图" : "开始翻译"}{(tool === "retouch" || tool === "expand" || regionalLayout) && <small>{billing.costText}</small>}</button></div>
+    </footer>;
+
+    return <form id={`${id}-image-edit`} className={`ftpl show specialized-form image-edit-form image-edit-${tool}${canvasLayout || regionalLayout ? " watermark-side-form" : ""}`} aria-label={TOOL_WORKFLOWS[tool].name} data-workflow={tool} onSubmit={submit} noValidate>
+        {(canvasLayout || tool === "cutout") && (annotationTarget ? createPortal(<WatermarkCanvas {...editorProps} />, annotationTarget) : regionalLayout && annotationTarget === undefined && <WatermarkCanvas {...editorProps} />)}
         {expansionLayout && annotationTarget && createPortal(<ExpansionPreview image={images[0]} ratio={ratio} scale={expandScale} position={expandPosition} onReady={setSourceReady} />, annotationTarget)}
-        {tool !== "retouch" && tool !== "expand" && !canvasLayout && <header className="specialized-heading"><h2>{TOOL_WORKFLOWS[tool].name}</h2>{tool === "watermark" ? <Eraser size={22} /> : <Languages size={22} />}</header>}
-        {!capable && <p className="specialized-message" role="status">当前模型不可用于参考图编辑，请选择可用模型或联系管理员配置。</p>}
+        {tool !== "retouch" && tool !== "expand" && !canvasLayout && !regionalLayout && <header className="specialized-heading"><h2>{TOOL_WORKFLOWS[tool].name}</h2>{tool === "watermark" ? <Eraser size={22} /> : <Languages size={22} />}</header>}
+        {!capable && <p className="specialized-message" role="status">{tool === "cutout" ? "本地抠图模型未就绪，请联系管理员完成模型下载后刷新。" : "当前模型不可用于参考图编辑，请选择可用模型或联系管理员配置。"}</p>}
         <fieldset className="specialized-fields" disabled={busy}>
-            <section className="specialized-band"><AssetRolePicker label={tool === "retouch" || tool === "expand" || canvasLayout ? "上传图片" : "待编辑图片"} images={images} max={1} disabled={busy} original={!canvasLayout} dropzone={tool === "retouch" || tool === "expand"} previewRegion={tool === "watermark" && !canvasLayout ? region : undefined}
+            <section className="specialized-band"><AssetRolePicker label={tool === "retouch" || tool === "expand" || canvasLayout || regionalLayout ? "上传图片" : "待编辑图片"} images={images} max={1} disabled={busy} original={!canvasLayout} dropzone={tool === "retouch" || tool === "expand" || regionalLayout} appearance={regionalLayout ? "links" : "default"} allowReplacement={regionalLayout} previewRegion={tool === "watermark" && !canvasLayout ? region : undefined}
                 onChange={(next) => replaceImages(next)} onFiles={uploadFiles} />
-                {(canvasLayout || expansionLayout) && images.length > 0 && <div className="watermark-source-actions">
+                {(canvasLayout || expansionLayout || regionalLayout) && images.length > 0 && <div className="watermark-source-actions">
                     <button type="button" disabled={busy} onClick={() => onEditSource?.()}><Scan size={14} />重新编辑</button>
                     <button type="button" disabled={busy} onClick={() => sourcePicker.current?.click()}><RefreshCw size={14} />重新上传</button>
                 </div>}
-                {(canvasLayout || expansionLayout) && <input ref={sourcePicker} type="file" hidden accept="image/png,image/jpeg,image/webp" aria-label={tool === "expand" ? "重新上传扩图原图" : "重新上传水印原图"} disabled={busy}
+                {(canvasLayout || expansionLayout || regionalLayout) && <input ref={sourcePicker} type="file" hidden accept="image/png,image/jpeg,image/webp" aria-label={tool === "expand" ? "重新上传扩图原图" : tool === "redraw" ? "重新上传重绘原图" : tool === "cutout" ? "重新上传抠图原图" : "重新上传水印原图"} disabled={busy}
                     onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = "";
                         if (busy || operation.current || current.current.locked || !files.length) return;
                         if (files.length !== 1 || !files[0] || !validImageFile(files[0])) { setError("请选择不超过 10 MiB 的 PNG、JPEG 或 WebP 图片"); return; }
                         void uploadFiles(files, true);
                     }} />}
             </section>
+            {tool === "cutout" && <section className="specialized-band"><h3 id={`${id}-background`}>背景颜色</h3><div className="cutout-color-swatches" role="radiogroup" aria-labelledby={`${id}-background`}>
+                {CUTOUT_COLORS.map((color) => <label key={color.name} title={color.name} className="cutout-color-choice"><input type="radio" name={`${id}-background-color`} aria-label={`背景颜色：${color.name}`} value={color.value ?? "transparent"} checked={!customBackground && backgroundColor === color.value} disabled={busy}
+                    onChange={() => changeBackground(color.value)} /><span className={`cutout-color-preview${color.value === null ? " cutout-color-transparent" : ""}`} style={{ backgroundColor: color.value ?? undefined, color: ["蓝色", "红色", "深红"].includes(color.name) ? "#fff" : "#263240" }}><Check size={15} /></span></label>)}
+                <label className="cutout-custom-color" data-selected={customBackground} title="自定义背景颜色"><Palette size={20} /><input type="color" id={`${id}-custom-color`} aria-label="自定义背景颜色" value={customColor} disabled={busy} onChange={(event) => changeBackground(event.target.value, true)} /></label>
+            </div></section>}
+            {tool === "redraw" && <section className="specialized-band redraw-descriptions" aria-label="重绘描述">
+                <header className="redraw-descriptions-heading"><h3>重绘描述</h3><span>{markHistory.marks.filter((mark) => mark.instruction?.trim() || mark.referenceAsset).length}/3</span></header>
+                {markHistory.marks.map((mark, index) => <div key={mark.id} className="redraw-description-row" data-selected={selectedMark === mark.id}>
+                    <div className="redraw-description-content"><button type="button" className="redraw-description-label" aria-label={`选择标注描述 ${index + 1}`} disabled={busy} onClick={() => editorProps.onSelect(mark.id)}>标注{index + 1}</button>
+                        <textarea id={`${id}-instructions-${mark.id}`} aria-label={`标注${index + 1}重绘描述`} placeholder="请输入您要重绘的内容，例如：更换颜色…" rows={2} maxLength={1500} value={mark.instruction ?? ""}
+                            onFocus={() => editorProps.onSelect(mark.id)} onChange={(event) => changeMarkDetails(mark.id, { instruction: event.target.value })} />
+                    </div>
+                    <AssetRolePicker label={`标注${index + 1}参考图`} images={mark.referenceAsset ? [mark.referenceAsset] : []} max={1} appearance="compact" allowReplacement disabled={busy || !capable || (model?.maxReferenceImages ?? 1) < 2}
+                        onChange={(next) => { if (next.length <= 1) changeMarkDetails(mark.id, { referenceAsset: next[0] }); }} onFiles={(files) => uploadFiles(files, true, mark.id)} />
+                    <button type="button" className="redraw-description-remove" aria-label={`删除标注 ${index + 1}`} title="删除标注" disabled={busy} onClick={() => changeMarks(markHistory.marks.filter((item) => item.id !== mark.id))}><X size={12} /></button>
+                </div>)}
+                {!markHistory.marks.length && <span className="redraw-description-empty" role="status">尚无标注</span>}
+                {markHistory.marks.some((mark) => mark.instruction?.trim() || mark.referenceAsset) && validation && <p className="specialized-message" role="status">{validation}</p>}
+            </section>}
             {tool === "retouch" && <section className="specialized-band"><h3 id={`${id}-mode-label`}>精修模式</h3><div className="retouch-modes" role="radiogroup" aria-labelledby={`${id}-mode-label`}>
                 {RETOUCH_MODES.map((mode) => <label key={mode.id} className="retouch-mode"><input type="radio" name={`${id}-retouch-mode`} value={mode.id} checked={retouchMode === mode.id} aria-label={mode.label} onChange={() => setRetouchMode(mode.id)} /><span>{mode.label}</span></label>)}
             </div></section>}
@@ -223,28 +306,11 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
                     {TOOL_LANGUAGES.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
                 <label className="image-edit-check" title="保留商品及包装上的文字，仅翻译周边排版文字"><input id={`${id}-protect`} type="checkbox" checked={protectSubject} onChange={(event) => setProtectSubject(event.target.checked)} />保护商品主体</label>
             </section> : null}
-            <section className="specialized-band"><label className="specialized-field" htmlFor={`${id}-instructions`}>补充要求（选填）<textarea id={`${id}-instructions`} rows={3} maxLength={1500} value={instructions} onChange={(event) => { if (!busy && !current.current.locked) { setInstructions(event.target.value); if (expansionLayout) onEditSource?.(); } }} /></label></section>
+            {tool !== "cutout" && tool !== "redraw" && <section className="specialized-band"><label className="specialized-field" htmlFor={`${id}-instructions`}>补充要求（选填）<textarea id={`${id}-instructions`} rows={3} maxLength={1500} value={instructions} onChange={(event) => changeInstructions(event.target.value)} /></label></section>}
         </fieldset>
         {regionOpen && images[0] && <SkuRegionEditor key={images[0].id} title="框选水印区域" image={images[0]} region={region} disabled={busy}
             onChange={(next) => { if (!busy && !current.current.locked) setRegion(next); }} onClose={() => setRegionOpen(false)} />}
-        <footer className="specialized-footer">
-            <Popover open={settingsOpen} onOpenChange={setSettingsOpen} modal={false}>
-                <PopoverTrigger asChild><button ref={settingsTrigger} type="button" className="image-edit-settings-trigger" disabled={busy}><Settings2 size={16} />高级设置<span>{ratio}</span><ChevronDown size={14} /></button></PopoverTrigger>
-                <PopoverContent className="main-settings-popover image-edit-settings" side="top" align="start" sideOffset={8} collisionPadding={12}
-                    container={settingsTrigger.current?.closest<HTMLElement>(".studio-app") ?? undefined} aria-label="编辑高级设置">
-                    <header><h3>高级设置</h3><button type="button" aria-label="关闭高级设置" title="关闭高级设置" onClick={() => setSettingsOpen(false)}><X size={16} /></button></header>
-                    <fieldset disabled={busy}>
-                        <label htmlFor={`${id}-model`}>生成模型<select id={`${id}-model`} aria-label="生成模型" value={model?.id ?? ""} onChange={(event) => setModelChoice(event.target.value)}>
-                            {!model && <option value="">请选择模型</option>}{model && !capable && <option value={model.id}>{model.name}（不可用）</option>}
-                            {models.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                        <label htmlFor={`${id}-ratio`}>图片比例<select id={`${id}-ratio`} aria-label="图片比例" value={ratio} onChange={(event) => { if (!busy && !current.current.locked) { setRatio(event.target.value as typeof ratio); if (expansionLayout) onEditSource?.(); } }}>
-                            {TOOL_RATIOS.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-                    </fieldset>
-                </PopoverContent>
-            </Popover>
-            <div className="specialized-submit-row">{tool !== "retouch" && tool !== "expand" && <span className="specialized-cost" role="status">{billing.costText}</span>}<button type="submit" className="specialized-primary" disabled={!canSubmit}>
-                {pending ? <LoaderCircle size={17} /> : tool === "watermark" ? <Eraser size={17} /> : tool === "retouch" ? <Sparkles size={17} /> : tool === "expand" ? <Maximize2 size={17} /> : <Languages size={17} />}{tool === "watermark" ? "开始去水印" : tool === "retouch" ? "立即生成" : tool === "expand" ? "立即扩图" : "开始翻译"}{(tool === "retouch" || tool === "expand") && <small>{billing.costText}</small>}</button></div>
-        </footer>
+        {regionalLayout && annotationTarget ? createPortal(footer, annotationTarget) : footer}
         {error && <p className="specialized-message specialized-error" role="alert">{error}</p>}
     </form>;
 }

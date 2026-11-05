@@ -12,12 +12,14 @@ import {
     type GenerationCapabilities,
     TOOL_KEYS,
     TOOL_REGISTRY,
+    LOCAL_CUTOUT_MODEL_ID,
     type ToolCapability,
     type ToolDefinition,
 } from "../../../shared/tools";
 import { MODEL_UNAVAILABLE } from "../constants/generation.constants";
 import { quoteGenerationCredits } from "../../../shared/billing";
 import { isToolEditKey, toolReferenceLimit, TOOL_RATIOS } from "../../../shared/tool-workflow";
+import { CUTOUT_MODEL, CutoutService } from "./cutout.service";
 
 @Injectable()
 export class GenerationModelService {
@@ -93,6 +95,8 @@ export class GenerationModelService {
             });
         }
 
+        if (await CutoutService.ready()) models.push({ id: LOCAL_CUTOUT_MODEL_ID, name: "BiRefNet Lite（本地）", model: CUTOUT_MODEL,
+            provider: "本地 CPU", providerCode: "local-cutout", capabilities: ["segmentation"], maxReferenceImages: 1 });
         return {
             models,
             tools: TOOL_KEYS.map((key) => {
@@ -121,7 +125,7 @@ export class GenerationModelService {
                           ? null
                           : "unsupported_capabilities",
                     limits: {
-                        sizes: isToolEditKey(key) ? TOOL_RATIOS : null,
+                        sizes: key === "cutout" ? null : isToolEditKey(key) ? TOOL_RATIOS : null,
                         maxInputImages: key === "main" || key === "suggest" ? 5 : isToolEditKey(key)
                             ? Math.max(0, ...eligibleModels.map((model) => model.maxReferenceImages ?? 0)) : null,
                     },
@@ -154,6 +158,7 @@ export class GenerationModelService {
 
     /** 校验图片模型状态并读取密钥配置，构造符合 V3 接口的图片适配器。 */
     async prepare(modelId: string) {
+        if (modelId === LOCAL_CUTOUT_MODEL_ID) throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
         const model = await this.publicAiModelService.getModelInfo(modelId).catch(() => {
             throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
         });
@@ -218,6 +223,10 @@ export class GenerationModelService {
 
     /** 校验模型启用状态并按图片数量计算积分报价，不调用模型或扣费。 */
     async quote(modelId: string, count: number, tool?: "sku") {
+        if (modelId === LOCAL_CUTOUT_MODEL_ID) {
+            if (count !== 1 || tool !== undefined || !await CutoutService.ready()) throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
+            return quoteGenerationCredits({ power: 0 }, 1);
+        }
         const model = await this.modelRepository.findOne({
             where: {
                 id: modelId,

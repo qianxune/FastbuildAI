@@ -1,17 +1,18 @@
 import { TOOL_KEYS, TOOL_REGISTRY } from "../src/api/shared/tools";
 
 describe("image studio tool registry", () => {
-    it("preserves the twelve stable UI keys and eleven intended tools", () => {
+    it("preserves stable UI keys and adds regional redraw with intended cutout", () => {
         expect(TOOL_KEYS).toEqual([
             "main", "detail", "replica", "creative", "fusion", "sku",
-            "retouch", "cutout", "watermark", "expand", "translate", "suggest",
+            "retouch", "redraw", "cutout", "watermark", "expand", "translate", "suggest",
         ]);
         expect(Object.values(TOOL_REGISTRY).filter((tool) => tool.status === "intended"))
-            .toHaveLength(11);
+            .toHaveLength(13);
     });
 
-    it("disables cutout without advertising transparent segmentation", () => {
-        expect(TOOL_REGISTRY.cutout).toEqual({ status: "disabled", requiredCapabilities: ["segmentation"] });
+    it("requires genuine segmentation for intended cutout and reference guidance for redraw", () => {
+        expect(TOOL_REGISTRY.cutout).toEqual({ status: "intended", requiredCapabilities: ["segmentation"] });
+        expect(TOOL_REGISTRY.redraw).toEqual({ status: "intended", requiredCapabilities: ["reference-image"] });
         expect(TOOL_REGISTRY.watermark).toEqual({ status: "intended", requiredCapabilities: ["reference-image"] });
     });
 
