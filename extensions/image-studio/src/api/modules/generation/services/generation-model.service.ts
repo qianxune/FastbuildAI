@@ -28,6 +28,7 @@ export class GenerationModelService {
         @InjectRepository(AiModel)
         private readonly modelRepository: Repository<AiModel>,
         private readonly publicAiModelService: PublicAiModelService,
+        private readonly cutoutService?: CutoutService,
     ) {}
 
     /** 根据已启用配置及适配器接口推导工具能力，不调用供应商或验证真实密钥权限。 */
@@ -95,8 +96,8 @@ export class GenerationModelService {
             });
         }
 
-        if (await CutoutService.ready()) models.push({ id: LOCAL_CUTOUT_MODEL_ID, name: "BiRefNet Lite（本地）", model: CUTOUT_MODEL,
-            provider: "本地 CPU", providerCode: "local-cutout", capabilities: ["segmentation"], maxReferenceImages: 1 });
+        if (await this.cutoutService?.ready()) models.push({ id: LOCAL_CUTOUT_MODEL_ID, name: "腾讯云智能抠图", model: CUTOUT_MODEL,
+            provider: "腾讯云数据万象", providerCode: "tencent-ci", capabilities: ["segmentation"], maxReferenceImages: 1 });
         return {
             models,
             tools: TOOL_KEYS.map((key) => {
@@ -224,8 +225,10 @@ export class GenerationModelService {
     /** 校验模型启用状态并按图片数量计算积分报价，不调用模型或扣费。 */
     async quote(modelId: string, count: number, tool?: "sku") {
         if (modelId === LOCAL_CUTOUT_MODEL_ID) {
-            if (count !== 1 || tool !== undefined || !await CutoutService.ready()) throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
-            return quoteGenerationCredits({ power: 0 }, 1);
+            const cutout = this.cutoutService;
+            if (!cutout || count !== 1 || tool !== undefined || !await cutout.ready()) throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);
+            try { return quoteGenerationCredits(cutout.billingRule(), 1); }
+            catch { throw HttpErrorFactory.badRequest("抠图积分价格配置无效，请联系管理员"); }
         }
         const model = await this.modelRepository.findOne({
             where: {

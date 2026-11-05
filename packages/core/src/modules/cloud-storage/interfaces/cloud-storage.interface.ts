@@ -5,4 +5,5 @@ export interface CloudStorageParams {
     file: Express.Multer.File;
     path: string;
     description?: string;
+    privateObject?: boolean;
 }

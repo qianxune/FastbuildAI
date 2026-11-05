@@ -49,8 +49,8 @@ jest.mock("@buildingai/errors", () => ({
 jest.mock("@buildingai/utils", () => ({ getProviderSecret: jest.fn() }));
 jest.mock("ai", () => ({ generateImage: jest.fn(), generateText: jest.fn() }));
 jest.mock("../src/api/modules/generation/services/cutout.service", () => ({
-    CutoutService: class { static ready = jest.fn().mockResolvedValue(false); },
-    CUTOUT_MODEL: "onnx-community/BiRefNet_lite-ONNX",
+    CutoutService: class { static ready = jest.fn().mockResolvedValue(false); ready = CutoutService.ready; billingRule = () => ({ power: 0 }); },
+    CUTOUT_MODEL: "Tencent CI AIPicMatting",
 }));
 jest.mock("fs/promises", () => ({
     lstat: jest.fn(),
@@ -248,6 +248,7 @@ describe("generation capabilities", () => {
     const service = new GenerationModelService(
         { find } as unknown as Repository<AiModel>,
         { getProviderConfig, getProviderAdapter } as unknown as PublicAiModelService,
+        new CutoutService(),
     );
     const configuredModel = (overrides: Record<string, unknown> = {}) => ({
         id: "image-model",
@@ -281,7 +282,7 @@ describe("generation capabilities", () => {
         >);
     });
 
-    it("advertises local cutout only when pinned weights are ready, independent of paid models", async () => {
+    it("advertises Tencent cutout only when COS is configured, independent of image models", async () => {
         find.mockResolvedValue([]);
         expect((await service.capabilities()).tools.find((tool) => tool.key === "cutout")).toMatchObject({ status: "unavailable", reason: "unsupported_capabilities" });
         jest.mocked(CutoutService.ready).mockResolvedValue(true);
@@ -293,7 +294,7 @@ describe("generation capabilities", () => {
         expect(getProviderMock).not.toHaveBeenCalled(); expect(generateImage).not.toHaveBeenCalled();
     });
 
-    it("quotes one ready local cutout for zero credits and never prepares provider secrets", async () => {
+    it("quotes the configured cutout credits and never prepares image model secrets", async () => {
         jest.mocked(CutoutService.ready).mockResolvedValue(true);
         await expect(service.quote(LOCAL_CUTOUT_MODEL_ID, 1)).resolves.toMatchObject({ total: 0 });
         await expect(service.quote(LOCAL_CUTOUT_MODEL_ID, 2)).rejects.toThrow();

@@ -72,7 +72,7 @@ function fixture() {
     const materials = { read, readThumbnail, readForAnalysis, remove, groups: jest.fn().mockResolvedValue(["Shop"]),
         updateMetadata: jest.fn(), createGroup: jest.fn(), changeGroup: jest.fn() };
     const localGenerate = jest.fn().mockResolvedValue(Buffer.from("transparent-png"));
-    const service = new GenerationService(repository as never, { prepare, prepareVision } as never, { persist, cleanup, url: () => "protected" } as never, { add } as never, materials as never, { createTask, finishUnsuccessful } as never, { generate: localGenerate } as never);
+    const service = new GenerationService(repository as never, { prepare, prepareVision } as never, { persist, cleanup, url: () => "protected" } as never, { add } as never, materials as never, { createTask, finishUnsuccessful } as never, { generate: localGenerate, ready: CutoutService.ready, billingRule: () => ({ power: 0 }) } as never);
     return { service, record, repository, manager, builder, prepare, imageModel, read, readThumbnail, readForAnalysis, remove, createTask, finishUnsuccessful, add, persist, cleanup, prepareVision, materials, localGenerate };
 }
 
@@ -131,7 +131,7 @@ describe("tool generation lifecycle", () => {
         jest.mocked(generateImage).mockResolvedValue({ images: [{ base64: "image", mediaType: "image/png" }] } as never);
         jest.mocked(generateText).mockResolvedValue({ text: "Observations and suggestions" } as never);
     });
-    it("creates free original-size cutout and persists local PNG without public model inference", async () => {
+    it("creates original-size Tencent cutout with configured credits without public model inference", async () => {
         const state = fixture();
         const request = input({ tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, productName: undefined,
             count: 1, instructions: "", design: { backgroundColor: null } });
@@ -144,11 +144,11 @@ describe("tool generation lifecycle", () => {
         expect(state.persist).toHaveBeenCalledWith("task", [{ base64: Buffer.from("transparent-png").toString("base64"), mediaType: "image/png" }]);
         expect(state.prepare).not.toHaveBeenCalled(); expect(generateImage).not.toHaveBeenCalled(); expect(generateText).not.toHaveBeenCalled();
     });
-    it("rejects unavailable local weights before creating or queuing a task", async () => {
+    it("rejects unavailable Tencent configuration before creating or queuing a task", async () => {
         const state = fixture();
         jest.mocked(CutoutService.ready).mockResolvedValueOnce(false);
         await expect(state.service.submitTool("owner", input({ tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID,
-            count: 1, instructions: "", design: { backgroundColor: "#ffffff" } }))).rejects.toThrow("模型未就绪");
+            count: 1, instructions: "", design: { backgroundColor: "#ffffff" } }))).rejects.toThrow("腾讯云抠图未配置");
         expect(state.createTask).not.toHaveBeenCalled(); expect(state.add).not.toHaveBeenCalled(); expect(state.localGenerate).not.toHaveBeenCalled();
     });
     it("processes redraw regions with the existing no-retry reference-image model", async () => {
@@ -160,6 +160,16 @@ describe("tool generation lifecycle", () => {
         expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({ n: 1, maxRetries: 0,
             prompt: { text: expect.stringContaining(JSON.stringify(request.design!.redrawRegions![0])), images: [Buffer.from("owned")] } }));
         expect(state.localGenerate).not.toHaveBeenCalled();
+    });
+    it("retains a safe Tencent permission error without retrying or persisting output", async () => {
+        const state = fixture();
+        Object.assign(state.record, { toolKey: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, count: 1,
+            toolInput: input({ tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, count: 1, instructions: "", design: { backgroundColor: null } }) });
+        state.localGenerate.mockRejectedValueOnce(new Error("CUTOUT_ACCESS_DENIED"));
+        await expect(state.service.processTask({ id: "task", userId: "owner" })).rejects.toThrow(GENERATION_FAILED);
+        expect(state.finishUnsuccessful).toHaveBeenCalledWith(state.manager, "owner", "task", ImageGenerationStatus.FAILED, expect.stringContaining("ci:CreateS3AIPicMattingJob"));
+        expect(state.localGenerate).toHaveBeenCalledTimes(1);
+        expect(state.persist).not.toHaveBeenCalled();
     });
     it("reads both owned redraw images in order and sends the linked regional reference to the model", async () => {
         const state = fixture(), request = designRequests.find((item) => item.design?.redrawEdits)!;

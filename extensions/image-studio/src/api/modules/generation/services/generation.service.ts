@@ -398,9 +398,9 @@ export class GenerationService {
         const error = validateToolWorkflow(input);
         if (error) throw HttpErrorFactory.badRequest(error);
         const local = input.tool === "cutout";
-        if (local && !await CutoutService.ready()) throw HttpErrorFactory.badRequest("本地抠图模型未就绪，请联系管理员完成模型下载");
+        if (local && !await this.cutoutService.ready()) throw HttpErrorFactory.badRequest("腾讯云抠图未配置，请联系管理员启用 COS 存储及数据万象");
         const prepared = local ? undefined : await this.generationModelService.prepare(input.modelId);
-        const model = prepared?.model ?? { id: LOCAL_CUTOUT_MODEL_ID, name: "BiRefNet Lite（本地）", billingRule: { power: 0 } };
+        const model = prepared?.model ?? { id: LOCAL_CUTOUT_MODEL_ID, name: "腾讯云智能抠图", billingRule: this.cutoutService.billingRule() };
         if (prepared && input.assetIds.length > toolReferenceLimit(prepared.imageModel))
             throw HttpErrorFactory.badRequest("所选模型不支持所需数量的参考图，请选择支持多图输入的 Seedream 模型");
         const generation = await this.withProductLock(userId, async (repository) => {
@@ -629,7 +629,8 @@ export class GenerationService {
         } catch (error) {
             this.logFailure(data.id, stage, error);
             await this.generationImageService.cleanup(data.id, images);
-            await this.failTask(data, stage === "persist_images" && error instanceof Error ? error.message : GENERATION_FAILED);
+            await this.failTask(data, error instanceof Error && (stage === "persist_images"
+                || (stage === "generate_image" && error.message.startsWith("CUTOUT_"))) ? publicGenerationError(error.message) : GENERATION_FAILED);
             throw new Error(GENERATION_FAILED);
         }
         await this.generationImageService.cleanup(data.id, images);
@@ -678,7 +679,7 @@ export class GenerationService {
     /** 在事务中终结未结束任务并退款，重复调用不会重复退还积分。 */
     async failTask(data: GenerationJobData, failureMessage = GENERATION_FAILED) {
         await this.generationRepository.manager.transaction((manager) => {
-            if (failureMessage === GENERATION_STORAGE_RESTRICTED) {
+            if (publicGenerationError(failureMessage) !== GENERATION_FAILED) {
                 return this.generationBillingService.finishUnsuccessful(
                     manager,
                     data.userId,

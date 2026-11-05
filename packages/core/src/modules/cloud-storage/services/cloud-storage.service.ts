@@ -43,6 +43,11 @@ export class CloudStorageService {
         return this.cosStorageService.readBuffer(storageConfig, key, maxBytes);
     }
 
+    async matting(storageConfig: StorageConfig, key: string, maxBytes: number) {
+        if (storageConfig.storageType !== StorageType.COS) throw new Error("Matting requires Tencent COS storage");
+        return this.cosStorageService.matting(storageConfig, key, maxBytes);
+    }
+
     /** 从指定腾讯 COS 配置删除对象，不依赖当前启用的存储类型。 */
     async deleteObject(storageConfig: StorageConfig, key: string) {
         if (storageConfig.storageType !== StorageType.COS) {

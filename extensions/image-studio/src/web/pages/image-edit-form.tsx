@@ -178,7 +178,7 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
     async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (busy || operation.current || current.current.locked) return;
-        if (!canSubmit) { setError(validation || (!capable ? tool === "cutout" ? "本地分割模型尚未就绪" : "请选择支持参考图编辑的可用模型" : !sourceReady && regionalLayout ? "原图尚未加载完成" : billing.costText)); return; }
+        if (!canSubmit) { setError(validation || (!capable ? tool === "cutout" ? "腾讯云抠图尚未配置" : "请选择支持参考图编辑的可用模型" : !sourceReady && regionalLayout ? "原图尚未加载完成" : billing.costText)); return; }
         operation.current = true; setPending(true); setError("");
         try { await onSubmit(input); }
         catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : "提交失败，请稍后重试"); }
@@ -229,7 +229,7 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
                 container={settingsTrigger.current?.closest<HTMLElement>(".studio-app") ?? undefined} aria-label="编辑高级设置">
                 <header><h3>高级设置</h3><button type="button" aria-label="关闭高级设置" title="关闭高级设置" onClick={() => setSettingsOpen(false)}><X size={16} /></button></header>
                 <fieldset disabled={busy}>
-                    <label htmlFor={`${id}-model`}>{tool === "cutout" ? "本地引擎" : "生成模型"}<select id={`${id}-model`} aria-label="生成模型" value={model?.id ?? ""} onChange={(event) => setModelChoice(event.target.value)}>
+                        <label htmlFor={`${id}-model`}>{tool === "cutout" ? "抠图服务" : "生成模型"}<select id={`${id}-model`} aria-label="生成模型" value={model?.id ?? ""} onChange={(event) => setModelChoice(event.target.value)}>
                         {!model && <option value="">请选择模型</option>}{model && !capable && <option value={model.id}>{model.name}（不可用）</option>}
                         {models.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                     {tool === "cutout" ? <div className="cutout-output-size"><span>输出尺寸</span><strong>{images[0] ? `${images[0].width} × ${images[0].height}` : "原图尺寸"}</strong><span>PNG</span></div>
@@ -248,7 +248,7 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
         {(canvasLayout || tool === "cutout") && (annotationTarget ? createPortal(<WatermarkCanvas {...editorProps} />, annotationTarget) : regionalLayout && annotationTarget === undefined && <WatermarkCanvas {...editorProps} />)}
         {expansionLayout && annotationTarget && createPortal(<ExpansionPreview image={images[0]} ratio={ratio} scale={expandScale} position={expandPosition} onReady={setSourceReady} />, annotationTarget)}
         {tool !== "retouch" && tool !== "expand" && !canvasLayout && !regionalLayout && <header className="specialized-heading"><h2>{TOOL_WORKFLOWS[tool].name}</h2>{tool === "watermark" ? <Eraser size={22} /> : <Languages size={22} />}</header>}
-        {!capable && <p className="specialized-message" role="status">{tool === "cutout" ? "本地抠图模型未就绪，请联系管理员完成模型下载后刷新。" : "当前模型不可用于参考图编辑，请选择可用模型或联系管理员配置。"}</p>}
+            {!capable && <p className="specialized-message" role="status">{tool === "cutout" ? "腾讯云抠图未配置，请联系管理员启用 COS 存储及数据万象后刷新。" : "当前模型不可用于参考图编辑，请选择可用模型或联系管理员配置。"}</p>}
         <fieldset className="specialized-fields" disabled={busy}>
             <section className="specialized-band"><AssetRolePicker label={tool === "retouch" || tool === "expand" || canvasLayout || regionalLayout ? "上传图片" : "待编辑图片"} images={images} max={1} disabled={busy} original={!canvasLayout} dropzone={tool === "retouch" || tool === "expand" || regionalLayout} appearance={regionalLayout ? "links" : "default"} allowReplacement={regionalLayout} previewRegion={tool === "watermark" && !canvasLayout ? region : undefined}
                 onChange={(next) => replaceImages(next)} onFiles={uploadFiles} />

@@ -56,6 +56,7 @@ export class CosStorageService {
         if (params.description) {
             uploadHeaders["x-cos-meta-description"] = encodeURIComponent(params.description);
         }
+        if (params.privateObject) uploadHeaders["x-cos-acl"] = "private";
 
         return await client.putObject({
             Bucket: config.bucket,
@@ -93,6 +94,46 @@ export class CosStorageService {
             Region: config.region,
             Key: key,
         });
+    }
+
+    async matting(storageConfig: CloudStorageParams["storageConfig"], key: string, maxBytes: number) {
+        if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error("Invalid matting size limit");
+        const config = storageConfig.config as TencentCosConfig;
+        const url = String(this.getCosClient(config).getObjectUrl({
+            Bucket: config.bucket, Region: config.region, Key: key,
+            Sign: true, Method: "GET", Protocol: "https:", Expires: 300,
+            Query: { "ci-process": "AIPicMatting", "center-layout": "0" },
+        }));
+        const response = await fetch(url, { signal: AbortSignal.timeout(120_000), redirect: "error" });
+        if (!response.ok) {
+            await response.body?.cancel();
+            const error = new Error("Tencent matting request failed");
+            Object.assign(error, { statusCode: response.status });
+            throw error;
+        }
+        if (!(response.headers.get("content-type") ?? "").toLowerCase().startsWith("image/png")
+            || Number(response.headers.get("content-length")) > maxBytes) {
+            await response.body?.cancel();
+            throw new Error("Invalid Tencent matting response");
+        }
+        if (!response.body) throw new Error("Missing Tencent matting response");
+        const reader = response.body.getReader();
+        const chunks: Buffer[] = [];
+        let length = 0;
+        try {
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                length += value.byteLength;
+                if (length > maxBytes) throw new Error("Tencent matting response exceeds size limit");
+                chunks.push(Buffer.from(value));
+            }
+        } finally {
+            await reader.cancel().catch(() => undefined);
+            reader.releaseLock();
+        }
+        if (!length) throw new Error("Empty Tencent matting response");
+        return Buffer.concat(chunks, length);
     }
 
     /**

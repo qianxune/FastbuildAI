@@ -102,7 +102,7 @@ export const TOOL_WORKFLOWS = {
     sku: { name: "商品SKU图", minAssets: 1, method: "Create the explicitly requested SKU variant of the referenced product. Change only the requested variant; preserve its structure and all unrelated details." },
     retouch: { name: "产品精修", minAssets: 1, method: "Retouch lighting, exposure and minor surface distractions using reference-image instruction editing. Preserve real product texture and geometry." },
     redraw: { name: "局部重绘", minAssets: 1, method: "Apply the user's requested change within the indicated regions of the reference image. Preserve unrelated product details and composition. Regions are instruction guidance, not a pixel mask or pixel lock." },
-    cutout: { name: "一键抠图", minAssets: 1, method: "Local alpha segmentation of the owned source image with the selected background color." },
+    cutout: { name: "一键抠图", minAssets: 1, method: "Tencent CI alpha segmentation of the owned source image with the selected background color." },
     expand: { name: "智能扩图", minAssets: 1, method: "Recompose the reference into a wider scene in the requested direction using reference-image instruction editing. Preserve the product and synthesize a consistent surrounding background. This is not pixel-locked outpainting." },
     translate: { name: "图片翻译", minAssets: 1, method: "Translate only legible text in the reference to the requested language using reference-image instruction editing. Preserve product identity and approximate layout. Do not invent illegible text; exact typography and pixel placement are not guaranteed." },
     watermark: { name: "去除水印", minAssets: 1, method: "On the user's owned or authorized image only, remove the indicated watermark using reference-image instruction editing and reconstruct a plausible background. Preserve product features; exact hidden pixels cannot be recovered." },
@@ -265,7 +265,7 @@ export function validateToolWorkflow(input: ToolWorkflowInput): string | null {
     if (!isRecord(input) || Object.keys(input).some((key) => !INPUT_KEYS.includes(key))) return "工具输入包含不支持的字段";
     if (!isToolEditKey(input.tool)) return "不支持的图片工具";
     if (typeof input.modelId !== "string" || !UUID.test(input.modelId)) return "请选择有效模型";
-    if ((input.tool === "cutout") !== (input.modelId === LOCAL_CUTOUT_MODEL_ID)) return "抠图仅支持本地分割模型，该模型不支持普通图片生成";
+    if ((input.tool === "cutout") !== (input.modelId === LOCAL_CUTOUT_MODEL_ID)) return "抠图仅支持专用分割服务，该服务不支持普通图片生成";
     if (!Array.isArray(input.assetIds) || input.assetIds.length < TOOL_WORKFLOWS[input.tool].minAssets || input.assetIds.length > 5 || new Set(input.assetIds).size !== input.assetIds.length || Array.from(input.assetIds).some((id) => typeof id !== "string" || !UUID.test(id))) return "请选择有效且不重复的商品参考图（最多 5 张）";
     const optionalName = ["creative", "replica", "fusion", "sku"].includes(input.tool)
         || (["watermark", "translate", "retouch", "expand", "redraw", "cutout"].includes(input.tool) && input.design !== undefined);
@@ -300,7 +300,7 @@ export function toolWorkflowPrompt(input: ToolWorkflowInput, imageIndex = 0): st
     const error = validateToolWorkflow(input);
     if (error) throw new Error(error);
     if (!Number.isInteger(imageIndex) || imageIndex < 0 || imageIndex >= input.count) throw new Error("输出索引超出图片数量");
-    if (input.tool === "cutout") return `Local BiRefNet alpha segmentation. Background color: ${input.design!.backgroundColor ?? "transparent"}. Preserve source dimensions.`;
+    if (input.tool === "cutout") return `Tencent CI AIPicMatting alpha segmentation. Background color: ${input.design!.backgroundColor ?? "transparent"}. Preserve source dimensions.`;
     const design = input.design;
     const module = DETAIL_MODULES.find((item) => item.id === design?.outputModules?.[imageIndex]);
     const preset = FUSION_PRESETS.find((item) => item.id === design?.fusionPreset);
