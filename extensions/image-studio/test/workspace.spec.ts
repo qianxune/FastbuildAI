@@ -437,6 +437,19 @@ describe("workspace selection", () => {
 });
 
 describe("workspace preferences and navigation", () => {
+    it("selects the overview independently of the active creation tool", () => {
+        const view = harness("workspace-navigation");
+        const props = { view: "overview", tool: "main", mobileOpen: false, onMobileOpenChange: jest.fn(), onNavigate: jest.fn(), onPreferences: jest.fn(), onHelp: jest.fn() };
+        const content = nodes(view.render(props)).find((node) => typeof node.type === "function")!;
+        const rendered = nodes(content.type(content.props));
+        const home = rendered.find((node) => node.type === "button" && text(node) === "创作工作台")!;
+        expect(home.props["aria-current"]).toBe("page");
+        expect(rendered.filter((node) => node.props["aria-current"] === "true")).toHaveLength(0);
+        home.props.onClick();
+        expect(props.onNavigate).toHaveBeenLastCalledWith("overview", undefined);
+        rendered.find((node) => node.type === "button" && text(node) === "商品主图")!.props.onClick();
+        expect(props.onNavigate).toHaveBeenLastCalledWith("create", "main");
+    });
     it("normalizes malformed, oversized and out-of-range preferences", () => {
         const values = new Map<string, string>();
         const view = harness("workspace-preferences", { "@buildingai/stores": { useAuthStore: () => "a" } }, { localStorage: { getItem: (key: string) => values.get(key) } });
@@ -495,7 +508,7 @@ describe("workspace preferences and navigation", () => {
     });
 });
 
-function workspace(search = "") {
+function workspace(search = "", enterCreation = true) {
     const environment = theme();
     const active: any = { id: "active", status: "queued", count: 1, images: [], modelName: "Test", toolKey: "main", mainInput: input() };
     const items: any[] = [];
@@ -524,10 +537,122 @@ function workspace(search = "") {
         },
     }, { ...environment.globals, URLSearchParams, window: { confirm, open, location: { search, pathname: "/extension/image-studio/studio" }, history: { replaceState } } });
     const render = () => nodes(view.render());
+    if (enterCreation && !search) render().find((node) => node.type === "Navigation")!.props.onNavigate("create", "main");
     return { ...view, ...environment, render, capability, capabilityQuery, active, items, query, mutation, toolMutation, retryMutation, quote, confirm, open, replaceState, preferences };
 }
 
+describe("workspace overview data", () => {
+    function overview() {
+        const navigation = harness("workspace-navigation").exports;
+        const profile = { data: { nickname: "Test seller", avatar: "/avatar.png" }, refetch: jest.fn() };
+        const balance: any = { isSuccess: true, data: { balance: 95 }, refetch: jest.fn() };
+        const ledger: any = { isSuccess: true, data: { items: [
+            { id: "expense", action: 2, changeAmount: 5, consumeSourceDesc: "Image Studio", createdAt: "2026-11-05T12:00:00Z" },
+            { id: "income", action: 1, changeAmount: 100, accountTypeDesc: "Recharge", createdAt: "2026-11-04T12:00:00Z" },
+        ] }, refetch: jest.fn() };
+        const recent: any = { isSuccess: true, data: { items: [{ id: "saved", toolKey: "main", count: 1, status: "completed", images: [{ url: "never-use-public-url" }], createdAt: "2026-11-05T12:00:00Z" }] }, refetch: jest.fn() };
+        const config = { membership: false, recharge: false };
+        const history = jest.fn(() => recent), load = jest.fn().mockReturnValue(jest.fn()), action = jest.fn();
+        const view = harness("workspace-overview", {
+            "./workspace-navigation": navigation,
+            "./workspace-account": { requestAccountAction: action },
+            "@buildingai/services/shared": { useUserInfoQuery: () => profile },
+            "@buildingai/services/web": { useUserAccountLogQuery: () => ledger, useRechargeCenterQuery: () => ({ data: { rechargeStatus: config.recharge } }) },
+            "@buildingai/stores": { useAuthStore: (selector: any) => selector({ auth: { userInfo: undefined } }), useConfigStore: (selector: any) => selector({ config: { websiteConfig: { features: { membership: config.membership } } } }) },
+            "../services/generation": { useCreditBalanceQuery: () => balance, useGenerationHistoryQuery: history, loadGenerationImage: load },
+        });
+        const props = { onNavigate: jest.fn(), onOpenTask: jest.fn() };
+        const render = () => nodes(view.render(props));
+        return { ...view, profile, balance, ledger, recent, config, history, load, action, props, renderComponent: view.render, render };
+    }
+    it("uses existing tool and account routes with real balance and correctly signed ledger data", () => {
+        const view = overview();
+        const cards = view.render().filter((node) => node.type === "button" && node.props.className?.startsWith("overview-tool "));
+        expect(cards).toHaveLength(12);
+        for (const card of cards) { card.props.onClick(); expect(view.props.onNavigate).toHaveBeenLastCalledWith("create", card.key); }
+        expect(view.render().filter((node) => node.props.role === "status").map(text)).toEqual(["95", "5"]);
+        expect(text(view.render())).toContain("+100"); expect(text(view.render())).toContain("-5");
+        expect(text(view.render())).toContain("最近 2 条积分变动");
+        view.render().find((node) => node.type === "button" && text(node).includes("编辑资料"))!.props.onClick();
+        view.render().find((node) => node.type === "button" && text(node).includes("积分明细"))!.props.onClick();
+        view.render().find((node) => node.type === "button" && text(node).includes("查看钱包"))!.props.onClick();
+        expect(view.action.mock.calls).toEqual([["profile"], ["credits"], ["wallet"]]);
+        expect(view.render().some((node) => node.props.src === "never-use-public-url")).toBe(false);
+    });
+    it("keeps recent history on page one and opens details without creating a task", () => {
+        const view = overview();
+        const task = view.render().find((node) => node.props.className === "overview-task")!;
+        task.props.onClick(); expect(view.props.onOpenTask).toHaveBeenCalledWith(view.recent.data.items[0]);
+        expect(view.history).toHaveBeenLastCalledWith(1, 5);
+        view.render().find((node) => node.type === "button" && text(node).includes("查看全部"))!.props.onClick();
+        expect(view.props.onNavigate).toHaveBeenLastCalledWith("history");
+        for (const status of ["queued", "processing", "completed", "failed", "cancelled"]) {
+            view.recent.data.items[0].status = status;
+            expect(view.render().find((node) => node.props.className === `overview-task-status ${status}`)).toBeDefined();
+        }
+    });
+    it("distinguishes loading, errors and empty results rather than displaying invented zero values", () => {
+        const view = overview();
+        view.balance.isSuccess = view.ledger.isSuccess = view.recent.isSuccess = false;
+        expect(view.render().filter((node) => node.type === "strong" && node.props.role === "status").map(text)).toEqual(["加载中", "加载中"]);
+        expect(text(view.render())).toContain("正在加载最近任务");
+        view.balance.isError = view.ledger.isError = view.recent.isError = true;
+        expect(view.render().filter((node) => node.props.role === "alert")).toHaveLength(2);
+        view.render().find((node) => node.type === "button" && text(node).includes("重新查询"))!.props.onClick();
+        expect(view.balance.refetch).toHaveBeenCalledTimes(1);
+        view.render().filter((node) => node.type === "button" && text(node).includes("重新加载")).forEach((node) => node.props.onClick());
+        expect(view.ledger.refetch).toHaveBeenCalledTimes(1); expect(view.recent.refetch).toHaveBeenCalledTimes(1);
+        view.ledger.isError = view.recent.isError = false; view.ledger.isSuccess = view.recent.isSuccess = true;
+        view.ledger.data.items = []; view.recent.data.items = [];
+        expect(text(view.render())).toContain("暂无积分变动"); expect(text(view.render())).toContain("暂无创作任务");
+    });
+    it("only exposes membership and recharge actions when enabled", () => {
+        const view = overview();
+        expect(text(view.render())).not.toContain("查看会员");
+        view.config.membership = true;
+        view.render().find((node) => node.type === "button" && text(node).includes("查看会员"))!.props.onClick();
+        expect(view.action).toHaveBeenLastCalledWith("subscribe");
+        view.config.membership = false; view.config.recharge = true;
+        view.render().find((node) => node.type === "button" && text(node).includes("积分充值"))!.props.onClick();
+        expect(view.action).toHaveBeenLastCalledWith("wallet");
+        expect(view.exports.overviewTime("invalid")).toBe("时间未知");
+    });
+    it("cleans up protected thumbnails and never shows a previous task image", () => {
+        const view = overview();
+        const task = view.recent.data.items[0];
+        const render = () => nodes(view.renderComponent({ task }, view.exports.RecentTaskImage));
+        render(); view.commit();
+        expect(view.load).toHaveBeenCalledWith("saved", 0, "api", expect.any(Function), expect.any(Function));
+        view.load.mock.calls[0][3]({ url: "blob:owned" });
+        expect(render().find((node) => node.type === "img")!.props.src).toBe("blob:owned");
+        const images = task.images; task.images = [];
+        expect(render().some((node) => node.type === "img")).toBe(false);
+        task.images = images;
+        task.id = "other"; expect(render().some((node) => node.type === "img")).toBe(false);
+        view.commit(); expect(view.load.mock.results[0].value).toHaveBeenCalledTimes(1);
+        view.load.mock.calls[1][4]();
+        expect(render().find((node) => node.props["aria-label"] === "图片加载失败")).toBeDefined();
+        task.images = []; render(); view.commit(); expect(view.load).toHaveBeenCalledTimes(2);
+        view.dispose();
+    });
+});
+
 describe("workspace integration", () => {
+    it("defaults to the overview but preserves direct task entry and creation navigation", () => {
+        const view = workspace("", false);
+        expect(view.render().find((node) => node.type === "Navigation")!.props.view).toBe("overview");
+        const overview = view.render().find((node) => node.type === "./workspace-overview")!;
+        expect(view.render().find((node) => node.type === "./main-image-form")!.props.locked).toBe(true);
+        overview.props.onNavigate("create", "redraw");
+        expect(view.render().find((node) => node.type === "Navigation")!.props).toEqual(expect.objectContaining({ view: "create", tool: "redraw" }));
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("overview");
+        view.render().find((node) => node.type === "./workspace-overview")!.props.onOpenTask({ id: "selected-task" });
+        expect(view.open).toHaveBeenCalledWith("/extension/image-studio/studio?task=selected-task", "_blank", "noopener,noreferrer");
+        expect(view.render().find((node) => node.type === "Navigation")!.props.view).toBe("overview");
+        expect(view.mutation.mutateAsync).not.toHaveBeenCalled();
+        expect(view.toolMutation.mutateAsync).not.toHaveBeenCalled();
+        expect(workspace("?task=33333333-3333-4333-8333-333333333333", false).render().find((node) => node.type === "Navigation")!.props.view).toBe("create");
+    });
     it.each(["main", "creative", "redraw", "cutout"])("opens the selected %s work in a separate page without changing the original workbench", (toolKey) => {
         const view = workspace();
         const generation = { ...view.active, id: "older-work", toolKey, status: "completed", prompt: "Selected work prompt",

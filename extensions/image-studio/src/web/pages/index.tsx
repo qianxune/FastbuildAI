@@ -33,6 +33,7 @@ import { RetouchPreview } from "./image-edit-form";
 import { isSpecializedTool, SPECIALIZED_TOOLS, SPECIALIZED_WORKSPACE_LAYOUT } from "./specialized-workflow";
 import WorkspaceNavigation, { TOOL_LABELS, type WorkspaceView } from "./workspace-navigation";
 import WorkspaceAccount from "./workspace-account";
+import WorkspaceOverview from "./workspace-overview";
 import { WorkspaceHelpDialog, WorkspacePreferencesDialog, useWorkspacePreferences } from "./workspace-preferences";
 import { useGenerateToolMutation } from "../services/tool-generation";
 import { isToolEditKey, validateToolWorkflow, type ToolWorkflowInput } from "../../api/shared/tool-workflow";
@@ -121,7 +122,7 @@ function imageCaption(item: ImageGeneration, index: number) {
 export default function ImageStudioPage() {
     const [detailRequest, setDetailRequest] = useState(() => typeof window === "undefined" ? null : new URLSearchParams(window.location?.search ?? "").get("task"));
     const detailTaskId = detailRequest && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(detailRequest) ? detailRequest : undefined;
-    const [view, setView] = useState<WorkspaceView>("create");
+    const [view, setView] = useState<WorkspaceView>(detailRequest ? "create" : "overview");
     const showWorks = view === "works";
     const showHistory = view === "history";
     const setShowHistory = (open: boolean) => setView(open ? "history" : "create");
@@ -445,9 +446,8 @@ export default function ImageStudioPage() {
                 <nav className="tb-crumb" aria-label="面包屑">
                     <span>工作台</span>
                     <i>/</i>
-                    <span>{{ create: "创作工作台", works: "我的作品", materials: "素材库", history: "生成历史" }[view]}</span>
-                    <i>/</i>
-                    <b>{showWorks ? "图片作品" : toolName}</b>
+                    <span>{{ overview: "创作工作台", create: "创作", works: "我的作品", materials: "素材库", history: "生成历史" }[view]}</span>
+                    {view !== "overview" && <><i>/</i><b>{showWorks ? "图片作品" : toolName}</b></>}
                 </nav>
                 <div className="tb-right">
                     <WorkspaceAccount onNavigate={navigate} locked={locked} />
@@ -459,6 +459,7 @@ export default function ImageStudioPage() {
                 <WorkspaceNavigation view={view} tool={tool} mobileOpen={mobileOpen} onMobileOpenChange={setMobileOpen} onNavigate={navigate} onPreferences={() => setPreferencesOpen(true)} onHelp={() => setHelpOpen(true)} />
                 <div className="workspace-content">
                 {busy && (view !== "create" || pendingTool !== tool) && <button className="workspace-active-task" onClick={() => navigate("create", pendingTool)}><span className="spin" />当前任务 {pendingStatus} · {pendingCount} 张<span>查看任务</span></button>}
+                {view === "overview" && <WorkspaceOverview onNavigate={navigate} onOpenTask={(generation) => window.open(`/extension/image-studio/studio?task=${encodeURIComponent(generation.id)}`, "_blank", "noopener,noreferrer")} />}
                 {view === "materials" && <MaterialsView onUse={(image) => { setRequestedMaterial({ image, requestId: ++materialSequence.current }); navigate("create", "main"); }} />}
 
                 {showWorks && <WorksView renderImage={({ generation, index }) => (
@@ -496,7 +497,7 @@ export default function ImageStudioPage() {
                                 model.capabilities.includes("vision"),
                             )}
                             available={mainAvailable}
-                            locked={locked}
+                            locked={locked || view !== "create"}
                             onSubmit={startMain}
                             requestedMaterial={requestedMaterial}
                             onMaterialConsumed={(requestId) => setRequestedMaterial((current) => current?.requestId === requestId ? null : current)}
