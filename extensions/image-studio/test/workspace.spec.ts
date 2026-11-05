@@ -14,6 +14,32 @@ const image = (index: number) => ({ id: `22222222-2222-4222-8222-${String(index)
 const input = () => ({ modelId, assetIds: [image(1).id], productName: "Product", brand: "", platform: main.MAIN_PLATFORMS[0], language: main.MAIN_LANGUAGES[0], ratio: "1:1", resolution: "2K", counts: { white: 1, scene: 0, selling: 0, other: 0 }, instructions: "" });
 
 describe("workspace drawer positioning", () => {
+    it("preserves task query and fragment through shared and plugin login redirects", async () => {
+        const source = readFileSync(path.resolve(__dirname, "../../../packages/@buildingai/web/services/src/base.ts"), "utf8");
+        const code = ts.transpileModule(source.replace(/import\.meta\.env/g, "({DEV:false})"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+        const clients: any[] = [];
+        const logout = jest.fn().mockResolvedValue(undefined);
+        const location = { pathname: "/extension/image-studio/studio", search: "?task=33333333-3333-4333-8333-333333333333", hash: "#result", replace: jest.fn() };
+        const module = { exports: {} as any };
+        runInNewContext(code, { module, exports: module.exports, location, encodeURIComponent, require: (name: string) => {
+            if (name === "@buildingai/http") return { createHttpClient: (options: any) => { clients.push(options); return options; }, createStandardApiParser: () => ({}) };
+            if (name === "@buildingai/stores") return { useAuthStore: { getState: () => ({ authActions: { logout } }) } };
+            if (name === "sonner") return { toast: { error: jest.fn() } };
+            if (name === "./shared/console-access") return {};
+            throw new Error(`Unexpected import: ${name}`);
+        } });
+        const destination = `/login?redirect=${encodeURIComponent(location.pathname + location.search + location.hash)}`;
+        await clients[0].hooks.onAuthError();
+        expect(location.replace).toHaveBeenLastCalledWith(destination);
+        module.exports.createPluginHttpClients("image-studio");
+        await clients[2].hooks.onAuthError();
+        expect(location.replace).toHaveBeenLastCalledWith(destination);
+        location.pathname = "/login";
+        location.replace.mockClear();
+        await clients[0].hooks.onAuthError();
+        expect(location.replace).not.toHaveBeenCalled();
+        expect(logout).toHaveBeenCalledTimes(3);
+    });
     it("shows an explicitly labeled interactive retouch example instead of pretending it is a generated result", () => {
         const view = harness("image-edit-form");
         const render = () => nodes(view.render({}, view.exports.RetouchPreview));
@@ -81,7 +107,7 @@ function harness(file: string, modules: Record<string, any> = {}, globals: Recor
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } });
     expect(compiled.diagnostics ?? []).toHaveLength(0);
     const jsx = (type: any, props: any, key?: string) => ({ type, props, key });
-    runInNewContext(compiled.outputText, {
+    runInNewContext(compiled.outputText + (file === "index" ? "\nexports.ResultTile = ResultTile;" : ""), {
         exports, Error, setTimeout: jest.fn(), clearTimeout: jest.fn(),
         require: (name: string) => {
             if (name === "react") return react;
@@ -469,7 +495,7 @@ describe("workspace preferences and navigation", () => {
     });
 });
 
-function workspace() {
+function workspace(search = "") {
     const environment = theme();
     const active: any = { id: "active", status: "queued", count: 1, images: [], modelName: "Test", toolKey: "main", mainInput: input() };
     const items: any[] = [];
@@ -479,6 +505,8 @@ function workspace() {
     const retryMutation = { isPending: false, mutateAsync: jest.fn().mockResolvedValue(active) };
     const quote = jest.fn().mockResolvedValue({ total: 2 });
     const confirm = jest.fn().mockReturnValue(true);
+    const open = jest.fn();
+    const replaceState = jest.fn();
     const preferences = { value: { count: 1, quality: "standard" }, update: jest.fn() };
     const capability: any = { models: [{ id: modelId, capabilities: ["reference-image", "multi-image"], maxReferenceImages: 5 }], tools: [{ key: "main", status: "available", requiredCapabilities: ["reference-image"], modelIdsByCapability: { "reference-image": [modelId] }, limits: { maxInputImages: 5 } }] };
     const capabilityQuery = { data: capability, isSuccess: true, isFetching: false };
@@ -494,12 +522,101 @@ function workspace() {
             useGenerateMainImageMutation: () => mutation, fetchGenerationQuote: quote,
             useRetryGenerationMutation: () => retryMutation, useCancelGenerationMutation: () => mutation, useDeleteGenerationMutation: () => mutation,
         },
-    }, { ...environment.globals, window: { confirm } });
+    }, { ...environment.globals, URLSearchParams, window: { confirm, open, location: { search, pathname: "/extension/image-studio/studio" }, history: { replaceState } } });
     const render = () => nodes(view.render());
-    return { ...view, ...environment, render, capability, capabilityQuery, active, items, query, mutation, toolMutation, retryMutation, quote, confirm, preferences };
+    return { ...view, ...environment, render, capability, capabilityQuery, active, items, query, mutation, toolMutation, retryMutation, quote, confirm, open, replaceState, preferences };
 }
 
 describe("workspace integration", () => {
+    it.each(["main", "creative", "redraw", "cutout"])("opens the selected %s work in a separate page without changing the original workbench", (toolKey) => {
+        const view = workspace();
+        const generation = { ...view.active, id: "older-work", toolKey, status: "completed", prompt: "Selected work prompt",
+            size: "1024x1024", billingStatus: "free", images: [{ url: "protected" }] };
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("works");
+        const gallery = view.render().find((node) => node.type === "./works")!;
+        const tile = gallery.props.renderImage({ generation, index: 0 });
+        expect(tile.props.generationId).toBe("older-work");
+        expect(tile.props.imageIndex).toBe(0);
+        tile.props.onDetails();
+        const rendered = view.render();
+        expect(view.open).toHaveBeenCalledWith("/extension/image-studio/studio?task=older-work", "_blank", "noopener,noreferrer");
+        expect(rendered.find((node) => node.type === "Navigation")!.props).toEqual(expect.objectContaining({ view: "works", tool: "main" }));
+        expect(rendered.some((node) => node.props.className === "result-prompt")).toBe(false);
+        expect(rendered.some((node) => node.props.className === "regional-canvas-host")).toBe(false);
+        expect(view.query).toHaveBeenLastCalledWith(undefined);
+        expect(view.mutation.mutateAsync).not.toHaveBeenCalled();
+        expect(view.toolMutation.mutateAsync).not.toHaveBeenCalled();
+    });
+
+    it("loads a direct task independently of history and rejects invalid task IDs", () => {
+        const id = "33333333-3333-4333-8333-333333333333";
+        const view = workspace(`?task=${id}`);
+        const generation = { ...view.active, id, toolKey: "cutout", status: "completed", prompt: "Saved task", images: [{ url: "protected" }], billingStatus: "free" };
+        view.query.mockReturnValue({ data: generation });
+        view.render(); view.commit();
+        expect(view.query).toHaveBeenLastCalledWith(id);
+        expect(text(view.render().find((node) => node.props.className === "result-prompt"))).toBe("Saved task");
+        expect(view.render().find((node) => node.type === "Navigation")!.props.tool).toBe("cutout");
+        expect(view.render().find((node) => node.type === "./tool-form" && node.props.tool === "cutout")!.props.taskSnapshot).toBe(generation);
+        const stage = view.render().find((node) => node.props.className === "res-grid result-image-stage")!;
+        expect(nodes(stage).find((node) => node.props.generationId === id)!.props.previewSize).toBe(generation.size);
+        expect(view.items).toHaveLength(0);
+        view.render().find((node) => node.type === "button" && text(node) === "返回创作")!.props.onClick();
+        expect(view.replaceState).toHaveBeenCalledWith(null, "", "/extension/image-studio/studio");
+        view.render(); expect(view.query).toHaveBeenLastCalledWith(undefined);
+        const invalid = workspace("?task=../private");
+        expect(text(invalid.render())).toContain("任务链接无效");
+        expect(invalid.query).toHaveBeenLastCalledWith(undefined);
+        expect(view.toolMutation.mutateAsync).not.toHaveBeenCalled();
+    });
+
+    it("shows direct-detail loading, missing and error states without using unrelated history", async () => {
+        const id = "33333333-3333-4333-8333-333333333333";
+        const view = workspace(`?task=${id}`);
+        view.query.mockReturnValue({ data: undefined, isPending: true } as any);
+        expect(text(view.render())).toContain("正在加载任务详情");
+        view.query.mockReturnValue({ data: undefined, isSuccess: true } as any);
+        expect(text(view.render())).toContain("任务不存在或已删除");
+        view.query.mockReturnValue({ data: undefined, isError: true } as any);
+        expect(text(view.render())).toContain("任务状态加载失败");
+        const generation = { ...view.active, id, status: "completed", toolKey: "creative", prompt: "Owned task", images: [{ url: "protected" }] };
+        view.query.mockReturnValue({ data: generation }); view.render(); view.commit();
+        await view.render().find((node) => node.props["aria-label"] === "删除记录")!.props.onClick();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(view.mutation.mutateAsync).toHaveBeenCalledWith(id);
+        view.render(); expect(view.query).toHaveBeenLastCalledWith(undefined);
+        expect(view.replaceState).toHaveBeenCalledWith(null, "", "/extension/image-studio/studio");
+    });
+
+    it("uses the loaded protected image for explicit work preview, supports closing, and preserves task access on image failure", () => {
+        const load = jest.fn().mockReturnValue(jest.fn());
+        const view = harness("index", { "../services/generation": { loadGenerationImage: load } });
+        const props = { generationId: "work", imageIndex: 1, caption: "2", onDetails: jest.fn(), onDownload: jest.fn() };
+        const render = () => nodes(view.render(props, view.exports.ResultTile));
+        const preview = () => render().find((node) => node.type === "button" && text(node) === "预览大图")!;
+        render().find((node) => node.props.onMouseEnter)!.props.onMouseEnter();
+        expect(render().find((node) => node.props.onMouseEnter)!.props.className).toBe("rtile peek");
+        expect(preview().props.disabled).toBe(true);
+        const dialog = { showModal: jest.fn(), close: jest.fn() };
+        render().find((node) => node.type === "dialog")!.props.ref.current = dialog;
+        view.commit();
+        expect(load).toHaveBeenCalledWith("work", 1, "api", expect.any(Function), expect.any(Function));
+        load.mock.calls[0][3]({ blob: {}, url: "blob:owned-image" });
+        expect(preview().props.disabled).toBe(false);
+        preview().props.onClick();
+        expect(dialog.showModal).toHaveBeenCalledTimes(1);
+        render().find((node) => node.props["aria-label"] === "关闭预览")!.props.onClick();
+        expect(dialog.close).toHaveBeenCalledTimes(1);
+        expect(load).toHaveBeenCalledTimes(1);
+        props.generationId = "failed-work";
+        render(); view.commit(); load.mock.calls[1][4]();
+        expect(preview().props.disabled).toBe(true);
+        render().find((node) => node.type === "button" && text(node) === "任务详情")!.props.onClick();
+        expect(props.onDetails).toHaveBeenCalledTimes(1);
+        expect(props.onDownload).not.toHaveBeenCalled();
+        view.dispose();
+    });
+
     it("quotes and retries ten SKU outputs only when the stored regional contract is valid", async () => {
         const view = workspace();
         view.capability.tools.push({ key: "sku", status: "available", requiredCapabilities: ["reference-image"], modelIdsByCapability: { "reference-image": [modelId] }, limits: { maxInputImages: 5 } });

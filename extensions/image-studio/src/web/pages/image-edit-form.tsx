@@ -63,7 +63,7 @@ const EXPAND_ICONS = [ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, Scan, Arrow
 const CUTOUT_COLORS = [{ name: "透明", value: null }, { name: "白色", value: "#ffffff" }, { name: "浅蓝", value: "#c4e0f4" },
     { name: "蓝色", value: "#287be5" }, { name: "红色", value: "#e73535" }, { name: "深红", value: "#a52639" }];
 
-export default function ImageEditForm({ tool, capabilities, locked, onSubmit, annotationTarget, onEditSource }: Omit<ToolFormProps, "tool"> & { tool: "watermark" | "translate" | "retouch" | "expand" | "redraw" | "cutout" }) {
+export default function ImageEditForm({ tool, capabilities, locked, onSubmit, annotationTarget, onEditSource, taskSnapshot }: Omit<ToolFormProps, "tool"> & { tool: "watermark" | "translate" | "retouch" | "expand" | "redraw" | "cutout" }) {
     const id = useId();
     const [images, setImages] = useState<ProductImage[]>([]);
     const [modelChoice, setModelChoice] = useState("");
@@ -99,6 +99,24 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
     useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
     const products = useProductImagesQuery();
     const upload = useUploadProductImageMutation();
+    const restoredTask = useRef<string | undefined>(undefined);
+    useEffect(() => {
+        const saved = taskSnapshot?.toolInput;
+        if (tool !== "cutout" || !taskSnapshot || saved?.tool !== "cutout" || restoredTask.current === taskSnapshot.id
+            || !products.isSuccess || products.isPending || products.isFetching || products.isError || !products.data
+            || pending || upload.isPending || operation.current) return;
+        const color = saved.design?.backgroundColor;
+        if (color !== null && (typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color))) return;
+        restoredTask.current = taskSnapshot.id;
+        const source = products.data.find((image) => image.id === saved.assetIds[0]);
+        setImages(source ? [source] : []); setSourceReady(false);
+        setModelChoice(saved.modelId); setRatio(saved.ratio);
+        setBackgroundColor(color?.toLowerCase() ?? null);
+        const custom = !CUTOUT_COLORS.some((preset) => preset.value === (color?.toLowerCase() ?? null));
+        setCustomBackground(custom);
+        if (color) setCustomColor(color.toLowerCase());
+        setError(source ? "" : "原任务素材已删除或不可用，请重新上传；生成结果仍可预览和下载");
+    }, [tool, taskSnapshot?.id, products.data, products.isSuccess, products.isPending, products.isFetching, products.isError, pending, upload.isPending]);
     const availability = capabilities.tools.find((item) => item.key === tool);
     const models = capabilities.models.filter((item) => availability?.status === "available"
         && TOOL_REGISTRY[tool].requiredCapabilities.every((capability) => item.capabilities.includes(capability)
@@ -222,7 +240,7 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
         if (busy || current.current.locked || operation.current || !mounted.current || (value !== null && !/^#[0-9a-f]{6}$/i.test(value))) return;
         setBackgroundColor(value); setCustomBackground(custom); if (custom && value) setCustomColor(value); onEditSource?.();
     }
-    const footer = <footer className={`specialized-footer${regionalLayout ? " regional-action-bar" : ""}`}>
+    const footer = <footer className={`specialized-footer${tool === "redraw" ? " redraw-action-bar" : ""}${tool === "cutout" ? " cutout-action-bar" : ""}`}>
         <Popover open={settingsOpen} onOpenChange={setSettingsOpen} modal={false}>
             <PopoverTrigger asChild><button ref={settingsTrigger} type="button" className="image-edit-settings-trigger" disabled={busy}><Settings2 size={16} />高级设置<span>{tool === "cutout" ? "原图" : ratio}</span><ChevronDown size={14} /></button></PopoverTrigger>
             <PopoverContent className="main-settings-popover image-edit-settings" side="top" align="start" sideOffset={8} collisionPadding={12}
@@ -266,7 +284,7 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
             {tool === "cutout" && <section className="specialized-band"><h3 id={`${id}-background`}>背景颜色</h3><div className="cutout-color-swatches" role="radiogroup" aria-labelledby={`${id}-background`}>
                 {CUTOUT_COLORS.map((color) => <label key={color.name} title={color.name} className="cutout-color-choice"><input type="radio" name={`${id}-background-color`} aria-label={`背景颜色：${color.name}`} value={color.value ?? "transparent"} checked={!customBackground && backgroundColor === color.value} disabled={busy}
                     onChange={() => changeBackground(color.value)} /><span className={`cutout-color-preview${color.value === null ? " cutout-color-transparent" : ""}`} style={{ backgroundColor: color.value ?? undefined, color: ["蓝色", "红色", "深红"].includes(color.name) ? "#fff" : "#263240" }}><Check size={15} /></span></label>)}
-                <label className="cutout-custom-color" data-selected={customBackground} title="自定义背景颜色"><Palette size={20} /><input type="color" id={`${id}-custom-color`} aria-label="自定义背景颜色" value={customColor} disabled={busy} onChange={(event) => changeBackground(event.target.value, true)} /></label>
+                <label className="cutout-custom-color" data-selected={customBackground} title="自定义背景颜色">{customBackground ? <Check size={15} /> : <Palette size={20} />}<input type="color" id={`${id}-custom-color`} aria-label="自定义背景颜色" value={customColor} disabled={busy} onChange={(event) => changeBackground(event.target.value, true)} /></label>
             </div></section>}
             {tool === "redraw" && <section className="specialized-band redraw-descriptions" aria-label="重绘描述">
                 <header className="redraw-descriptions-heading"><h3>重绘描述</h3><span>{markHistory.marks.filter((mark) => mark.instruction?.trim() || mark.referenceAsset).length}/3</span></header>
@@ -310,7 +328,7 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
         </fieldset>
         {regionOpen && images[0] && <SkuRegionEditor key={images[0].id} title="框选水印区域" image={images[0]} region={region} disabled={busy}
             onChange={(next) => { if (!busy && !current.current.locked) setRegion(next); }} onClose={() => setRegionOpen(false)} />}
-        {regionalLayout && annotationTarget ? createPortal(footer, annotationTarget) : footer}
+        {footer}
         {error && <p className="specialized-message specialized-error" role="alert">{error}</p>}
     </form>;
 }

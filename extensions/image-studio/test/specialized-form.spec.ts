@@ -171,6 +171,7 @@ describe("watermark annotation history and geometry", () => {
 
 function renderHarness(file: string, exportName: string, props: Record<string, any>, services: Record<string, unknown> = {}) {
     const state: any[] = [], refs: any[] = [];
+    const portals: ElementNode[] = [];
     const effects: Array<{ dependencies?: unknown[]; cleanup?: () => void }> = [];
     let stateCursor = 0, refCursor = 0, effectCursor = 0;
     const queued: Array<() => void> = [];
@@ -180,7 +181,7 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } });
     runInNewContext(compiled.outputText, { exports, Error, require: (name: string) => {
         if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
-        if (name === "react-dom") return { createPortal: (child: unknown) => child };
+        if (name === "react-dom") return { createPortal: (child: ElementNode) => { portals.push(child); return child; } };
         if (name === "react") return {
             useState: (initial: unknown) => { const index = stateCursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial;
                 return [state[index], (value: any) => { state[index] = typeof value === "function" ? value(state[index]) : value; }]; },
@@ -203,6 +204,7 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
     } });
     function render() {
         stateCursor = 0; refCursor = 0; effectCursor = 0;
+        portals.length = 0;
         const nodes: ElementNode[] = [];
         const visit = (value: any) => {
             if (Array.isArray(value)) value.forEach(visit);
@@ -212,7 +214,7 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
         queued.splice(0).forEach((effect) => effect());
         return nodes;
     }
-    return { render, props, exports, unmount: () => effects.forEach((effect) => effect.cleanup?.()) };
+    return { render, props, exports, portals, unmount: () => effects.forEach((effect) => effect.cleanup?.()) };
 }
 
 describe("watermark canvas controls", () => {
@@ -664,9 +666,40 @@ function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "expand"
 }
 
 describe("dedicated image editing", () => {
+    it.each([null, "#287be5", "#ABC123"])("restores saved cutout background %s and source only once per task", (color) => {
+        const view = imageEditHarness("cutout");
+        view.props.taskSnapshot = { id: "saved-cutout", toolKey: "cutout", toolInput: { tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, assetIds: [images[1]!.id], ratio: "4:3", design: { backgroundColor: color } } };
+        view.products.isFetching = true; view.render(); expect(view.picker().images).toEqual([]);
+        view.products.isFetching = false; view.render(); view.render();
+        expect(view.picker().images[0].id).toBe(images[1]!.id);
+        const radios = () => view.render().filter((node) => node.props.type === "radio");
+        if (color === "#ABC123") {
+            expect(radios().some((node) => node.props.checked)).toBe(false);
+            expect(view.field("custom-color").props.value).toBe("#abc123");
+            expect(view.render().find((node) => node.props.className === "cutout-custom-color")!.props["data-selected"]).toBe(true);
+        } else expect(radios().find((node) => node.props.checked)!.props.value).toBe(color ?? "transparent");
+        view.field("custom-color").props.onChange({ target: { value: "#123456" } });
+        view.props.taskSnapshot = { ...view.props.taskSnapshot }; view.products.data = [...view.products.data]; view.render();
+        expect(view.field("custom-color").props.value).toBe("#123456");
+        expect(view.onSubmit).not.toHaveBeenCalled();
+        view.picker().onChange([images[0]]); expect(radios().find((node) => node.props.checked)!.props.value).toBe("transparent");
+    });
+    it("retains historical color when the original source is unavailable without enabling submission", () => {
+        const view = imageEditHarness("cutout");
+        view.props.taskSnapshot = { id: "missing-source", toolKey: "cutout", toolInput: { tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, assetIds: ["deleted"], ratio: "1:1", design: { backgroundColor: "#287be5" } } };
+        view.render(); view.render();
+        expect(view.picker().images).toEqual([]);
+        expect(view.render().find((node) => node.props.type === "radio" && node.props.checked)!.props.value).toBe("#287be5");
+        expect(view.submitButton().props.disabled).toBe(true);
+        expect(view.render().map(elementText).join(" ")).toContain("原任务素材已删除或不可用");
+    });
     it("requires redraw source readiness, regions and explicit edits and submits their exact metadata", async () => {
         const view = imageEditHarness("redraw"); view.props.annotationTarget = {};
         view.picker().onChange([images[0]]);
+        expect(view.render().find((node) => node.type === "footer")!.props.className).toContain("redraw-action-bar");
+        expect(view.render().find((node) => node.type === "footer")!.props.className).not.toContain("regional-action-bar");
+        expect(view.portals.some((node) => node.type === "footer")).toBe(false);
+        expect(view.portals.some((node) => node.type === "WatermarkCanvas")).toBe(true);
         expect(view.picker().appearance).toBe("links"); expect(view.picker().allowReplacement).toBe(true);
         const canvas = () => view.render().find((node) => node.type === "WatermarkCanvas")!.props;
         const regions = [{ id: "redraw-1", region: { x: .1, y: .2, width: .3, height: .4 } }];
@@ -713,6 +746,11 @@ describe("dedicated image editing", () => {
     });
     it("submits transparent or validated custom cutout without quality/ratio or text editing controls", async () => {
         const view = imageEditHarness("cutout"); view.props.annotationTarget = {}; view.fill();
+        expect(view.render().find((node) => node.type === "footer")!.props.className).toContain("cutout-action-bar");
+        expect(view.render().find((node) => node.type === "footer")!.props.className).not.toContain("regional-action-bar");
+        expect(view.portals.some((node) => node.type === "footer")).toBe(false);
+        expect(view.portals.some((node) => node.type === "WatermarkCanvas")).toBe(true);
+        expect(imageEditHarness("redraw").render().find((node) => node.type === "footer")!.props.className).not.toContain("cutout-action-bar");
         const canvas = () => view.render().find((node) => node.type === "WatermarkCanvas")!.props;
         expect(canvas().readOnly).toBe(true); expect(view.submitButton().props.disabled).toBe(true); canvas().onReady(true);
         expect(view.render().filter((node) => node.props.type === "radio")).toHaveLength(6);

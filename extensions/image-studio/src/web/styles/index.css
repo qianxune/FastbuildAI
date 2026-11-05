@@ -778,6 +778,13 @@ details.adv summary:hover{color:var(--text1)}
 .work-item{min-width:0}
 .work-image{position:relative}
 .work-image .rtile{aspect-ratio:1/1; width:100%}
+.work-image .ovl{top:0; bottom:auto; justify-content:flex-end; background:none}
+.work-image .o-cap{display:none}
+.work-tile-actions{position:absolute; bottom:0; left:0; right:0; display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px; background:#171c24b8; color:#fff}
+.work-tile-actions button{display:inline-flex; align-items:center; justify-content:center; gap:4px; min-height:32px; padding:4px; border:0; border-radius:4px; background:transparent; color:inherit; font:12px/1.5 var(--font-cn); cursor:pointer}
+.work-tile-actions button:hover:not(:disabled),.work-tile-actions button:focus-visible{background:#ffffff26}
+.work-tile-actions button:disabled{opacity:.5; cursor:not-allowed}
+@media (pointer:coarse){.work-tile-actions button{min-height:44px}}
 .work-select{position:absolute; top:10px; left:10px; display:grid; place-items:center; width:30px; height:30px; border-radius:6px; background:var(--bg0); border:1px solid var(--line-strong)}
 .work-select input{width:18px; height:18px; accent-color:var(--lime); cursor:pointer}
 .work-caption{display:flex; flex-direction:column; gap:4px; padding:10px 0; font-size:11px; color:var(--text3)}
@@ -859,6 +866,10 @@ details.adv summary:hover{color:var(--text1)}
 .studio-app .shim{border-radius:8px;background:linear-gradient(100deg,#f0f3f5 40%,#e0e8eb 50%,#f0f3f5 60%);background-size:220% 100%}
 .studio-app .cstate{padding:28px 24px}
 .studio-app .res-grid{grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),1fr))}
+.studio-app .result-image-stage{display:flex;justify-content:center;align-items:center;min-height:min(70vh,740px);padding:20px 0 32px}
+.studio-app .result-image-stage .result-preview-tile{flex:none;max-width:100%;border:0;border-radius:8px;background:repeating-conic-gradient(#fff 0% 25%,#e9edf1 0% 50%) 0 0 / 20px 20px}
+.studio-app .result-preview-state .canvas-inner{max-width:1100px}
+.studio-app .result-image-stage .result-preview{height:100%;width:100%}
 .studio-app .rfail{background:#fff3f3;backdrop-filter:none}
 .studio-app .toast{max-width:calc(100% - 24px);box-shadow:0 6px 20px #18232d14;border-radius:6px}
 .studio-app .chip{border-radius:6px}
@@ -889,6 +900,7 @@ details.adv summary:hover{color:var(--text1)}
 .workspace-drawer .workspace-nav{flex:1;min-height:0}
 @media (max-width:900px){
   .studio-app .workspace-create{height:auto;min-height:100%;grid-template-columns:minmax(0,1fr)}
+  .studio-app .result-image-stage{min-height:0;padding:16px 0}
   .studio-app .workspace-create.specialized-workspace{grid-template-columns:minmax(0,1fr)}
   .studio-app .workspace-create>.form{overflow:visible;border-right:0;border-bottom:1px solid var(--line)}
   .studio-app .workspace-create>.canvas{min-height:360px;overflow:visible}

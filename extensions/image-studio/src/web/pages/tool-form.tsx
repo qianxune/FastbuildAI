@@ -13,6 +13,7 @@ import ImageEditForm from "./image-edit-form";
 import SpecializedToolForm from "./specialized-tool-form";
 import SkuToolForm from "./sku-tool-form";
 import { isSpecializedTool } from "./specialized-workflow";
+import type { ImageGeneration } from "../services/types";
 
 export interface ToolFormProps {
     tool: ToolKey;
@@ -21,6 +22,7 @@ export interface ToolFormProps {
     defaultCount?: number;
     annotationTarget?: HTMLElement | null;
     onEditSource?: () => void;
+    taskSnapshot?: ImageGeneration | null;
     onSubmit: (input: ToolWorkflowInput) => Promise<void>;
 }
 

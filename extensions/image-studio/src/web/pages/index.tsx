@@ -11,6 +11,8 @@ import {
     Plus,
     Sparkles,
     X,
+    Eye,
+    ArrowUpRight,
 } from "lucide-react";
 import { useDocumentHead } from "@buildingai/hooks";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
@@ -117,6 +119,8 @@ function imageCaption(item: ImageGeneration, index: number) {
 }
 
 export default function ImageStudioPage() {
+    const [detailRequest, setDetailRequest] = useState(() => typeof window === "undefined" ? null : new URLSearchParams(window.location?.search ?? "").get("task"));
+    const detailTaskId = detailRequest && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(detailRequest) ? detailRequest : undefined;
     const [view, setView] = useState<WorkspaceView>("create");
     const showWorks = view === "works";
     const showHistory = view === "history";
@@ -151,7 +155,10 @@ export default function ImageStudioPage() {
         setWorkflowFailure(message ? { tool: sourceTool, message } : null);
     const [downloading, setDownloading] = useState(false);
     const [retryPreparing, setRetryPreparing] = useState<ToolKey | null>(null);
-    const task = useGenerationQuery(result?.id);
+    const task = useGenerationQuery(result?.id ?? detailTaskId);
+    useEffect(() => {
+        if (detailTaskId && task.data?.id === detailTaskId) setTool(task.data.toolKey ?? "creative");
+    }, [detailTaskId, task.data?.id]);
     const currentTask =
         task.data ?? history.data?.items.find((item) => item.id === result?.id) ?? result;
     const previewTask = historyResult ?? currentTask;
@@ -345,6 +352,7 @@ export default function ImageStudioPage() {
             await remove.mutateAsync(item.id);
             if (result?.id === item.id) setResult(null);
             if (historyResult?.id === item.id) setHistoryResult(null);
+            if (detailTaskId === item.id) { setDetailRequest(null); window.history.replaceState(null, "", window.location.pathname); }
         } catch (error) {
             setWorkflowError(errorMessage(error), item.toolKey ?? "creative");
         }
@@ -456,6 +464,7 @@ export default function ImageStudioPage() {
                 {showWorks && <WorksView renderImage={({ generation, index }) => (
                     <ResultTile generationId={generation.id} imageIndex={index}
                         caption={imageCaption(generation, index)}
+                        onDetails={() => window.open(`/extension/image-studio/studio?task=${encodeURIComponent(generation.id)}`, "_blank", "noopener,noreferrer")}
                         onDownload={(blob, url) => downloadImage(blob, url, generation.id, index)} />
                 )} />}
 
@@ -504,6 +513,7 @@ export default function ImageStudioPage() {
                         </div>;
                     })}
                     {tool !== "main" && !isSpecializedTool(tool) && <ToolForm tool={tool} capabilities={capabilities.data ?? { models: [], tools: [] }} locked={locked || view !== "create" || !capabilities.isSuccess || capabilities.isFetching}
+                        taskSnapshot={currentResult}
                         annotationTarget={tool === "watermark" || tool === "expand" || tool === "redraw" || tool === "cutout" ? annotationTarget : undefined} onEditSource={() => { if (tool === "redraw" || tool === "cutout") setRegionalEditing(tool); else if (tool === "expand") setExpansionEditing(true); else setWatermarkEditing(true); }}
                         onSubmit={startTool} />}
                 </section>
@@ -515,7 +525,10 @@ export default function ImageStudioPage() {
                             {workflowError}
                         </div>
                     )}
-                    {task.isError && result && (
+                    {detailRequest && !detailTaskId && <div className="workflow-message error" role="alert">任务链接无效</div>}
+                    {detailTaskId && task.isPending && <div className="workflow-message" role="status">正在加载任务详情</div>}
+                    {detailTaskId && task.isSuccess && !task.data && <div className="workflow-message error" role="alert">任务不存在或已删除</div>}
+                    {task.isError && (result || detailTaskId) && (
                         <div className="workflow-message error" role="alert">
                             任务状态加载失败
                             <button
@@ -759,7 +772,7 @@ export default function ImageStudioPage() {
                             </div>
                         </div>
                     ) : currentResult && !showWatermarkEditor && !showExpansionEditor && !showSkuEditor && !showRegionalEditor ? (
-                        <div className="cstate show">
+                        <div className="cstate show result-preview-state">
                             <div className="canvas-inner">
                                 <div className="res-bar">
                                     <h3>{generationStatus(currentResult)}</h3>
@@ -778,7 +791,7 @@ export default function ImageStudioPage() {
                                         )}
                                         <button
                                             className="btn btn-ghost btn-sm"
-                                            onClick={() => { setHistoryResult(null); setResult(null); }}
+                                            onClick={() => { setHistoryResult(null); setResult(null); if (detailRequest) { setDetailRequest(null); window.history.replaceState(null, "", window.location.pathname); } }}
                                         >
                                             返回创作
                                         </button>
@@ -846,12 +859,13 @@ export default function ImageStudioPage() {
                                     !currentResult.images.length && (
                                         <p className="workflow-message">该记录没有可下载的图片。</p>
                                     )}
-                                <div className="res-grid">
+                                <div className={`res-grid${currentResult.images.length === 1 ? " result-image-stage" : ""}`}>
                                     {currentResult.images.map((_image, index) => (
                                         <ResultTile
                                             key={`${currentResult.id}-${index}`}
                                             generationId={currentResult.id}
                                             imageIndex={index}
+                                            previewSize={currentResult.images.length === 1 ? currentResult.size : undefined}
                                             caption={imageCaption(currentResult, index)}
                                             onDownload={(blob, url) =>
                                                 downloadImage(blob, url, currentResult.id, index)
@@ -898,12 +912,16 @@ function ResultTile({
     beforeSrc,
     caption,
     onDownload,
+    onDetails,
+    previewSize,
 }: {
     generationId: string;
     imageIndex: number;
     beforeSrc?: string;
     caption: string;
     onDownload: (blob: Blob, url: string) => void;
+    onDetails?: () => void;
+    previewSize?: string;
 }) {
     const [hover, setHover] = useState(false);
     const [holding, setHolding] = useState(false);
@@ -918,6 +936,8 @@ function ResultTile({
     const previewDialog = useRef<HTMLDialogElement>(null);
     const loaded = image?.id === generationId && image.index === imageIndex ? image : null;
     const failed = failure?.id === generationId && failure.index === imageIndex;
+    const dimensions = previewSize?.match(/^(\d+)x(\d+)$/);
+    const previewRatio = dimensions && Number(dimensions[1]) > 0 && Number(dimensions[2]) > 0 ? Number(dimensions[1]) / Number(dimensions[2]) : 1;
     useEffect(
         () =>
             loadGenerationImage(
@@ -932,7 +952,8 @@ function ResultTile({
     return (
         <>
             <div
-                className={`rtile${hover ? "peek" : ""}${holding ? "holding" : ""}`}
+                className={`rtile${hover ? " peek" : ""}${holding ? " holding" : ""}${previewSize ? " result-preview-tile" : ""}`}
+                style={previewSize ? { aspectRatio: previewRatio, width: `min(100%, 900px, ${68 * previewRatio}vh)` } : undefined}
                 onMouseEnter={() => setHover(true)}
                 onMouseLeave={() => setHover(false)}
                 onPointerDown={() => beforeSrc && setHolding(true)}
@@ -967,6 +988,12 @@ function ResultTile({
                         )}
                     </div>
                 )}
+                {onDetails && <div className="work-tile-actions">
+                    <button type="button" disabled={!loaded} onClick={() => previewDialog.current?.showModal()}>
+                        <Eye size={15} />预览大图
+                    </button>
+                    <button type="button" onClick={onDetails}>任务详情<ArrowUpRight size={15} /></button>
+                </div>}
                 {beforeSrc && (
                     <img className="before" src={beforeSrc} alt="原图" draggable={false} />
                 )}

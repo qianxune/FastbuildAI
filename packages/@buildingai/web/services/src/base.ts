@@ -32,7 +32,7 @@ async function handleAuthError(error: unknown): Promise<void> {
     if (location.pathname.includes("/login")) {
         return;
     }
-    location.replace(`/login?redirect=${location.pathname}`);
+    location.replace(`/login?redirect=${encodeURIComponent(location.pathname + location.search + location.hash)}`);
 }
 
 async function handleAccessError(): Promise<void> {
@@ -100,7 +100,7 @@ async function handlePluginAuthError(error: unknown): Promise<void> {
     if (isDev) {
         location.replace(`${devBase}/login?redirect=${encodeURIComponent(location.href)}`);
     } else {
-        location.replace(`/login?redirect=${location.pathname}`);
+        location.replace(`/login?redirect=${encodeURIComponent(location.pathname + location.search + location.hash)}`);
     }
 }
 
