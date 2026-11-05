@@ -645,7 +645,7 @@ function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "expand"
     const billing = jest.fn().mockReturnValue({ ready: options.ready ?? true, costText: "实际报价 2 积分" });
     const selectedModelId = tool === "cutout" ? LOCAL_CUTOUT_MODEL_ID : modelId;
     const capabilities = { tools: [{ key: tool, status: options.unavailable ? "unavailable" : "available", modelIdsByCapability: { "reference-image": [selectedModelId], segmentation: [selectedModelId] } }],
-        models: [{ id: selectedModelId, name: tool === "cutout" ? "BiRefNet Lite" : "Seedream", capabilities: tool === "cutout" ? ["segmentation"] : ["reference-image"], maxReferenceImages: 5 }] } as GenerationCapabilities;
+        models: [{ id: selectedModelId, name: tool === "cutout" ? "腾讯云智能抠图" : "Seedream", capabilities: tool === "cutout" ? ["segmentation"] : ["reference-image"], maxReferenceImages: 5 }] } as GenerationCapabilities;
     const view = renderHarness("image-edit-form", "default", { tool, capabilities, locked: options.locked ?? false, onSubmit }, {
         useGenerationBilling: billing, useProductImagesQuery: () => products, useUploadProductImageMutation: () => uploadState,
     });
