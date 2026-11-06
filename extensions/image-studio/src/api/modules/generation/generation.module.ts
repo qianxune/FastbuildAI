@@ -6,6 +6,9 @@ import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 
 import { ImageGeneration } from "../../db/entities/image-generation.entity";
+import { AssetRecord } from "../../db/entities/asset-record.entity";
+import { AssetsController } from "./controllers/web/assets.controller";
+import { AssetRecordService } from "./services/asset-record.service";
 import { GenerationController } from "./controllers/web/generation.controller";
 import { GenerationProcessor } from "./generation.processor";
 import { GENERATION_QUEUE } from "./constants/generation.constants";
@@ -21,11 +24,13 @@ import { CutoutService } from "./services/cutout.service";
         AiPublicModule,
         ExtensionBillingModule,
         CloudStorageModule,
-        TypeOrmModule.forFeature([ImageGeneration, AiModel, StorageConfig]),
+        TypeOrmModule.forFeature([ImageGeneration, AssetRecord, AiModel, StorageConfig]),
         BullModule.registerQueue({ name: GENERATION_QUEUE }),
     ],
-    controllers: [GenerationController],
+    controllers: [GenerationController, AssetsController],
     providers: [
+        AssetRecordService,
+        { provide: "IMAGE_STUDIO_ASSET_RECORD_SERVICE", useExisting: AssetRecordService },
         GenerationService,
         GenerationModelService,
         GenerationImageService,

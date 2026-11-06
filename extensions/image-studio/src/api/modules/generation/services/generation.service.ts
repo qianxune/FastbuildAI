@@ -1,8 +1,8 @@
 import { InjectRepository } from "@buildingai/db/@nestjs/typeorm";
-import { Repository } from "@buildingai/db/typeorm";
+import { Repository, type EntityManager } from "@buildingai/db/typeorm";
 import { HttpErrorFactory } from "@buildingai/errors";
 import { InjectQueue } from "@nestjs/bullmq";
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { generateImage, generateText } from "ai";
 import type { Queue } from "bullmq";
 import { plainToInstance } from "class-transformer";
@@ -29,6 +29,7 @@ import { ProductImageService, type ProductImageMetadata, type ProductImageUpload
 import { GenerationBillingService } from "./generation-billing.service";
 import { CutoutService, cutoutSourceSize } from "./cutout.service";
 import { LOCAL_CUTOUT_MODEL_ID } from "../../../shared/tools";
+import type { AssetRecordService } from "./asset-record.service";
 
 import {
     GeneratedImage,
@@ -56,6 +57,8 @@ export class GenerationService {
         private readonly productImageService: ProductImageService,
         private readonly generationBillingService: GenerationBillingService,
         private readonly cutoutService: CutoutService,
+        @Optional() @Inject("IMAGE_STUDIO_ASSET_RECORD_SERVICE")
+        private readonly assetRecordService?: AssetRecordService,
     ) {}
 
     /** 返回工具及模型能力清单，不发起模型推理。 */
@@ -521,7 +524,8 @@ export class GenerationService {
 
     /** 在用户级锁内检查历史记录引用，拒绝删除仍被生成记录使用的商品图。 */
     async removeProductImage(userId: string, id: string) {
-        return this.withProductLock(userId, async (repository) => {
+        return this.withProductLock(userId, async (repository, manager) => {
+            await this.assetRecordService?.lockUser(manager, userId);
             const used = await repository
                 .createQueryBuilder("generation")
                 .where("generation.userId = :userId", { userId })
@@ -530,6 +534,7 @@ export class GenerationService {
                 })
                 .getExists();
             if (used) throw HttpErrorFactory.badRequest("商品图已用于生成记录，请先删除相关记录");
+            await this.assetRecordService?.assertImageUnreferenced(manager, userId, id);
             return this.productImageService.remove(userId, id);
         });
     }
@@ -544,13 +549,13 @@ export class GenerationService {
     /** 通过 PostgreSQL 事务级咨询锁串行化同一用户的商品图相关操作。 */
     private withProductLock<T>(
         userId: string,
-        operation: (repository: Repository<ImageGeneration>) => Promise<T>,
+        operation: (repository: Repository<ImageGeneration>, manager: EntityManager) => Promise<T>,
     ) {
         return this.generationRepository.manager.transaction(async (manager) => {
             await manager.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
                 `image-studio-products:${userId}`,
             ]);
-            return operation(manager.getRepository(ImageGeneration));
+            return operation(manager.getRepository(ImageGeneration), manager);
         });
     }
 

@@ -8,8 +8,8 @@ import {
 import type { ProductImage } from "../services/types";
 import "../styles/materials.css";
 
-export function MaterialDialog({ title, onClose, busy = false, children }: {
-    title: string; onClose: () => void; busy?: boolean; children: ReactNode;
+export function MaterialDialog({ title, onClose, busy = false, children, className = "" }: {
+    title: string; onClose: () => void; busy?: boolean; children: ReactNode; className?: string;
 }) {
     const ref = useRef<HTMLDialogElement>(null);
     const titleId = useId();
@@ -25,7 +25,7 @@ export function MaterialDialog({ title, onClose, busy = false, children }: {
             if (previous?.isConnected) previous.focus();
         };
     }, []);
-    return <dialog ref={ref} className="materials-dialog" aria-labelledby={titleId}
+    return <dialog ref={ref} className={`materials-dialog ${className}`} aria-labelledby={titleId}
         onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}
         onClick={(event) => { if (!busy && event.target === event.currentTarget) onClose(); }}>
         <div className="materials-dialog-body">

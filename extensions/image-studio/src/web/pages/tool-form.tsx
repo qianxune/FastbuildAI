@@ -14,6 +14,7 @@ import SpecializedToolForm from "./specialized-tool-form";
 import SkuToolForm from "./sku-tool-form";
 import { isSpecializedTool } from "./specialized-workflow";
 import type { ImageGeneration } from "../services/types";
+import type { AssetApplication } from "../../api/shared/assets";
 
 export interface ToolFormProps {
     tool: ToolKey;
@@ -23,6 +24,8 @@ export interface ToolFormProps {
     annotationTarget?: HTMLElement | null;
     onEditSource?: () => void;
     taskSnapshot?: ImageGeneration | null;
+    requestedAsset?: AssetApplication | null;
+    onAssetConsumed?: (requestId: number, applied: boolean, message?: string) => void;
     onSubmit: (input: ToolWorkflowInput) => Promise<void>;
 }
 

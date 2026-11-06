@@ -12,12 +12,13 @@ import {
     type DetailPlan, type Region, type SpecializedDraft, type SpecializedTool,
 } from "./specialized-workflow";
 import "../styles/specialized-forms.css";
+import { assetDraftSnapshot, confirmAssetReplacement } from "./asset-draft";
 
 export { FusionPresetGallery } from "./specialized-components";
 export { SPECIALIZED_WORKSPACE_LAYOUT } from "./specialized-workflow";
 export type SpecializedToolFormProps = Omit<ToolFormProps, "tool"> & { tool: SpecializedTool };
 
-export default function SpecializedToolForm({ tool, capabilities, locked, defaultCount = 1, onSubmit }: SpecializedToolFormProps) {
+export default function SpecializedToolForm({ tool, capabilities, locked, defaultCount = 1, requestedAsset, onAssetConsumed, onSubmit }: SpecializedToolFormProps) {
     const id = useId();
     const [primary, setPrimary] = useState<ProductImage[]>([]);
     const [references, setReferences] = useState<ProductImage[]>([]);
@@ -76,6 +77,32 @@ export default function SpecializedToolForm({ tool, capabilities, locked, defaul
     const liveModel = useRef({ id: model?.id, limit, capable });
     liveModel.current = { id: model?.id, limit, capable };
     const busy = locked || pending || upload.isPending || analysis.isPending;
+    const consumedAsset = useRef<number | null>(null);
+    useEffect(() => {
+        if (tool !== "creative" || !requestedAsset || consumedAsset.current === requestedAsset.requestId) return;
+        const finish = (applied: boolean, message?: string) => {
+            consumedAsset.current = requestedAsset.requestId;
+            onAssetConsumed?.(requestedAsset.requestId, applied, message);
+        };
+        if (busy || operation.current) { finish(false, "当前创作草稿已锁定，请稍后重新使用资产"); return; }
+        if (products.isError) { finish(false, "图片素材加载失败，请重试后再使用资产"); return; }
+        if (!products.isSuccess || products.isPending || products.isFetching) return;
+        try {
+            const snapshot = assetDraftSnapshot(requestedAsset.asset, products.data ?? [], capabilities, modelChoice);
+            const dirty = Boolean(primary.length || references.length || instructions || modelChoice || countOverride !== null || ratio !== "1:1"
+                || productName || brand || description || platform !== "淘宝" || language !== "简体中文");
+            if (!confirmAssetReplacement(dirty, () => window.confirm("当前创作草稿已有内容，确定替换参考图片和创作要求？"))) {
+                finish(false); return;
+            }
+            current.current = { ...current.current, primary: [], references: snapshot.references, modelChoice: snapshot.modelId };
+            setPrimary([]); setReferences(snapshot.references); setInstructions(snapshot.instructions); setModelChoice(snapshot.modelId); setError("");
+            finish(true);
+        } catch (failure) {
+            const message = failure instanceof Error ? failure.message : "资产无法用于当前草稿";
+            setError(message); finish(false, message);
+        }
+    }, [requestedAsset, tool, busy, products.data, products.isSuccess, products.isPending, products.isFetching, products.isError,
+        capabilities, modelChoice, primary, references, instructions, countOverride, ratio, productName, brand, description, platform, language, onAssetConsumed]);
     const draft: SpecializedDraft = { tool, modelId: model?.id ?? "", primary: primary.map((image) => image.id), references: references.map((image) => image.id),
         productName, brand, description, platform, language, instructions, count, ratio, modules, outputModules, plan, replicaMode,
         fusionPreset: preset, skuVariants: variants.map(({ name, instruction }) => ({ name, instruction })), skuRegion: region };

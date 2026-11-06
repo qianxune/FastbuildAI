@@ -9,6 +9,7 @@ import type { GenerationCapabilities } from "../src/api/shared/tools";
 import { TOOL_REGISTRY, LOCAL_CUTOUT_MODEL_ID } from "../src/api/shared/tools";
 import * as workflow from "../src/api/shared/tool-workflow";
 import * as specialized from "../src/web/pages/specialized-workflow";
+import * as assetDraft from "../src/web/pages/asset-draft";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
@@ -179,7 +180,7 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
     const jsx = (type: unknown, childProps: ElementNode["props"]) => ({ type, props: childProps });
     const source = readFileSync(path.join(__dirname, `../src/web/pages/${file}.tsx`), "utf8");
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } });
-    runInNewContext(compiled.outputText, { exports, Error, require: (name: string) => {
+    runInNewContext(compiled.outputText, { exports, Error, window: { confirm: () => props.confirmReplacement?.() ?? true }, require: (name: string) => {
         if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
         if (name === "react-dom") return { createPortal: (child: ElementNode) => { portals.push(child); return child; } };
         if (name === "react") return {
@@ -197,6 +198,7 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
         if (name === "../../api/shared/tool-workflow") return workflow;
         if (name === "../../api/shared/tools") return { TOOL_REGISTRY, LOCAL_CUTOUT_MODEL_ID };
         if (name === "./specialized-workflow") return specialized;
+        if (name === "./asset-draft") return assetDraft;
         if (name === "./specialized-components") return componentTokens;
         if (name === "./material-picker") return { default: "MaterialPicker", MaterialDialog: "MaterialDialog" };
         if (name === "../services/generation" || name === "../services/tool-generation") return services;
@@ -635,6 +637,55 @@ function formHarness(tool: SpecializedDraft["tool"], options: { ready?: boolean;
     };
     return { ...view, onSubmit, upload, analyze, billing, products, capabilities, field, button, set, role, submitButton, submit, preset, filled };
 }
+
+describe("asset application in the owning creative form", () => {
+    const record = { id: assetIds[5], kind: "reference", name: "Style", prompt: "Soft light", imageIds: [assetIds[0]], version: 1, createdAt: "2026-11-06", updatedAt: "2026-11-06" };
+    it.each(["reference", "model"])("snapshots %s roles into submitted input and queued prompt without auto-generation", async (kind) => {
+        const view = formHarness("creative");
+        const consumed = jest.fn();
+        view.props.onAssetConsumed = consumed;
+        view.props.requestedAsset = { asset: { ...record, kind, imageIds: [...record.imageIds] }, requestId: 1 };
+        view.render(); view.render();
+        expect(consumed).toHaveBeenCalledTimes(1);
+        expect(consumed).toHaveBeenCalledWith(1, true, undefined);
+        expect(view.onSubmit).not.toHaveBeenCalled();
+        await view.submit();
+        const input = view.onSubmit.mock.calls[0][0];
+        expect(input.assetIds).toEqual(record.imageIds);
+        expect(input.instructions).toContain(kind === "model" ? "person" : "style");
+        const prompt = toolWorkflowPrompt(input);
+        expect(prompt).toContain(kind === "model" ? "person" : "style");
+        view.props.requestedAsset.asset.prompt = "Changed later";
+        view.props.requestedAsset.asset.imageIds.length = 0;
+        expect(toolWorkflowPrompt(input)).toBe(prompt);
+    });
+    it("cancels dirty replacement without changing images, instructions, model, count or ratio", () => {
+        const view = formHarness("creative"); view.filled();
+        view.role("参考图片（可选）").onChange([images[1]]);
+        const before = view.render().filter((node) => node.type === "input" || node.type === "textarea" || node.type === "select").map((node) => node.props.value);
+        const confirm = jest.fn(() => false), consumed = jest.fn();
+        view.props.confirmReplacement = confirm; view.props.onAssetConsumed = consumed;
+        view.props.requestedAsset = { asset: record, requestId: 2 };
+        view.render(); view.render();
+        expect(confirm).toHaveBeenCalledTimes(1); expect(consumed).toHaveBeenCalledWith(2, false, undefined);
+        expect(view.role("参考图片（可选）").images.map((image: any) => image.id)).toEqual([images[1]!.id]);
+        expect(view.render().filter((node) => node.type === "input" || node.type === "textarea" || node.type === "select").map((node) => node.props.value)).toEqual(before);
+    });
+    it.each(["locked", "missing", "five", "model", "budget"])("consumes %s failures without replacing the draft", (failure) => {
+        const view = formHarness("creative"); view.filled();
+        const consumed = jest.fn(); view.props.onAssetConsumed = consumed;
+        const candidate = { ...record, imageIds: [...record.imageIds] };
+        if (failure === "locked") view.props.locked = true;
+        if (failure === "missing") candidate.imageIds = ["33333333-3333-4333-8333-333333333333"];
+        if (failure === "five") candidate.imageIds = assetIds.slice(0, 5);
+        if (failure === "model") view.capabilities.models[0]!.capabilities = ["text-to-image"];
+        if (failure === "budget") candidate.prompt = "x".repeat(1500);
+        view.props.requestedAsset = { asset: candidate, requestId: 3 }; view.render(); view.render();
+        expect(consumed).toHaveBeenCalledTimes(1); expect(consumed.mock.calls[0][1]).toBe(false);
+        expect(consumed.mock.calls[0][2]).toBeTruthy(); expect(view.field("instructions").props.value).toBe("User prompt");
+        expect(view.onSubmit).not.toHaveBeenCalled();
+    });
+});
 
 function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "expand" | "redraw" | "cutout", options: { ready?: boolean; locked?: boolean; unavailable?: boolean } = {}) {
     const onSubmit = jest.fn().mockResolvedValue(undefined), upload = jest.fn();

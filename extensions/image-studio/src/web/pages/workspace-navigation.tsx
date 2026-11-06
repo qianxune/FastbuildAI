@@ -33,7 +33,7 @@ function NavigationContent({ view, tool, onNavigate, onPreferences, onHelp, onMo
         <div className="workspace-nav-primary">
             {([
                 ["overview", "创作工作台", LayoutDashboard], ["works", "我的作品", FolderOpen],
-                ["materials", "素材库", Images], ["history", "生成历史", History],
+                ["materials", "资产库", Images], ["history", "生成历史", History],
             ] as const).map(([key, label, Icon]) => <button key={key} type="button"
                 className="workspace-nav-item" aria-current={view === key ? "page" : undefined}
                 onClick={() => navigate(key)}><Icon size={18} /><span>{label}</span></button>)}

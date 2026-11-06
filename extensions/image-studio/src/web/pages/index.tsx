@@ -27,7 +27,8 @@ import {
 } from "../../api/shared/main-image";
 import MainImageForm from "./main-image-form";
 import WorksView from "./works";
-import MaterialsView from "./materials";
+import AssetsView from "./assets";
+import type { AssetApplication, CreativeAsset } from "../../api/shared/assets";
 import ToolForm from "./tool-form";
 import { RetouchPreview } from "./image-edit-form";
 import { isSpecializedTool, SPECIALIZED_TOOLS, SPECIALIZED_WORKSPACE_LAYOUT } from "./specialized-workflow";
@@ -137,6 +138,11 @@ export default function ImageStudioPage() {
     const [skuEditing, setSkuEditing] = useState(false);
     const [regionalEditing, setRegionalEditing] = useState<"redraw" | "cutout" | null>(null);
     const materialSequence = useRef(0);
+    const [requestedAsset, setRequestedAsset] = useState<AssetApplication | null>(null);
+    const [assetNotice, setAssetNotice] = useState("");
+    const assetSequence = useRef(0);
+    const assetRequest = useRef<{ requestId: number; resolve: (applied: boolean) => void; reject: (error: Error) => void } | null>(null);
+    useEffect(() => () => { assetRequest.current?.resolve(false); assetRequest.current = null; }, []);
     useDocumentHead({ title: showWorks ? "我的作品 — 出图AI" : "创作工作台 — 出图AI" });
 
     const [tool, setTool] = useState<ToolKey>("main");
@@ -247,10 +253,35 @@ export default function ImageStudioPage() {
     const toolName = TOOL_LABELS[tool];
 
     const navigate = (next: WorkspaceView, nextTool?: ToolKey) => {
+        if (assetRequest.current && (next !== "create" || (nextTool && nextTool !== "creative"))) {
+            assetRequest.current.resolve(false); assetRequest.current = null; setRequestedAsset(null);
+            setAssetNotice("已取消使用资产；原草稿已保留");
+        }
         setView(next);
         if (nextTool) setTool(nextTool);
         if (next !== "history") setHistoryResult(null);
         setWorkflowError(null);
+    };
+    const consumeAsset = (requestId: number, applied: boolean, message?: string) => {
+        const request = assetRequest.current;
+        if (!request || request.requestId !== requestId) return;
+        assetRequest.current = null;
+        setRequestedAsset((current) => current?.requestId === requestId ? null : current);
+        setAssetNotice(message || (applied ? "资产已填入创作草稿，尚未生成" : "已取消替换；原草稿已保留"));
+        if (message) request.reject(new Error(message)); else request.resolve(applied);
+    };
+    const useAsset = (asset: CreativeAsset): Promise<boolean> => {
+        if (locked || !capabilities.isSuccess || capabilities.isFetching || assetRequest.current) {
+            const message = "当前工作区已锁定或能力尚未就绪，请稍后重新使用资产";
+            setAssetNotice(message); return Promise.reject(new Error(message));
+        }
+        navigate("create", "creative");
+        const requestId = ++assetSequence.current;
+        setAssetNotice("正在检查资产并准备创作草稿");
+        return new Promise((resolve, reject) => {
+            assetRequest.current = { requestId, resolve, reject };
+            setRequestedAsset({ asset: { ...asset, imageIds: [...asset.imageIds] }, requestId });
+        });
     };
 
     useEffect(() => {
@@ -446,7 +477,7 @@ export default function ImageStudioPage() {
                 <nav className="tb-crumb" aria-label="面包屑">
                     <span>工作台</span>
                     <i>/</i>
-                    <span>{{ overview: "创作工作台", create: "创作", works: "我的作品", materials: "素材库", history: "生成历史" }[view]}</span>
+                    <span>{{ overview: "创作工作台", create: "创作", works: "我的作品", materials: "资产库", history: "生成历史" }[view]}</span>
                     {view !== "overview" && <><i>/</i><b>{showWorks ? "图片作品" : toolName}</b></>}
                 </nav>
                 <div className="tb-right">
@@ -458,9 +489,11 @@ export default function ImageStudioPage() {
             <main className="workspace-layout">
                 <WorkspaceNavigation view={view} tool={tool} mobileOpen={mobileOpen} onMobileOpenChange={setMobileOpen} onNavigate={navigate} onPreferences={() => setPreferencesOpen(true)} onHelp={() => setHelpOpen(true)} />
                 <div className="workspace-content">
+                {assetNotice && <p className="workflow-message" role="status">{assetNotice}</p>}
                 {busy && (view !== "create" || pendingTool !== tool) && <button className="workspace-active-task" onClick={() => navigate("create", pendingTool)}><span className="spin" />当前任务 {pendingStatus} · {pendingCount} 张<span>查看任务</span></button>}
                 {view === "overview" && <WorkspaceOverview onNavigate={navigate} onOpenTask={(generation) => window.open(`/extension/image-studio/studio?task=${encodeURIComponent(generation.id)}`, "_blank", "noopener,noreferrer")} />}
-                {view === "materials" && <MaterialsView onUse={(image) => { setRequestedMaterial({ image, requestId: ++materialSequence.current }); navigate("create", "main"); }} />}
+                <AssetsView active={view === "materials"} locked={locked || !capabilities.isSuccess || capabilities.isFetching}
+                    onUse={useAsset} onUseImage={(image) => { setRequestedMaterial({ image, requestId: ++materialSequence.current }); navigate("create", "main"); }} />
 
                 {showWorks && <WorksView renderImage={({ generation, index }) => (
                     <ResultTile generationId={generation.id} imageIndex={index}
@@ -510,6 +543,7 @@ export default function ImageStudioPage() {
                                 locked={inactive || locked || !capabilities.isSuccess || capabilities.isFetching}
                                 annotationTarget={specializedTool === "sku" ? (inactive ? null : annotationTarget) : undefined}
                                 onEditSource={specializedTool === "sku" ? () => { if (!inactive && !locked) setSkuEditing(true); } : undefined}
+                                requestedAsset={specializedTool === "creative" ? requestedAsset : null} onAssetConsumed={consumeAsset}
                                 defaultCount={preferences.value.count} onSubmit={startTool} />
                         </div>;
                     })}

@@ -64,7 +64,7 @@
 .materials-report { margin: 12px 0; max-height: 200px; overflow: auto; }
 .materials-report p { margin: 5px 0; }
 .materials-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 24px; }
-.materials-dialog { border: 1px solid var(--mat-line); border-radius: 8px; padding: 0; width: min(840px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); background: var(--mat-bg); box-shadow: 0 16px 70px #0003; }
+.materials-dialog { position: fixed; inset: 0; margin: auto; border: 1px solid var(--mat-line); border-radius: 8px; padding: 0; width: min(840px, calc(100vw - 32px)); height: fit-content; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); background: var(--mat-bg); box-shadow: 0 16px 70px #0003; }
 .materials-dialog::backdrop { background: #18251f70; }
 .materials-dialog-body { padding: 22px; min-width: 0; }
 .materials-dialog header { padding-bottom: 14px; border-bottom: 1px solid var(--mat-line); }

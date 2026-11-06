@@ -495,7 +495,7 @@ describe("workspace preferences and navigation", () => {
                 expect(props.onNavigate).toHaveBeenLastCalledWith("create", key);
                 expect(props.onMobileOpenChange).toHaveBeenLastCalledWith(false);
             }
-            for (const [label, next] of [["我的作品", "works"], ["素材库", "materials"], ["生成历史", "history"]]) {
+            for (const [label, next] of [["我的作品", "works"], ["资产库", "materials"], ["生成历史", "history"]]) {
                 rendered.find((node) => node.type === "button" && text(node) === label)!.props.onClick();
                 expect(props.onNavigate).toHaveBeenLastCalledWith(next, undefined);
             }
@@ -540,6 +540,48 @@ function workspace(search = "", enterCreation = true) {
     if (enterCreation && !search) render().find((node) => node.type === "Navigation")!.props.onNavigate("create", "main");
     return { ...view, ...environment, render, capability, capabilityQuery, active, items, query, mutation, toolMutation, retryMutation, quote, confirm, open, replaceState, preferences };
 }
+
+describe("workspace asset application routing", () => {
+    const record = { id: image(4).id, kind: "model", name: "Portrait", prompt: "", imageIds: [image(1).id], version: 1, createdAt: "2026-11-06", updatedAt: "2026-11-06" };
+    const assetView = (view: ReturnType<typeof workspace>) => view.render().find((node) => node.type === "./assets")!;
+    const creativeForm = (view: ReturnType<typeof workspace>) => view.render().find((node) => node.type === "./tool-form" && node.props.tool === "creative")!;
+    it("copies requests to creative only, settles once, and never submits automatically", async () => {
+        const view = workspace();
+        const candidate = { ...record, imageIds: [...record.imageIds] };
+        const pending = assetView(view).props.onUse(candidate);
+        candidate.imageIds.length = 0;
+        const form = creativeForm(view);
+        expect(form.props.requestedAsset.asset.imageIds).toEqual(record.imageIds);
+        expect(view.render().filter((node) => node.type === "./tool-form" && node.props.tool !== "creative").every((node) => !node.props.requestedAsset)).toBe(true);
+        form.props.onAssetConsumed(form.props.requestedAsset.requestId, true);
+        form.props.onAssetConsumed(form.props.requestedAsset.requestId, false, "late failure");
+        await expect(pending).resolves.toBe(true);
+        expect(creativeForm(view).props.requestedAsset).toBeNull();
+        expect(view.mutation.mutateAsync).not.toHaveBeenCalled(); expect(view.toolMutation.mutateAsync).not.toHaveBeenCalled();
+    });
+    it("settles navigation cancellation and owning-form rejection while preserving image-to-main routing", async () => {
+        const view = workspace();
+        const pending = assetView(view).props.onUse(record);
+        view.render().find((node) => node.type === "Navigation")!.props.onNavigate("materials");
+        await expect(pending).resolves.toBe(false);
+        const failed = assetView(view).props.onUse(record);
+        const rejection = expect(failed).rejects.toThrow("missing image");
+        const form = creativeForm(view);
+        form.props.onAssetConsumed(form.props.requestedAsset.requestId, false, "missing image");
+        await rejection;
+        expect(view.render().some((node) => node.props.role === "status" && text(node).includes("missing image"))).toBe(true);
+        assetView(view).props.onUseImage(image(2));
+        const mainForm = view.render().find((node) => node.type === "./main-image-form")!;
+        expect(mainForm.props.requestedMaterial.image.id).toBe(image(2).id);
+    });
+    it("rejects unsettled capabilities and releases a pending request on unmount", async () => {
+        const view = workspace(); view.capabilityQuery.isFetching = true;
+        await expect(assetView(view).props.onUse(record)).rejects.toThrow("能力尚未就绪");
+        view.capabilityQuery.isFetching = false; view.render(); view.commit();
+        const pending = assetView(view).props.onUse(record); view.dispose();
+        await expect(pending).resolves.toBe(false);
+    });
+});
 
 describe("workspace overview data", () => {
     function overview() {
@@ -912,10 +954,10 @@ describe("workspace integration", () => {
         expect(view.render().some((node) => node.props.className === "workspace-active-task" && text(node).includes("等待生成"))).toBe(true);
         view.active.status = "completed";
         find("Navigation").props.onNavigate("materials");
-        find("./materials").props.onUse(image(1));
+        find("./assets").props.onUseImage(image(1));
         const first = find("./main-image-form").props.requestedMaterial;
         find("Navigation").props.onNavigate("materials");
-        find("./materials").props.onUse(image(2));
+        find("./assets").props.onUseImage(image(2));
         const second = find("./main-image-form").props.requestedMaterial;
         expect(second.requestId).toBeGreaterThan(first.requestId);
         find("./main-image-form").props.onMaterialConsumed(first.requestId);

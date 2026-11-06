@@ -51,7 +51,7 @@ function MaterialEditor({ editor, groups, onClose, onSave }: {
     </MaterialDialog>;
 }
 
-function MaterialPreview({ image, onClose }: { image: ProductImage; onClose: () => void }) {
+export function MaterialPreview({ image, onClose }: { image: ProductImage; onClose: () => void }) {
     const [url, setUrl] = useState("");
     const [failed, setFailed] = useState(false);
     const [attempt, setAttempt] = useState(0);
