@@ -196,6 +196,114 @@ export function loadGenerationImage(
     };
 }
 
+export async function fetchGenerationThumbnail(id: string, index: number, apiPrefix = "api", signal?: AbortSignal): Promise<Blob> {
+    try {
+        const prefix = apiPrefix.replace(/^\/+|\/+$/g, "");
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ||
+            !Number.isInteger(index) || index < 0 || index > 9 || !/^[a-z0-9_-]+(?:\/[a-z0-9_-]+)*$/i.test(prefix)) throw new Error();
+        const { data } = await apiHttpClient.instance.get<Blob>(`/image-studio/${prefix}/generations/${id}/images/${index}/thumbnail`, {
+            responseType: "blob", signal, withCredentials: false,
+        });
+        if (!(data instanceof Blob) || data.type !== "image/webp" || !data.size || data.size > 256 * 1024) throw new Error();
+        return data;
+    } catch { throw new Error("缩略图加载失败，请稍后重试"); }
+}
+
+type ThumbnailEntry = { promise: Promise<Blob>; controller: AbortController; users: number; settled: boolean; expires: number };
+const generationThumbnails = new Map<string, ThumbnailEntry>();
+const thumbnailControllers = new Set<AbortController>();
+const thumbnailQueue: Array<() => Promise<void>> = [];
+let thumbnailActive = 0;
+let thumbnailAccount = "";
+let thumbnailEpoch = 0;
+
+function drainThumbnailQueue() {
+    while (thumbnailActive < 4 && thumbnailQueue.length) {
+        thumbnailActive++;
+        void thumbnailQueue.shift()!().finally(() => { thumbnailActive--; drainThumbnailQueue(); });
+    }
+}
+
+export function clearGenerationThumbnails() {
+    thumbnailEpoch++;
+    for (const controller of thumbnailControllers) controller.abort();
+    generationThumbnails.clear();
+}
+
+export function setGenerationThumbnailAccount(account: string) {
+    if (thumbnailAccount !== account) { clearGenerationThumbnails(); thumbnailAccount = account; }
+}
+
+export function loadGenerationThumbnail(
+    id: string, index: number, apiPrefix: string,
+    onLoad: (image: { blob: Blob; url: string }) => void, onError: () => void, account: string,
+) {
+    setGenerationThumbnailAccount(account);
+    if (!account) { onError(); return () => undefined; }
+    const epoch = thumbnailEpoch;
+    const key = JSON.stringify([account, id, index, apiPrefix, "thumbnail-v1"]);
+    let entry = generationThumbnails.get(key);
+    if (!entry || entry.expires <= Date.now()) {
+        const controller = new AbortController();
+        thumbnailControllers.add(controller);
+        const promise = new Promise<Blob>((resolve, reject) => {
+            thumbnailQueue.push(async () => {
+                try {
+                    if (controller.signal.aborted) throw new Error("cancelled");
+                    resolve(await fetchGenerationThumbnail(id, index, apiPrefix, controller.signal));
+                } catch (error) { reject(error); }
+                finally { thumbnailControllers.delete(controller); }
+            });
+            drainThumbnailQueue();
+        });
+        entry = { promise, controller, users: 0, settled: false, expires: Date.now() + 10 * 60 * 1000 };
+        const current = entry;
+        current.promise = promise.then((blob) => { current.settled = true; return blob; }, (error) => {
+            current.settled = true;
+            if (generationThumbnails.get(key) === current) generationThumbnails.delete(key);
+            throw error;
+        });
+        generationThumbnails.set(key, current);
+        if (generationThumbnails.size > 128) generationThumbnails.delete(generationThumbnails.keys().next().value!);
+    }
+    const current = entry;
+    current.users++;
+    let disposed = false;
+    let url: string | undefined;
+    void current.promise.then((blob) => {
+        if (disposed || epoch !== thumbnailEpoch) return;
+        url = URL.createObjectURL(blob);
+        onLoad({ blob, url });
+    }).catch(() => { if (!disposed && epoch === thumbnailEpoch) onError(); });
+    return () => {
+        if (disposed) return;
+        disposed = true;
+        if (url) URL.revokeObjectURL(url);
+        if (--current.users === 0 && !current.settled) {
+            current.controller.abort();
+            if (generationThumbnails.get(key) === current) generationThumbnails.delete(key);
+        }
+    };
+}
+
+export function loadWhenVisible(target: Element | null, load: () => () => void) {
+    let disposed = false;
+    let started = false;
+    let release: (() => void) | undefined;
+    let observer: IntersectionObserver | undefined;
+    const start = () => { if (!disposed && !started) { started = true; observer?.disconnect(); release = load(); } };
+    if (!target || typeof IntersectionObserver !== "function") start();
+    else {
+        try {
+            observer = new IntersectionObserver((entries) => {
+                if (entries.some((entry) => entry.target === target && entry.isIntersecting)) start();
+            }, { rootMargin: "0px", threshold: 0 });
+            observer.observe(target);
+        } catch { observer?.disconnect(); start(); }
+    }
+    return () => { disposed = true; observer?.disconnect(); release?.(); };
+}
+
 export function useGenerationCapabilitiesQuery() {
     return useQuery({
         queryKey: ["image-studio", "capabilities"],
@@ -292,7 +400,7 @@ export function useDeleteGenerationMutation() {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: (id: string) => apiHttpClient.delete(`/generations/${id}`),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: historyKey }),
+        onSuccess: () => { clearGenerationThumbnails(); return queryClient.invalidateQueries({ queryKey: historyKey }); },
     });
 }
 

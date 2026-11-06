@@ -224,6 +224,19 @@ export class GenerationController {
     }
 
     /** 校验记录归属与零起始图片索引，直接返回禁止缓存的生成图文件流。 */
+    @Get(":id/images/:index/thumbnail")
+    @SkipTransform()
+    @Header("X-Content-Type-Options", "nosniff")
+    @Header("Cache-Control", "private, no-store")
+    async thumbnail(
+        @Playground() user: UserPlayground,
+        @Param("id", ParseUUIDPipe) id: string,
+        @Param("index", ParseIntPipe) index: number,
+    ) {
+        const image = await this.generationService.readThumbnail(user.id, id, index);
+        return new StreamableFile(image.buffer, { type: image.mediaType, length: image.buffer.length });
+    }
+
     @Get(":id/images/:index")
     @SkipTransform()
     @Header("X-Content-Type-Options", "nosniff")

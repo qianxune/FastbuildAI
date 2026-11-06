@@ -15,6 +15,7 @@ import {
     ArrowUpRight,
 } from "lucide-react";
 import { useDocumentHead } from "@buildingai/hooks";
+import { useAuthStore } from "@buildingai/stores";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { ToolKey } from "../../api/shared/tools";
 import {
@@ -41,6 +42,10 @@ import { isToolEditKey, validateToolWorkflow, type ToolWorkflowInput } from "../
 import type { GenerationCapabilities } from "../../api/shared/tools";
 import {
     loadGenerationImage,
+        loadGenerationThumbnail,
+        loadWhenVisible,
+        clearGenerationThumbnails,
+        setGenerationThumbnailAccount,
     fetchGenerationImage,
     isGenerationActive,
     useGenerationCapabilitiesQuery,
@@ -121,6 +126,8 @@ function imageCaption(item: ImageGeneration, index: number) {
 }
 
 export default function ImageStudioPage() {
+        const account = useAuthStore((state) => state.auth.userInfo?.id ?? "");
+        useEffect(() => { setGenerationThumbnailAccount(account); return clearGenerationThumbnails; }, [account]);
     const [detailRequest, setDetailRequest] = useState(() => typeof window === "undefined" ? null : new URLSearchParams(window.location?.search ?? "").get("task"));
     const detailTaskId = detailRequest && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(detailRequest) ? detailRequest : undefined;
     const [view, setView] = useState<WorkspaceView>(detailRequest ? "create" : "overview");
@@ -496,7 +503,7 @@ export default function ImageStudioPage() {
                     onUse={useAsset} onUseImage={(image) => { setRequestedMaterial({ image, requestId: ++materialSequence.current }); navigate("create", "main"); }} />
 
                 {showWorks && <WorksView renderImage={({ generation, index }) => (
-                    <ResultTile generationId={generation.id} imageIndex={index}
+                    <ResultTile thumbnail generationId={generation.id} imageIndex={index}
                         caption={imageCaption(generation, index)}
                         onDetails={() => window.open(`/extension/image-studio/studio?task=${encodeURIComponent(generation.id)}`, "_blank", "noopener,noreferrer")}
                         onDownload={(blob, url) => downloadImage(blob, url, generation.id, index)} />
@@ -657,6 +664,7 @@ export default function ImageStudioPage() {
                                             <div className="res-grid">
                                                 {item.images.map((_image, index) => (
                                                     <ResultTile
+                                                        thumbnail
                                                         key={`${item.id}-${index}`}
                                                         generationId={item.id}
                                                         imageIndex={index}
@@ -949,6 +957,7 @@ function ResultTile({
     onDownload,
     onDetails,
     previewSize,
+    thumbnail = false,
 }: {
     generationId: string;
     imageIndex: number;
@@ -957,7 +966,10 @@ function ResultTile({
     onDownload: (blob: Blob, url: string) => void;
     onDetails?: () => void;
     previewSize?: string;
+    thumbnail?: boolean;
 }) {
+    const account = useAuthStore((state) => state.auth.userInfo?.id ?? "");
+    const tile = useRef<HTMLDivElement>(null);
     const [hover, setHover] = useState(false);
     const [holding, setHolding] = useState(false);
     const [image, setImage] = useState<{
@@ -965,28 +977,55 @@ function ResultTile({
         index: number;
         blob: Blob;
         url: string;
+        account: string;
     } | null>(null);
+    const [original, setOriginal] = useState<typeof image>(null);
+    const [originalRequested, setOriginalRequested] = useState<{ id: string; index: number; account: string } | null>(null);
+    const [originalFailure, setOriginalFailure] = useState(false);
+    const [downloading, setDownloading] = useState(false);
+    const downloadPending = useRef(false);
+    const downloadHandler = useRef(onDownload);
+    downloadHandler.current = onDownload;
     const [failure, setFailure] = useState<{ id: string; index: number } | null>(null);
     const [attempt, setAttempt] = useState(0);
     const previewDialog = useRef<HTMLDialogElement>(null);
-    const loaded = image?.id === generationId && image.index === imageIndex ? image : null;
+    const loaded = image?.id === generationId && image.index === imageIndex && image.account === account ? image : null;
+    const full = thumbnail ? (original?.id === generationId && original.index === imageIndex && original.account === account ? original : null) : loaded;
     const failed = failure?.id === generationId && failure.index === imageIndex;
     const dimensions = previewSize?.match(/^(\d+)x(\d+)$/);
     const previewRatio = dimensions && Number(dimensions[1]) > 0 && Number(dimensions[2]) > 0 ? Number(dimensions[1]) / Number(dimensions[2]) : 1;
-    useEffect(
-        () =>
-            loadGenerationImage(
-                generationId,
-                imageIndex,
-                import.meta.env.VITE_APP_WEB_API_PREFIX || "api",
-                (result) => setImage({ ...result, id: generationId, index: imageIndex }),
-                () => setFailure({ id: generationId, index: imageIndex }),
-            ),
-        [generationId, imageIndex, attempt],
-    );
+    useEffect(() => {
+        if (!account) return;
+        const prefix = import.meta.env.VITE_APP_WEB_API_PREFIX || "api";
+        const onLoad = (result: { blob: Blob; url: string }) => { setImage({ ...result, id: generationId, index: imageIndex, account }); setFailure(null); };
+        const onError = () => setFailure({ id: generationId, index: imageIndex });
+        const load = () => thumbnail ? loadGenerationThumbnail(generationId, imageIndex, prefix, onLoad, onError, account)
+            : loadGenerationImage(generationId, imageIndex, prefix, onLoad, onError);
+        return thumbnail ? loadWhenVisible(tile.current, load) : load();
+    }, [generationId, imageIndex, attempt, thumbnail, account]);
+    useEffect(() => {
+        if (!thumbnail || !originalRequested || originalRequested.id !== generationId ||
+            originalRequested.index !== imageIndex || originalRequested.account !== account) return;
+        setOriginalFailure(false);
+        return loadGenerationImage(generationId, imageIndex, import.meta.env.VITE_APP_WEB_API_PREFIX || "api", (result) => {
+            setOriginal({ ...result, id: generationId, index: imageIndex, account });
+            if (downloadPending.current) { downloadPending.current = false; downloadHandler.current(result.blob, result.url); }
+            setDownloading(false);
+        }, () => {
+            downloadPending.current = false; setDownloading(false); setOriginalFailure(true);
+            if (!previewDialog.current?.open) previewDialog.current?.showModal();
+        });
+    }, [generationId, imageIndex, account, thumbnail, originalRequested, attempt]);
+    const requestOriginal = () => { if (thumbnail && !full) setOriginalRequested({ id: generationId, index: imageIndex, account }); };
+    const openPreview = () => { requestOriginal(); previewDialog.current?.showModal(); };
+    const download = () => {
+        if (full) onDownload(full.blob, full.url);
+        else if (loaded) { downloadPending.current = true; setDownloading(true); requestOriginal(); }
+    };
     return (
         <>
             <div
+                ref={tile}
                 className={`rtile${hover ? " peek" : ""}${holding ? " holding" : ""}${previewSize ? " result-preview-tile" : ""}`}
                 style={previewSize ? { aspectRatio: previewRatio, width: `min(100%, 900px, ${68 * previewRatio}vh)` } : undefined}
                 onMouseEnter={() => setHover(true)}
@@ -1001,7 +1040,7 @@ function ResultTile({
                         className="result-preview"
                         aria-label={`预览图片 ${caption}`}
                         title="放大预览"
-                        onClick={() => previewDialog.current?.showModal()}
+                        onClick={openPreview}
                     >
                         <img src={loaded.url} alt={caption} draggable={false} />
                     </button>
@@ -1024,7 +1063,7 @@ function ResultTile({
                     </div>
                 )}
                 {onDetails && <div className="work-tile-actions">
-                    <button type="button" disabled={!loaded} onClick={() => previewDialog.current?.showModal()}>
+                    <button type="button" disabled={!loaded} onClick={openPreview}>
                         <Eye size={15} />预览大图
                     </button>
                     <button type="button" onClick={onDetails}>任务详情<ArrowUpRight size={15} /></button>
@@ -1038,8 +1077,8 @@ function ResultTile({
                         className="o-btn"
                         title="下载"
                         aria-label={`下载图片 ${caption}`}
-                        disabled={!loaded}
-                        onClick={() => loaded && onDownload(loaded.blob, loaded.url)}
+                        disabled={!loaded || downloading}
+                        onClick={download}
                     >
                         <Download width={14} height={14} />
                     </button>
@@ -1049,7 +1088,7 @@ function ResultTile({
                         title="放大预览"
                         aria-label={`放大预览 ${caption}`}
                         disabled={!loaded}
-                        onClick={() => previewDialog.current?.showModal()}
+                        onClick={openPreview}
                     >
                         <ImageIcon size={14} />
                     </button>
@@ -1071,8 +1110,8 @@ function ResultTile({
                         className="icon-btn"
                         title="下载原图"
                         aria-label="下载原图"
-                        disabled={!loaded}
-                        onClick={() => loaded && onDownload(loaded.blob, loaded.url)}
+                        disabled={!full || downloading}
+                        onClick={download}
                     >
                         <Download size={18} />
                     </button>
@@ -1086,7 +1125,10 @@ function ResultTile({
                         <X size={18} />
                     </button>
                 </div>
-                {loaded && <img src={loaded.url} alt={caption} />}
+                {full ? <img src={full.url} alt={caption} /> : thumbnail && <div className="generation-placeholder" role={originalFailure ? "alert" : "status"}>
+                    <span>{originalFailure ? "原图加载失败" : "正在加载原图..."}</span>
+                    {originalFailure && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={14} />重新加载</button>}
+                </div>}
             </dialog>
         </>
     );

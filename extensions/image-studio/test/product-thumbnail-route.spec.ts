@@ -97,3 +97,19 @@ it("validates typed metadata and group bodies without accepting client ownership
     const identifier = Object.values(parameters).find((entry: any) => entry.index === 1) as { pipes: Array<typeof nest.ParseUUIDPipe> };
     expect(identifier.pipes).toContain(nest.ParseUUIDPipe);
 });
+
+it("routes generated thumbnails through ownership checks without using the original reader", async () => {
+    const readThumbnail = jest.fn().mockResolvedValue({ buffer: Buffer.from("small webp"), mediaType: "image/webp" });
+    const readImage = jest.fn();
+    const { controller } = controllerHarness({ readThumbnail, readImage });
+    expect(Reflect.getMetadata("path", controller.thumbnail)).toBe(":id/images/:index/thumbnail");
+    const file = await controller.thumbnail({ id: "owner" }, "task", 9);
+    expect(file.getHeaders()).toMatchObject({ type: "image/webp", length: 10 });
+    expect(readThumbnail).toHaveBeenCalledWith("owner", "task", 9);
+    expect(readImage).not.toHaveBeenCalled();
+    expect(Reflect.getMetadata("__headers__", controller.thumbnail)).toEqual(expect.arrayContaining([
+        { name: "Cache-Control", value: "private, no-store" },
+    ]));
+    readThumbnail.mockRejectedValueOnce(new Error("not owned"));
+    await expect(controller.thumbnail({ id: "other" }, "task", 0)).rejects.toThrow("not owned");
+});

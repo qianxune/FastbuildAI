@@ -3,9 +3,9 @@ import { useRechargeCenterQuery, useUserAccountLogQuery } from "@buildingai/serv
 import { useAuthStore, useConfigStore } from "@buildingai/stores";
 import { Avatar, AvatarFallback, AvatarImage } from "@buildingai/ui/components/ui/avatar";
 import { ArrowRight, ArrowUpRight, CheckCircle2, Clock3, ImageIcon, RefreshCw, UserPen, Wallet, XCircle, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ToolKey } from "../../api/shared/tools";
-import { loadGenerationImage, useCreditBalanceQuery, useGenerationHistoryQuery } from "../services/generation";
+import { loadGenerationThumbnail, loadWhenVisible, useCreditBalanceQuery, useGenerationHistoryQuery } from "../services/generation";
 import type { ImageGeneration } from "../services/types";
 import { requestAccountAction } from "./workspace-account";
 import { TOOL_ICONS, TOOL_LABELS, type WorkspaceView } from "./workspace-navigation";
@@ -33,15 +33,17 @@ export function overviewTime(value: string) {
 }
 
 export function RecentTaskImage({ task }: { task: ImageGeneration }) {
-    const [image, setImage] = useState<{ id: string; url: string } | null>(null);
+    const account = useAuthStore((state) => state.auth.userInfo?.id ?? "");
+    const target = useRef<HTMLSpanElement>(null);
+    const [image, setImage] = useState<{ id: string; url: string; account: string } | null>(null);
     const [failure, setFailure] = useState<string | null>(null);
     useEffect(() => {
-        if (!task.images.length) return;
-        return loadGenerationImage(task.id, 0, import.meta.env.VITE_APP_WEB_API_PREFIX || "api",
-            ({ url }) => { setImage({ id: task.id, url }); setFailure(null); }, () => setFailure(task.id));
-    }, [task.id, task.images.length]);
-    return <span className="overview-task-image">
-        {task.images.length > 0 && image?.id === task.id && failure !== task.id
+        if (!task.images.length || !account) return;
+        return loadWhenVisible(target.current, () => loadGenerationThumbnail(task.id, 0, import.meta.env.VITE_APP_WEB_API_PREFIX || "api",
+            ({ url }) => { setImage({ id: task.id, url, account }); setFailure(null); }, () => setFailure(task.id), account));
+    }, [task.id, task.images.length, account]);
+    return <span ref={target} className="overview-task-image">
+        {task.images.length > 0 && image?.id === task.id && image.account === account && failure !== task.id
             ? <img src={image.url} alt="" onError={() => setFailure(task.id)} />
             : <ImageIcon size={21} aria-label={failure === task.id ? "图片加载失败" : task.images.length ? "图片加载中" : "暂无结果图片"} />}
     </span>;

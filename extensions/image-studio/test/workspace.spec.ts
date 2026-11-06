@@ -137,6 +137,11 @@ function harness(file: string, modules: Record<string, any> = {}, globals: Recor
             if (name === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "Fragment" };
             if (name === "../../api/shared/main-image") return main;
             if (name === "../../api/shared/tool-workflow") return workflow;
+            if (name === "@buildingai/stores" && !modules[name]) return { useAuthStore: (select: any) => select({ auth: { userInfo: { id: "owner" } } }) };
+            if (name === "../services/generation") return {
+                clearGenerationThumbnails: jest.fn(), setGenerationThumbnailAccount: jest.fn(),
+                loadWhenVisible: (_target: any, load: () => any) => load(), ...modules[name],
+            };
             if (name === "./specialized-workflow") return specializedWorkflow;
             if (name === "../../api/shared/tools") return { TOOL_REGISTRY };
             return modules[name] ?? new Proxy({ __esModule: true, default: name }, { get: (target, key) => key in target ? target[key as keyof typeof target] : key });
@@ -623,8 +628,8 @@ describe("workspace overview data", () => {
             "./workspace-account": { requestAccountAction: action },
             "@buildingai/services/shared": { useUserInfoQuery: () => profile },
             "@buildingai/services/web": { useUserAccountLogQuery: () => ledger, useRechargeCenterQuery: () => ({ data: { rechargeStatus: config.recharge } }) },
-            "@buildingai/stores": { useAuthStore: (selector: any) => selector({ auth: { userInfo: undefined } }), useConfigStore: (selector: any) => selector({ config: { websiteConfig: { features: { membership: config.membership } } } }) },
-            "../services/generation": { useCreditBalanceQuery: () => balance, useGenerationHistoryQuery: history, loadGenerationImage: load },
+            "@buildingai/stores": { useAuthStore: (selector: any) => selector({ auth: { userInfo: { id: "owner" } } }), useConfigStore: (selector: any) => selector({ config: { websiteConfig: { features: { membership: config.membership } } } }) },
+            "../services/generation": { useCreditBalanceQuery: () => balance, useGenerationHistoryQuery: history, loadGenerationThumbnail: load },
         });
         const props = { onNavigate: jest.fn(), onOpenTask: jest.fn() };
         const render = () => nodes(view.render(props));
@@ -687,7 +692,7 @@ describe("workspace overview data", () => {
         const task = view.recent.data.items[0];
         const render = () => nodes(view.renderComponent({ task }, view.exports.RecentTaskImage));
         render(); view.commit();
-        expect(view.load).toHaveBeenCalledWith("saved", 0, "api", expect.any(Function), expect.any(Function));
+        expect(view.load).toHaveBeenCalledWith("saved", 0, "api", expect.any(Function), expect.any(Function), "owner");
         view.load.mock.calls[0][3]({ url: "blob:owned" });
         expect(render().find((node) => node.type === "img")!.props.src).toBe("blob:owned");
         const images = task.images; task.images = [];
@@ -805,6 +810,37 @@ describe("workspace integration", () => {
         expect(props.onDetails).toHaveBeenCalledTimes(1);
         expect(props.onDownload).not.toHaveBeenCalled();
         view.dispose();
+    });
+
+    it("defers list images until visible and downloads the separately requested original, never the thumbnail", () => {
+        const thumbnail = jest.fn().mockReturnValue(jest.fn());
+        const original = jest.fn().mockReturnValue(jest.fn());
+        let start: () => () => void;
+        let release: (() => void) | undefined;
+        const view = harness("index", { "../services/generation": {
+            loadGenerationThumbnail: thumbnail, loadGenerationImage: original,
+            loadWhenVisible: (_target: any, load: () => () => void) => { start = () => (release = load()); return () => release?.(); },
+        } });
+        const props = { thumbnail: true, generationId: "work", imageIndex: 1, caption: "2", onDownload: jest.fn() };
+        const render = () => nodes(view.render(props, view.exports.ResultTile));
+        const dialog = { showModal: jest.fn(), close: jest.fn() };
+        render().find((node) => node.type === "dialog")!.props.ref.current = dialog;
+        view.commit(); expect(thumbnail).not.toHaveBeenCalled(); expect(original).not.toHaveBeenCalled();
+        start!(); expect(thumbnail).toHaveBeenCalledTimes(1);
+        const small = { blob: { size: 100 }, url: "blob:thumbnail" };
+        thumbnail.mock.calls[0][3](small);
+        render().find((node) => node.props.title === "下载")!.props.onClick();
+        render(); view.commit(); expect(original).toHaveBeenCalledTimes(1);
+        expect(props.onDownload).not.toHaveBeenCalled();
+        const full = { blob: { size: 5000000 }, url: "blob:original" };
+        original.mock.calls[0][3](full);
+        expect(props.onDownload).toHaveBeenCalledWith(full.blob, full.url);
+        expect(props.onDownload).not.toHaveBeenCalledWith(small.blob, small.url);
+        const image = render().find((node) => node.props.className === "result-preview")!;
+        image.props.onClick(); expect(dialog.showModal).toHaveBeenCalledTimes(1);
+        expect(render().filter((node) => node.type === "img").map((node) => node.props.src)).toEqual(["blob:thumbnail", "blob:original"]);
+        view.dispose(); expect(thumbnail.mock.results[0].value).toHaveBeenCalledTimes(1);
+        expect(original.mock.results[0].value).toHaveBeenCalledTimes(1);
     });
 
     it("quotes and retries ten SKU outputs only when the stored regional contract is valid", async () => {

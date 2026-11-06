@@ -3,17 +3,20 @@ import { InjectRepository } from "@buildingai/db/@nestjs/typeorm";
 import { StorageConfig } from "@buildingai/db/entities";
 import { Repository } from "@buildingai/db/typeorm";
 import { HttpErrorFactory } from "@buildingai/errors";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "fs/promises";
 import path from "path";
 import { Readable } from "stream";
+import sharp from "sharp";
 
 import type { GeneratedImage } from "../../../db/entities/image-generation.entity";
 import { GENERATION_FAILED, GENERATION_STORAGE_RESTRICTED } from "../constants/generation.constants";
 
 const APP_IDENTIFIER = "image-studio";
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_THUMBNAIL_BYTES = 256 * 1024;
+const THUMBNAIL_SUFFIX = ".thumbnail-v1.webp";
 const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const IMAGE_EXTENSIONS: Record<string, string> = {
     "image/png": "png",
@@ -23,6 +26,10 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 
 @Injectable()
 export class GenerationImageService {
+    private readonly thumbnails = new Map<string, { expires: number; value: Promise<{ buffer: Buffer; mediaType: string }> }>();
+    private readonly thumbnailReads = new Map<string, Promise<{ buffer: Buffer; mediaType: string }>>();
+    private readonly thumbnailRemovals = new Set<string>();
+    private readonly logger = new Logger(GenerationImageService.name);
     /** 复用系统启用的存储配置及云存储服务，不在扩展内另存密钥。 */
     constructor(
         @InjectRepository(StorageConfig)
@@ -63,20 +70,127 @@ export class GenerationImageService {
         }
     }
 
+    async readThumbnail(id: string, index: number, image: GeneratedImage) {
+        const location = this.imageLocation(id, index, image);
+        const config = image.storage ? await this.cloudConfig(id, index, image) : undefined;
+        const cacheKey = this.thumbnailCacheKey(id, index, image);
+        if (this.thumbnailRemovals.has(cacheKey)) throw HttpErrorFactory.notFound("图片不存在");
+        const pending = this.thumbnailReads.get(cacheKey);
+        if (pending) return pending;
+        const cached = this.thumbnails.get(cacheKey);
+        if (cached && cached.expires > Date.now()) return cached.value;
+        this.thumbnails.delete(cacheKey);
+        const value = (async () => {
+            try {
+                let buffer: Buffer;
+                try {
+                    if (config) buffer = await this.cloudStorageService.readBuffer(config, image.storage!.key + THUMBNAIL_SUFFIX, MAX_THUMBNAIL_BYTES);
+                    else {
+                        const filename = await this.checkedPath(location.directory, location.filename + THUMBNAIL_SUFFIX);
+                        const info = await lstat(filename);
+                        if (!info.isFile() || info.isSymbolicLink() || !info.size || info.size > MAX_THUMBNAIL_BYTES) throw new Error("Invalid thumbnail file");
+                        buffer = await readFile(filename);
+                    }
+                } catch (error) {
+                    const detail = error as { code?: string; statusCode?: number };
+                    if (detail.code !== "ENOENT" && detail.code !== "NoSuchKey" && detail.statusCode !== 404) throw error;
+                    const original = await this.read(id, index, image);
+                    buffer = await this.createThumbnail(original.buffer);
+                    await this.writeThumbnail(id, index, image, buffer);
+                }
+                await this.validateThumbnail(buffer);
+                return { buffer, mediaType: "image/webp" };
+            } catch {
+                throw HttpErrorFactory.notFound("缩略图暂不可用，请稍后重试");
+            }
+        })();
+        this.thumbnailReads.set(cacheKey, value);
+        this.thumbnails.set(cacheKey, { expires: Date.now() + 10 * 60 * 1000, value });
+        if (this.thumbnails.size > 128) this.thumbnails.delete(this.thumbnails.keys().next().value!);
+        try { return await value; } catch (error) {
+            if (this.thumbnails.get(cacheKey)?.value === value) this.thumbnails.delete(cacheKey);
+            throw error;
+        } finally { if (this.thumbnailReads.get(cacheKey) === value) this.thumbnailReads.delete(cacheKey); }
+    }
+
+    private thumbnailCacheKey(id: string, index: number, image: GeneratedImage) {
+        return JSON.stringify([id, index, image.storage ?? image.url, THUMBNAIL_SUFFIX]);
+    }
+
+    private async createThumbnail(buffer: Buffer) {
+        const thumbnail = await sharp(buffer, { limitInputPixels: 40000000, failOn: "warning", animated: false })
+            .rotate().resize({ width: 512, height: 512, fit: "inside", withoutEnlargement: true })
+            .webp({ quality: 78 }).toBuffer();
+        await this.validateThumbnail(thumbnail);
+        return thumbnail;
+    }
+
+    private async validateThumbnail(buffer: Buffer) {
+        if (!buffer.length || buffer.length > MAX_THUMBNAIL_BYTES) throw new Error("Invalid thumbnail size");
+        const metadata = await sharp(buffer, { limitInputPixels: 512 * 512, animated: false }).metadata();
+        if (metadata.format !== "webp" || !metadata.width || !metadata.height ||
+            metadata.width > 512 || metadata.height > 512 || (metadata.pages ?? 1) > 1) throw new Error("Invalid thumbnail");
+    }
+
+    private async writeThumbnail(id: string, index: number, image: GeneratedImage, buffer: Buffer) {
+        const location = this.imageLocation(id, index, image);
+        if (image.storage) {
+            const config = await this.cloudConfig(id, index, image);
+            const key = image.storage.key + THUMBNAIL_SUFFIX;
+            try {
+                await this.cloudStorageService.upload({ storageConfig: config, path: key, privateObject: true, file: {
+                    fieldname: "file", originalname: `${index}${THUMBNAIL_SUFFIX}`, encoding: "7bit", mimetype: "image/webp",
+                    size: buffer.length, buffer, destination: "", filename: `${index}${THUMBNAIL_SUFFIX}`, path: key, stream: Readable.from(buffer),
+                } });
+            } catch (error) {
+                await this.cloudStorageService.deleteObject(config, key).catch(() => undefined);
+                throw error;
+            }
+        } else {
+            const original = await this.checkedPath(location.directory, location.filename);
+            try { await writeFile(original + THUMBNAIL_SUFFIX, buffer, { flag: "wx", mode: 0o600 }); }
+            catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+        }
+    }
+
+    private async persistThumbnails(id: string, images: GeneratedImage[], buffers: Buffer[]) {
+        for (const [index, image] of images.entries()) {
+            try {
+                const buffer = await this.createThumbnail(buffers[index]);
+                await this.writeThumbnail(id, index, image, buffer);
+            } catch {
+                this.logger.warn(`Thumbnail pending for ${id}:${index}`);
+            }
+        }
+    }
+
+    private async removeStoredImage(id: string, index: number, image: GeneratedImage) {
+        const location = this.imageLocation(id, index, image);
+        const config = image.storage ? await this.cloudConfig(id, index, image) : undefined;
+        const cacheKey = this.thumbnailCacheKey(id, index, image);
+        this.thumbnailRemovals.add(cacheKey);
+        try {
+            await this.thumbnailReads.get(cacheKey)?.catch(() => undefined);
+            this.thumbnails.delete(cacheKey);
+            const removeLocal = async (filename: string) => {
+                try { await rm(await this.checkedPath(location.directory, filename), { force: true }); }
+                catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+            };
+            const results = await Promise.allSettled(config ? [
+                this.cloudStorageService.deleteObject(config, image.storage!.key),
+                this.cloudStorageService.deleteObject(config, image.storage!.key + THUMBNAIL_SUFFIX),
+            ] : [removeLocal(location.filename), removeLocal(location.filename + THUMBNAIL_SUFFIX)]);
+            const failure = results.find((result) => result.status === "rejected");
+            if (failure?.status === "rejected") throw failure.reason;
+        } finally { this.thumbnailRemovals.delete(cacheKey); }
+    }
+
     /** 删除记录关联的 COS 或本地图片；忽略本地文件不存在，其余错误转换为业务提示。 */
     async remove(id: string, images: GeneratedImage[]) {
         await Promise.all(
             images.map(async (image, index) => {
-                const location = this.imageLocation(id, index, image);
                 try {
-                    if (image.storage) {
-                        const config = await this.cloudConfig(id, index, image);
-                        await this.cloudStorageService.deleteObject(config, image.storage.key);
-                        return;
-                    }
-                    await rm(await this.checkedPath(location.directory, location.filename), {
-                        force: true,
-                    });
+                    await this.removeStoredImage(id, index, image);
                 } catch (error) {
                     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                         throw HttpErrorFactory.badRequest("图片删除失败，请稍后重试");
@@ -89,18 +203,7 @@ export class GenerationImageService {
     /** 尽力清理记录指定的 COS 或本地输出，不让补偿异常覆盖原始错误。 */
     cleanup(id: string, images: GeneratedImage[]) {
         return Promise.allSettled(
-            images.map(async (image, index) => {
-                if (image.storage) {
-                    this.imageLocation(id, index, image);
-                    const config = await this.cloudConfig(id, index, image);
-                    await this.cloudStorageService.deleteObject(config, image.storage.key);
-                    return;
-                }
-                await rm(
-                    path.join(this.storageDirectory(), `${id}-${index}.${IMAGE_EXTENSIONS[image.mediaType]}`),
-                    { force: true },
-                );
-            }),
+            images.map((image, index) => this.removeStoredImage(id, index, image)),
         );
     }
 
@@ -160,6 +263,7 @@ export class GenerationImageService {
                 writtenFiles.push(destination);
                 persisted.push({ url: this.url(generationId, index), mediaType: image.mediaType });
             }
+            await this.persistThumbnails(generationId, persisted, decoded);
             return persisted;
         } catch (error) {
             await this.cleanupFiles(writtenFiles);
@@ -210,6 +314,7 @@ export class GenerationImageService {
                     },
                 });
             }
+            await this.persistThumbnails(generationId, persisted, decoded);
             return persisted;
         } catch (error) {
             await Promise.allSettled(

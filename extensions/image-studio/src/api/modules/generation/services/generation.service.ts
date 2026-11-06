@@ -741,6 +741,14 @@ export class GenerationService {
         return this.generationImageService.read(generation.id, index, generation.images[index]);
     }
 
+    async readThumbnail(userId: string, id: string, index: number) {
+        const generation = await this.findOwned(userId, id);
+        if (!Number.isInteger(index) || index < 0 || index >= generation.images.length) {
+            throw HttpErrorFactory.notFound("图片不存在");
+        }
+        return this.generationImageService.readThumbnail(generation.id, index, generation.images[index]);
+    }
+
     /** 将内部错误统一为公开提示，并将图片地址转换为受权限保护的读取接口。 */
     private publicRecord(generation: ImageGeneration) {
         return {

@@ -3,6 +3,7 @@
 import { GenerationImageService } from "../src/api/modules/generation/services/generation-image.service";
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "fs/promises";
 import { GENERATION_STORAGE_RESTRICTED } from "../src/api/modules/generation/constants/generation.constants";
+import sharp from "sharp";
 
 jest.mock("@buildingai/core/modules", () => ({ CloudStorageService: class {} }));
 jest.mock("@buildingai/db/@nestjs/typeorm", () => ({ InjectRepository: () => () => undefined }));
@@ -97,7 +98,7 @@ describe("generated image storage", () => {
         await expect(service.read(id, 10, images[9]!)).rejects.toThrow();
         await expect(service.persist(id, [...batch, input], "sku")).rejects.toThrow();
         await service.remove(id, images);
-        expect(cloud.deleteObject).toHaveBeenCalledTimes(10);
+        expect(cloud.deleteObject).toHaveBeenCalledTimes(20);
     });
 
     it("deletes only the recorded cloud objects on removal and cancellation cleanup", async () => {
@@ -105,11 +106,11 @@ describe("generated image storage", () => {
         const images = await service.persist(id, [input, input]);
         await service.remove(id, images);
         expect(cloud.deleteObject.mock.calls.map((call) => call[1])).toEqual(
-            images.map((image) => image.storage!.key),
+            expect.arrayContaining(images.flatMap((image) => [image.storage!.key, image.storage!.key + ".thumbnail-v1.webp"])),
         );
         cloud.deleteObject.mockClear().mockRejectedValue(new Error("unavailable"));
         await expect(service.cleanup(id, images)).resolves.toHaveLength(2);
-        expect(cloud.deleteObject).toHaveBeenCalledTimes(2);
+        expect(cloud.deleteObject).toHaveBeenCalledTimes(4);
         expect(rm).not.toHaveBeenCalled();
     });
 
@@ -182,7 +183,7 @@ describe("generated image storage", () => {
         );
         await expect(service.read(id, 0, image)).resolves.toEqual({ buffer, mediaType: "image/png" });
         await service.remove(id, [image]);
-        expect(rm).toHaveBeenCalledTimes(1);
+        expect(rm).toHaveBeenCalledTimes(2);
         expect(cloud.upload).not.toHaveBeenCalled();
     });
 
@@ -195,6 +196,117 @@ describe("generated image storage", () => {
         await service.remove(id, [image]);
         expect(cloud.readBuffer).not.toHaveBeenCalled();
         expect(cloud.deleteObject).not.toHaveBeenCalled();
-        expect(rm).toHaveBeenCalledTimes(1);
+        expect(rm).toHaveBeenCalledTimes(2);
+    });
+
+    it("materializes a bounded WebP for historical COS images once across concurrent requests", async () => {
+        const { service, cloud } = fixture();
+        const original = await sharp({ create: { width: 1600, height: 1000, channels: 4, background: { r: 20, g: 90, b: 80, alpha: 0.5 } } }).png().toBuffer();
+        const image = { url: service.url(id, 0), mediaType: "image/png", storage: {
+            type: "cos" as const, configId, bucket: "test-bucket", region: "ap-guangzhou",
+            key: `image-studio/generated/${id}/${configId}/0.png`,
+        } };
+        const stored = new Map<string, Buffer>();
+        cloud.readBuffer.mockImplementation(async (_config, key) => {
+            if (key === image.storage.key) return original;
+            if (stored.has(key)) return stored.get(key)!;
+            throw Object.assign(new Error("missing"), { statusCode: 404 });
+        });
+        cloud.upload.mockImplementation(async ({ path, file }) => { stored.set(path, file.buffer); return {}; });
+        const [first, concurrent] = await Promise.all([
+            service.readThumbnail(id, 0, image), service.readThumbnail(id, 0, image),
+        ]);
+        expect(first).toEqual(concurrent);
+        expect(first.mediaType).toBe("image/webp");
+        const metadata = await sharp(first.buffer).metadata();
+        expect(metadata.width).toBe(512);
+        expect(metadata.height).toBe(320);
+        expect(metadata.hasAlpha).toBe(true);
+        expect(first.buffer.length).toBeLessThan(original.length);
+        await service.readThumbnail(id, 0, image);
+        expect(cloud.readBuffer.mock.calls.filter((call) => call[1] === image.storage.key)).toHaveLength(1);
+        expect(cloud.upload).toHaveBeenCalledTimes(1);
+        expect(cloud.upload.mock.calls[0][0]).toMatchObject({ privateObject: true, file: { mimetype: "image/webp" } });
+        expect(await service.read(id, 0, image)).toEqual({ buffer: original, mediaType: "image/png" });
+    });
+
+    it("rejects invalid thumbnail references before reading COS", async () => {
+        const { service, cloud } = fixture();
+        const image = { url: service.url(id, 0), mediaType: "image/png", storage: {
+            type: "cos" as const, configId, bucket: "test-bucket", region: "ap-guangzhou",
+            key: `image-studio/generated/${configId}/${configId}/0.png`,
+        } };
+        await expect(service.readThumbnail(id, 0, image)).rejects.toThrow();
+        expect(cloud.readBuffer).not.toHaveBeenCalled();
+        expect(cloud.upload).not.toHaveBeenCalled();
+    });
+
+    it("prepares new thumbnails from generated bytes and keeps successful originals when the thumbnail upload fails", async () => {
+        const { service, cloud } = fixture();
+        const original = await sharp({ create: { width: 1024, height: 1024, channels: 4, background: { r: 30, g: 70, b: 80, alpha: 1 } } }).png().toBuffer();
+        cloud.upload.mockImplementation(async ({ file }) => {
+            if (file.mimetype === "image/webp") throw new Error("thumbnail unavailable");
+            return {};
+        });
+        const images = await service.persist(id, [{ base64: original.toString("base64"), mediaType: "image/png" }]);
+        expect(images).toHaveLength(1);
+        expect(cloud.upload.mock.calls.map((call) => call[0].file.mimetype)).toEqual(["image/png", "image/webp"]);
+        expect(cloud.readBuffer).not.toHaveBeenCalled();
+        expect(cloud.deleteObject).toHaveBeenCalledTimes(1);
+        expect(cloud.deleteObject.mock.calls[0][1]).toBe(images[0].storage!.key + ".thumbnail-v1.webp");
+    });
+
+    it("does not read a full original when COS denies thumbnail access", async () => {
+        const { service, cloud } = fixture();
+        const image = { url: service.url(id, 0), mediaType: "image/png", storage: {
+            type: "cos" as const, configId, bucket: "test-bucket", region: "ap-guangzhou",
+            key: `image-studio/generated/${id}/${configId}/0.png`,
+        } };
+        cloud.readBuffer.mockRejectedValue(Object.assign(new Error("denied"), { statusCode: 403 }));
+        await expect(service.readThumbnail(id, 0, image)).rejects.toThrow("缩略图暂不可用");
+        expect(cloud.readBuffer).toHaveBeenCalledTimes(1);
+        expect(cloud.readBuffer.mock.calls[0][1]).toContain(".thumbnail-v1.webp");
+        expect(cloud.upload).not.toHaveBeenCalled();
+    });
+
+    it("rejects oversized local derivatives before reading any bytes or falling back to the original", async () => {
+        const { service, cloud } = fixture("local");
+        (lstat as jest.Mock).mockResolvedValue({ isFile: () => true, isSymbolicLink: () => false, size: 256 * 1024 + 1 });
+        await expect(service.readThumbnail(id, 0, { url: service.url(id, 0), mediaType: "image/png" })).rejects.toThrow();
+        expect(readFile).not.toHaveBeenCalled(); expect(writeFile).not.toHaveBeenCalled(); expect(cloud.readBuffer).not.toHaveBeenCalled();
+    });
+
+    it("waits for active thumbnail reads, blocks new reads throughout deletion, and evicts cached bytes", async () => {
+        const { service, cloud } = fixture();
+        const image = { url: service.url(id, 0), mediaType: "image/png", storage: {
+            type: "cos" as const, configId, bucket: "test-bucket", region: "ap-guangzhou",
+            key: `image-studio/generated/${id}/${configId}/0.png`,
+        } };
+        const thumbnail = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 20, g: 60, b: 70 } } }).webp().toBuffer();
+        let resolveRead: (buffer: Buffer) => void;
+        cloud.readBuffer.mockImplementation(() => new Promise<Buffer>((resolve) => { resolveRead = resolve; }));
+        const read = service.readThumbnail(id, 0, image);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const removal = service.remove(id, [image]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(cloud.deleteObject).not.toHaveBeenCalled();
+        await expect(service.readThumbnail(id, 0, image)).rejects.toThrow("图片不存在");
+        resolveRead!(thumbnail); await read; await removal;
+        expect(cloud.deleteObject.mock.calls.map((call) => call[1])).toEqual([image.storage.key, image.storage.key + ".thumbnail-v1.webp"]);
+        cloud.readBuffer.mockRejectedValue(Object.assign(new Error("missing"), { code: "NoSuchKey" }));
+        await expect(service.readThumbnail(id, 0, image)).rejects.toThrow();
+        expect(cloud.readBuffer).toHaveBeenCalledTimes(3);
+    });
+
+    it("still compensates the original when deleting a derivative fails", async () => {
+        const { service, cloud } = fixture();
+        const image = { url: service.url(id, 0), mediaType: "image/png", storage: {
+            type: "cos" as const, configId, bucket: "test-bucket", region: "ap-guangzhou",
+            key: `image-studio/generated/${id}/${configId}/0.png`,
+        } };
+        cloud.deleteObject.mockImplementation(async (_config, key) => { if (key.endsWith(".webp")) throw new Error("cleanup failed"); });
+        await service.cleanup(id, [image]);
+        expect(cloud.deleteObject.mock.calls.map((call) => call[1])).toContain(image.storage.key);
+        expect(cloud.deleteObject).toHaveBeenCalledTimes(2);
     });
 });

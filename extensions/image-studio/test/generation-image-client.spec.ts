@@ -12,6 +12,12 @@ import path from "node:path";
 import { runInNewContext } from "node:vm";
 import * as ts from "typescript";
 
+let intersect: (entries: any[]) => void = () => undefined;
+class TestIntersectionObserver {
+    observe = jest.fn();
+    disconnect = jest.fn();
+    constructor(callback: (entries: any[]) => void) { intersect = callback; }
+}
 const clientExports: Record<string, unknown> = {};
 const clientSource = readFileSync(path.join(__dirname, "../src/web/services/generation.ts"), "utf8");
 const compiledClient = ts.transpileModule(clientSource, {
@@ -25,7 +31,7 @@ const compiledClient = ts.transpileModule(clientSource, {
     }] },
 });
 runInNewContext(compiledClient.outputText, {
-    exports: clientExports, Blob, URL, AbortController, FormData, Error,
+    exports: clientExports, Blob, URL, AbortController, FormData, Error, Date, IntersectionObserver: TestIntersectionObserver,
     require: (name: string) => {
         if (name === "./base") return { apiHttpClient };
         if (name === "@tanstack/react-query") return { useMutation, useQuery, useQueryClient };
@@ -38,6 +44,8 @@ const {
     fetchGenerationImage, loadGenerationImage, isGenerationActive, useGenerationQuery,
     useGenerationHistoryQuery, useGenerateImageMutation, useRetryGenerationMutation,
     useCancelGenerationMutation, useGenerationBilling, fetchGenerationQuote,
+    fetchGenerationThumbnail, loadGenerationThumbnail, clearGenerationThumbnails, setGenerationThumbnailAccount,
+    loadWhenVisible,
 } = clientExports as typeof import("../src/web/services/generation");
 
 describe("asynchronous generation client", () => {
@@ -190,6 +198,73 @@ describe("authenticated generation image client", () => {
         expect(onLoad).not.toHaveBeenCalled();
         expect(onError).not.toHaveBeenCalled();
         create.mockRestore();
+    });
+});
+
+describe("generated thumbnail client", () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const get = apiHttpClient.instance.get as jest.Mock;
+    beforeEach(() => { jest.clearAllMocks(); clearGenerationThumbnails(); });
+
+    it("does not start an offscreen fetch and releases a visible load exactly once", () => {
+        const target = {} as Element;
+        const release = jest.fn();
+        const load = jest.fn(() => release);
+        const dispose = loadWhenVisible(target, load);
+        expect(load).not.toHaveBeenCalled();
+        intersect([{ target, isIntersecting: false }]);
+        expect(load).not.toHaveBeenCalled();
+        intersect([{ target, isIntersecting: true }]);
+        intersect([{ target, isIntersecting: true }]);
+        expect(load).toHaveBeenCalledTimes(1);
+        dispose(); expect(release).toHaveBeenCalledTimes(1);
+        intersect([{ target, isIntersecting: true }]);
+        expect(load).toHaveBeenCalledTimes(1);
+    });
+
+    it("requests only the bounded private WebP endpoint and leaves original downloads separate", async () => {
+        const blob = new Blob(["webp"], { type: "image/webp" });
+        get.mockResolvedValue({ data: blob });
+        await expect(fetchGenerationThumbnail(id, 9)).resolves.toBe(blob);
+        expect(get).toHaveBeenCalledWith(`/image-studio/api/generations/${id}/images/9/thumbnail`, expect.objectContaining({ withCredentials: false, responseType: "blob" }));
+        get.mockResolvedValue({ data: new Blob(["png"], { type: "image/png" }) });
+        await expect(fetchGenerationThumbnail(id, 0)).rejects.toThrow("缩略图加载失败");
+        get.mockResolvedValue({ data: new Blob([new Uint8Array(256 * 1024 + 1)], { type: "image/webp" }) });
+        await expect(fetchGenerationThumbnail(id, 0)).rejects.toThrow("缩略图加载失败");
+    });
+
+    it("shares one request while each consumer owns its Blob URL and isolates account changes", async () => {
+        get.mockResolvedValue({ data: new Blob(["webp"], { type: "image/webp" }) });
+        const first = jest.fn(); const second = jest.fn(); const failed = jest.fn();
+        const releaseFirst = loadGenerationThumbnail(id, 0, "api", first, failed, "owner");
+        const releaseSecond = loadGenerationThumbnail(id, 0, "api", second, failed, "owner");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(get).toHaveBeenCalledTimes(1);
+        expect(first).toHaveBeenCalledTimes(1); expect(second).toHaveBeenCalledTimes(1);
+        expect(first.mock.calls[0][0].url).not.toBe(second.mock.calls[0][0].url);
+        releaseFirst(); releaseSecond();
+        const releaseCached = loadGenerationThumbnail(id, 0, "api", jest.fn(), failed, "owner");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(get).toHaveBeenCalledTimes(1);
+        releaseCached(); setGenerationThumbnailAccount("");
+        const releaseOther = loadGenerationThumbnail(id, 0, "api", jest.fn(), failed, "other");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(get).toHaveBeenCalledTimes(2);
+        expect(failed).not.toHaveBeenCalled(); releaseOther();
+    });
+
+    it("limits list fetches to four concurrent requests", async () => {
+        const pending: Array<(response: { data: Blob }) => void> = [];
+        get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+        const releases = Array.from({ length: 8 }, (_, index) => loadGenerationThumbnail(id, index, "api", jest.fn(), jest.fn(), "owner"));
+        expect(get).toHaveBeenCalledTimes(4);
+        const blob = new Blob(["webp"], { type: "image/webp" });
+        pending.splice(0).forEach((resolve) => resolve({ data: blob }));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(get).toHaveBeenCalledTimes(8);
+        pending.splice(0).forEach((resolve) => resolve({ data: blob }));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        releases.forEach((release) => release());
     });
 });
 
