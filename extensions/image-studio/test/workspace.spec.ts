@@ -40,6 +40,29 @@ describe("workspace drawer positioning", () => {
         expect(location.replace).not.toHaveBeenCalled();
         expect(logout).toHaveBeenCalledTimes(3);
     });
+    it("switches landing navigation with the shared login state without changing studio links", () => {
+        const auth: any = { token: undefined, userInfo: { username: "stale-user" } };
+        const view = harness("landing", {
+            "@buildingai/stores": { useAuthStore: (select: any) => select({ auth }) },
+            "react-router-dom": { useLocation: () => ({ hash: "" }) },
+        });
+        const navigation = () => nodes(view.render()).find((node) => node.props.className === "nav-right")!;
+        const links = () => nodes(navigation()).filter((node) => node.type === "a");
+        expect(links().map(text)).toEqual(["登录", "免费开始"]);
+        auth.token = "test-session";
+        auth.userInfo = { username: "seller", nickname: "Seller nickname" };
+        expect(links().map(text)).toEqual(["控制台", "seller"]);
+        expect(links().map((node) => [node.props.href, node.props.target])).toEqual([["/studio", "_top"], ["/studio", "_top"]]);
+        auth.userInfo = { username: "seller".repeat(50) };
+        expect(links()[1].props.title).toBe(auth.userInfo.username);
+        expect(links()[1].props.style.maxWidth).toBe(160);
+        auth.userInfo = { nickname: "Nickname" };
+        expect(links().map(text)).toEqual(["控制台", "Nickname"]);
+        auth.userInfo = undefined;
+        expect(links().map(text)).toEqual(["控制台", "我的账户"]);
+        auth.token = undefined;
+        expect(links().map(text)).toEqual(["登录", "免费开始"]);
+    });
     it("shows an explicitly labeled interactive retouch example instead of pretending it is a generated result", () => {
         const view = harness("image-edit-form");
         const render = () => nodes(view.render({}, view.exports.RetouchPreview));

@@ -1,4 +1,4 @@
-import { ArrowRight, Check, ImagePlus, LoaderCircle, Maximize, RefreshCw, Scan, Upload, X } from "lucide-react";
+import { Check, ImagePlus, LoaderCircle, Maximize, RefreshCw, Scan, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { FUSION_PRESETS } from "../../api/shared/tool-workflow";
 import { loadProductImage, loadProductThumbnail } from "../services/generation";
@@ -38,7 +38,8 @@ export function FusionPresetGallery({ selected, disabled, onSelect }: FusionPres
                 <button key={preset.id} type="button" className="specialized-preset" aria-pressed={selected === preset.id}
                     title={preset.description} disabled={disabled} onClick={() => onSelect(preset.id)}>
                     <img src={FUSION_PRESET_IMAGES[preset.id]} alt={`${preset.label}素材示意`} loading="lazy" decoding="async" referrerPolicy="no-referrer" />
-                    <span><strong>{preset.label}</strong>{selected === preset.id ? <Check size={16} /> : <ArrowRight size={16} />}</span>
+                    <span className="specialized-preset-heading"><strong>{preset.label}</strong>{selected === preset.id && <Check size={14} aria-hidden="true" />}</span>
+                    <small className="specialized-preset-description">{preset.description}</small>
                 </button>)}</div>
         </section>)}
     </div>;

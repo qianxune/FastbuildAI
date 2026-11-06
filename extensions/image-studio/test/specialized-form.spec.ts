@@ -1338,6 +1338,10 @@ describe("specialized assets and region controls", () => {
         const nodes = view.render(); const pictures = nodes.filter((node) => node.type === "img");
         expect(pictures).toHaveLength(15); expect(new Set(pictures.map((node) => node.props.src)).size).toBe(15);
         expect(nodes.filter((node) => node.type === "h3").map(elementText)).toEqual(["表面附着", "空间摆放"]);
+        expect(nodes.filter((node) => node.props.className === "specialized-preset-description").map(elementText)).toEqual(workflow.FUSION_PRESETS.map((preset) => preset.description));
+        expect(nodes.filter((node) => node.type === "button" && node.props["aria-pressed"])).toHaveLength(1);
+        view.props.disabled = true;
+        expect(view.render().filter((node) => node.type === "button").every((node) => node.props.disabled)).toBe(true);
         nodes.find((node) => node.type === "button" && elementText(node).includes("礼盒组合"))!.props.onClick(); expect(onSelect).toHaveBeenCalledWith("gift");
     });
 });

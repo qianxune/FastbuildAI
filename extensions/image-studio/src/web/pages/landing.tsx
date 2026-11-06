@@ -1,3 +1,4 @@
+import { useAuthStore } from "@buildingai/stores";
 import {
   ArrowRight,
   Check,
@@ -25,6 +26,8 @@ const tickers = [
 
 export default function LandingPage() {
   const { hash } = useLocation();
+  const { token, userInfo } = useAuthStore((state) => state.auth);
+  const accountName = userInfo?.username || userInfo?.nickname || "我的账户";
   const [comparison, setComparison] = useState(58);
   const cmpRef = useRef<HTMLDivElement>(null);
 
@@ -102,10 +105,18 @@ export default function LandingPage() {
           </nav>
           <div className="nav-right">
             <a className="link-dim" href={studioUrl} target="_top">
-              登录
+              {token ? "控制台" : "登录"}
             </a>
-            <a className="btn btn-lime btn-sm" href={studioUrl} target="_top">
-              免费开始
+            <a
+              className="btn btn-lime btn-sm"
+              href={studioUrl}
+              target="_top"
+              title={token ? accountName : undefined}
+              style={{ minWidth: 0, maxWidth: 160 }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {token ? accountName : "免费开始"}
+              </span>
             </a>
           </div>
         </div>

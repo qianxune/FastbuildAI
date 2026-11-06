@@ -192,3 +192,4 @@ describe("authenticated generation image client", () => {
         create.mockRestore();
     });
 });
+
