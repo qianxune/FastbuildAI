@@ -16,32 +16,35 @@ import {
 } from "class-validator";
 
 import {
+    MAIN_IMAGE_LIMIT,
     MAIN_LANGUAGES,
     MAIN_PLATFORMS,
     MAIN_RATIOS,
     MAIN_RESOLUTIONS,
+    MAX_SELLING_LAYOUTS,
+    SELLING_IMAGE_LAYOUTS,
     type MainImageInput,
 } from "../../../shared/main-image";
 
 export class MainImageCountsDto {
     @IsInt()
     @Min(0)
-    @Max(4)
+    @Max(MAIN_IMAGE_LIMIT)
     white: number = 1;
 
     @IsInt()
     @Min(0)
-    @Max(4)
+    @Max(MAIN_IMAGE_LIMIT)
     scene: number = 1;
 
     @IsInt()
     @Min(0)
-    @Max(4)
+    @Max(MAIN_IMAGE_LIMIT)
     selling: number = 1;
 
     @IsInt()
     @Min(0)
-    @Max(4)
+    @Max(MAIN_IMAGE_LIMIT)
     other: number = 0;
 }
 
@@ -81,6 +84,12 @@ export class MainImageDto implements MainImageInput {
     @ValidateNested()
     @Type(() => MainImageCountsDto)
     counts: MainImageCountsDto = new MainImageCountsDto();
+
+    @IsArray()
+    @ArrayMaxSize(MAX_SELLING_LAYOUTS)
+    @ArrayUnique()
+    @IsIn(SELLING_IMAGE_LAYOUTS.map((layout) => layout.id), { each: true })
+    sellingLayouts: NonNullable<MainImageInput["sellingLayouts"]> = [];
 
     @IsString()
     @Length(0, 3000)

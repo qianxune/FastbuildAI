@@ -223,7 +223,7 @@ export class GenerationModelService {
     }
 
     /** 校验模型启用状态并按图片数量计算积分报价，不调用模型或扣费。 */
-    async quote(modelId: string, count: number, tool?: "sku") {
+    async quote(modelId: string, count: number, tool?: "main" | "sku") {
         if (modelId === LOCAL_CUTOUT_MODEL_ID) {
             const cutout = this.cutoutService;
             if (!cutout || count !== 1 || tool !== undefined || !await cutout.ready()) throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);

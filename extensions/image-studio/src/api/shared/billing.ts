@@ -1,3 +1,4 @@
+import { MAIN_IMAGE_LIMIT } from "./main-image";
 import { SKU_LIMIT } from "./tool-workflow";
 
 export interface GenerationQuote {
@@ -10,9 +11,9 @@ export interface GenerationQuote {
 export function quoteGenerationCredits(
     rule: { power: number } | null | undefined,
     count: number,
-    tool?: "sku",
+    tool?: "main" | "sku",
 ): GenerationQuote {
-    if (!Number.isInteger(count) || count < 1 || count > (tool === "sku" ? SKU_LIMIT : 4)) {
+    if (!Number.isSafeInteger(count) || count < 1 || count > (tool === "main" ? MAIN_IMAGE_LIMIT : tool === "sku" ? SKU_LIMIT : 4)) {
         throw new Error("Invalid image count");
     }
     if (!rule || !Number.isSafeInteger(rule.power) || rule.power < 0) {

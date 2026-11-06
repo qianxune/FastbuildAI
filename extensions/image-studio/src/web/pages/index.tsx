@@ -19,6 +19,7 @@ import { useAuthStore } from "@buildingai/stores";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { ToolKey } from "../../api/shared/tools";
 import {
+    MAIN_IMAGE_LIMIT,
     MAIN_IMAGE_TYPES,
     MAIN_RATIOS,
     MAIN_RESOLUTIONS,
@@ -86,8 +87,8 @@ export function supportsMainRetry(item: ImageGeneration, capabilities?: Generati
         !model?.capabilities.includes("reference-image") ||
         !availability.modelIdsByCapability["reference-image"]?.includes(item.modelId)) return false;
     const counts = Object.keys(MAIN_IMAGE_TYPES).map((key) => input.counts[key as keyof typeof MAIN_IMAGE_TYPES]);
-    return counts.every((count) => Number.isInteger(count) && count >= 0 && count <= 4) &&
-        counts.reduce((total, count) => total + count, 0) === item.count && item.count >= 1 && item.count <= 4 &&
+    return counts.every((count) => Number.isSafeInteger(count) && count >= 0) &&
+        counts.reduce((total, count) => total + count, 0) === item.count && Number.isSafeInteger(item.count) && item.count >= 1 && item.count <= MAIN_IMAGE_LIMIT &&
         input.assetIds.length > 0 && new Set(input.assetIds).size === input.assetIds.length &&
         input.assetIds.every((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) &&
         input.assetIds.length <= Math.min(model.maxReferenceImages ?? 1, availability.limits.maxInputImages ?? 5) &&
@@ -365,7 +366,7 @@ export default function ImageStudioPage() {
         setWorkflowError(null);
         setRetryPreparing(item.toolKey ?? "creative");
         try {
-            const quote = item.toolKey === "sku" && item.toolInput?.design?.skuRegions !== undefined
+            const quote = item.toolKey === "main" ? await fetchGenerationQuote(item.modelId, item.count, "main") : item.toolKey === "sku" && item.toolInput?.design?.skuRegions !== undefined
                 ? await fetchGenerationQuote(item.modelId, item.count, "sku") : await fetchGenerationQuote(item.modelId, item.count);
             if (!window.confirm(`本次重试费用为 ${quote.total} 积分，是否继续？`)) return;
             setTool(item.toolKey ?? "creative");

@@ -10,6 +10,8 @@ import { AddToolWorkflowInput1793448000000 } from "../src/api/db/migrations/1793
 import { GENERATION_FAILED, GENERATION_STORAGE_RESTRICTED } from "../src/api/modules/generation/constants/generation.constants";
 import { LOCAL_CUTOUT_MODEL_ID } from "../src/api/shared/tools";
 import { CutoutService } from "../src/api/modules/generation/services/cutout.service";
+import { MainImageDto } from "../src/api/modules/generation/dto/main-image.dto";
+import { MAX_SELLING_LAYOUTS, SELLING_IMAGE_LAYOUTS, mainImagePrompt } from "../src/api/shared/main-image";
 
 jest.mock("@buildingai/db/@nestjs/typeorm", () => ({ InjectRepository: () => () => undefined }));
 jest.mock("@buildingai/db/typeorm", () => ({ Repository: class {}, TableColumn: class { constructor(value: unknown) { Object.assign(this, value); } } }));
@@ -27,6 +29,100 @@ const modelId = "11111111-1111-4111-8111-111111111111";
 const assetId = "22222222-2222-4222-8222-222222222222";
 const secondAsset = "33333333-3333-4333-8333-333333333333";
 const input = (overrides: Partial<ToolWorkflowInput> = {}): ToolWorkflowInput => ({ tool: "retouch", modelId, assetIds: [assetId], productName: "Product", instructions: "Lighting", count: 2, ratio: "1:1", ...overrides });
+
+describe("main selling image layouts", () => {
+    it("accepts ten main outputs but rejects eleven and caps layouts independently before billing", async () => {
+        const mainInput = plainToInstance(MainImageDto, { modelId, assetIds: [assetId], productName: "Product",
+            counts: { white: 0, scene: 2, selling: 8, other: 0 },
+            sellingLayouts: ["headline-detail", "split-detail", "feature-grid", "scene-caption"] });
+        expect(validateSync(mainInput)).toHaveLength(0);
+        const view = fixture();
+        await view.service.submitMain("owner", mainInput);
+        expect(view.createTask.mock.calls[0][1]).toEqual(expect.objectContaining({ count: 10, mainInput }));
+        const rejected = fixture();
+        await expect(rejected.service.submitMain("owner", { ...mainInput, counts: { ...mainInput.counts, white: 1 } })).rejects.toThrow("请选择 1–10 张配图");
+        const tooMany = { ...mainInput, sellingLayouts: [...mainInput.sellingLayouts, "clean-type"] };
+        expect(validateSync(plainToInstance(MainImageDto, tooMany))).not.toHaveLength(0);
+        await expect(rejected.service.submitMain("owner", tooMany as any)).rejects.toThrow("卖点图版式选择无效");
+        expect(rejected.prepare).not.toHaveBeenCalled();
+        expect(rejected.createTask).not.toHaveBeenCalled();
+        expect(rejected.add).not.toHaveBeenCalled();
+        for (const count of [11, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+            const invalid = { ...mainInput, counts: { ...mainInput.counts, white: count } };
+            expect(validateSync(plainToInstance(MainImageDto, invalid))).not.toHaveLength(0);
+            await expect(rejected.service.submitMain("owner", invalid)).rejects.toThrow();
+        }
+        await expect(rejected.service.submitMain("owner", { ...mainInput, counts: { white: 0, scene: 0, selling: 0, other: 0 }, sellingLayouts: [] })).rejects.toThrow();
+        expect(rejected.prepare).not.toHaveBeenCalled();
+        expect(rejected.createTask).not.toHaveBeenCalled();
+    });
+    it("accepts four sample-derived layouts and rejects five without changing non-selling prompts", () => {
+        expect(MAX_SELLING_LAYOUTS).toBe(4);
+        expect(new Set(SELLING_IMAGE_LAYOUTS.map((layout) => layout.id)).size).toBe(SELLING_IMAGE_LAYOUTS.length);
+        const original = plainToInstance(MainImageDto, { modelId, assetIds: [assetId], productName: "Product", counts: { white: 0, scene: 0, selling: 4, other: 0 } });
+        for (const layout of SELLING_IMAGE_LAYOUTS) {
+            const selected = plainToInstance(MainImageDto, { ...original, sellingLayouts: [layout.id] });
+            expect(validateSync(selected)).toHaveLength(0);
+            expect(mainImagePrompt(selected, "selling")).toContain(layout.direction);
+            expect(mainImagePrompt(selected, "selling")).toContain("不复制示例商品、示例文案");
+            expect(mainImagePrompt(selected, "white")).toBe(mainImagePrompt(original, "white"));
+        }
+        const sellingLayouts = ["color-swatches", "sidebar-features", "block-collage", "arched-details"];
+        expect(validateSync(plainToInstance(MainImageDto, { ...original, sellingLayouts }))).toHaveLength(0);
+        expect(validateSync(plainToInstance(MainImageDto, { ...original, sellingLayouts: [...sellingLayouts, "vertical-copy"] }))).not.toHaveLength(0);
+    });
+    it("applies an approved layout only to a selling image and keeps legacy prompts", () => {
+        const original = plainToInstance(MainImageDto, { modelId, assetIds: [assetId], productName: "Product" });
+        const selected = plainToInstance(MainImageDto, { ...original, sellingLayouts: ["headline-detail"] });
+        expect(mainImagePrompt(selected, "selling")).toContain("版式：标题与细节");
+        expect(mainImagePrompt(selected, "white")).toBe(mainImagePrompt(original, "white"));
+        expect(mainImagePrompt(original, "selling")).not.toContain("版式：");
+    });
+    it("maps ordered layouts to selling ordinals and lets remaining images use the legacy prompt", () => {
+        const original = plainToInstance(MainImageDto, { modelId, assetIds: [assetId], productName: "Product" });
+        const selected = plainToInstance(MainImageDto, { ...original, sellingLayouts: ["headline-detail", "split-detail"] });
+        expect(mainImagePrompt(selected, "selling", 0)).toContain("版式：标题与细节");
+        expect(mainImagePrompt(selected, "selling", 1)).toContain("版式：材质特写");
+        expect(mainImagePrompt(selected, "selling", 2)).toBe(mainImagePrompt(original, "selling"));
+        for (const type of ["white", "scene", "other"] as const) expect(mainImagePrompt(selected, type, 1)).toBe(mainImagePrompt(original, type));
+    });
+    it("validates layout IDs and rejects invalid selections before model preparation or billing", async () => {
+        const original = plainToInstance(MainImageDto, { modelId, assetIds: [assetId], productName: "Product" });
+        expect(validateSync(original)).toHaveLength(0);
+        expect(validateSync(plainToInstance(MainImageDto, { ...original, sellingLayouts: ["headline-detail"] }))).toHaveLength(0);
+        for (const sellingLayouts of [["unknown"], ["headline-detail", "headline-detail"], ["headline-detail", "split-detail"], "headline-detail", null]) {
+            const bad = plainToInstance(MainImageDto, { ...original, sellingLayouts });
+            if (Array.isArray(sellingLayouts) && sellingLayouts.length === 2 && sellingLayouts[1] === "split-detail") expect(validateSync(bad)).toHaveLength(0);
+            else expect(validateSync(bad)).not.toHaveLength(0);
+            const view = fixture();
+            await expect(view.service.submitMain("owner", bad)).rejects.toThrow("卖点图版式选择无效");
+            expect(view.prepare).not.toHaveBeenCalled();
+            expect(view.createTask).not.toHaveBeenCalled();
+            expect(view.add).not.toHaveBeenCalled();
+        }
+        const view = fixture();
+        await view.service.submitMain("owner", plainToInstance(MainImageDto, { ...original, sellingLayouts: ["headline-detail"] }));
+        expect(view.createTask.mock.calls[0][1]).toEqual(expect.objectContaining({ count: 3, mainInput: expect.objectContaining({ sellingLayouts: ["headline-detail"] }) }));
+    });
+    it("does not shift selling layouts after white and scene images or add image calls", async () => {
+        const view = fixture();
+        const mainInput = plainToInstance(MainImageDto, { modelId, assetIds: [assetId], productName: "Product", counts: { white: 1, scene: 1, selling: 8, other: 0 }, sellingLayouts: ["headline-detail", "split-detail", "feature-grid", "scene-caption"] });
+        jest.mocked(generateImage).mockReset().mockResolvedValue({ images: [{ base64: "owned", mediaType: "image/png" }] } as never);
+        await (view.service as any).infer({ id: "task", userId: "owner", toolKey: "main", mainInput }, { imageModel: view.imageModel });
+        const requests = jest.mocked(generateImage).mock.calls.map(([request]) => request);
+        expect(requests).toHaveLength(10);
+        expect(requests.every((request) => request.n === 1)).toBe(true);
+        expect((requests[0].prompt as any).text).not.toContain("版式：");
+        expect((requests[1].prompt as any).text).not.toContain("版式：");
+        expect((requests[2].prompt as any).text).toContain("版式：标题与细节");
+        expect((requests[3].prompt as any).text).toContain("版式：材质特写");
+        expect((requests[4].prompt as any).text).toContain("版式：多卖点分区");
+        expect((requests[5].prompt as any).text).toContain("版式：场景与卖点");
+        expect(requests.slice(6).every((request) => (request.prompt as any).text === mainImagePrompt({ ...mainInput, sellingLayouts: [] }, "selling"))).toBe(true);
+        expect(view.createTask).not.toHaveBeenCalled();
+        jest.mocked(generateImage).mockReset();
+    });
+});
 
 const designRequests: ToolWorkflowInput[] = [
     input({ tool: "detail", design: { brand: "Confirmed brand", platform: "淘宝", language: "English", description: "Confirmed description", detailModules: ["hero", "selling", "specs"], outputModules: ["selling", "hero"] } }),

@@ -47,6 +47,15 @@ jest.mock("../src/api/db/entities/image-generation.entity", () => ({
 }));
 
 describe("image studio credit quotes", () => {
+    it("prices up to ten main outputs and rejects eleven without lifting other tool limits", () => {
+        expect(quoteGenerationCredits({ power: 3 }, 10, "main")).toEqual({ unitPrice: 3, count: 10, total: 30 });
+        expect(() => quoteGenerationCredits({ power: 3 }, 11, "main")).toThrow();
+        for (const count of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])
+            expect(() => quoteGenerationCredits({ power: 3 }, count, "main")).toThrow();
+        expect(() => quoteGenerationCredits({ power: 2147483647 }, 14, "main")).toThrow();
+        expect(() => quoteGenerationCredits({ power: 3 }, 14)).toThrow();
+        expect(() => quoteGenerationCredits({ power: 3 }, 14, "sku")).toThrow();
+    });
     it("uses the configured per-image price and requested count", () => {
         expect(quoteGenerationCredits({ power: 30 }, 3)).toEqual({
             unitPrice: 30,
@@ -181,6 +190,24 @@ describe("transactional image studio billing", () => {
             task: () => tasks["task-1"],
         };
     }
+
+    it("charges all ten main outputs and refunds the entire mocked task once", async () => {
+        const state = fixture();
+        await state.transaction(() => state.service.createTask(state.manager, { userId: "owner", toolKey: "main", count: 10, status: ImageGenerationStatus.QUEUED }, { power: 3 }));
+        expect(state.balance()).toBe(70);
+        expect(state.task()!.billingAmount).toBe(30);
+        await state.fail();
+        await state.fail();
+        expect(state.balance()).toBe(100);
+        expect(state.addUserPower).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects eleven main outputs before task persistence or account debit", async () => {
+        const invalid = fixture();
+        await expect(invalid.transaction(() => invalid.service.createTask(invalid.manager, { userId: "owner", toolKey: "main", count: 11, status: ImageGenerationStatus.QUEUED }, { power: 3 }))).rejects.toThrow();
+        expect(invalid.repository.save).not.toHaveBeenCalled();
+        expect(invalid.deductUserPower).not.toHaveBeenCalled();
+    });
 
     it("queries existing spendable balance without writing account credits", async () => {
         const state = fixture();

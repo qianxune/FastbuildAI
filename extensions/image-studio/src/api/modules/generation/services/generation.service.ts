@@ -13,6 +13,10 @@ import {
     mainImagePrompt,
     mainImageSize,
     mainImageVariants,
+    MAIN_IMAGE_TYPES,
+    MAIN_IMAGE_LIMIT,
+    MAX_SELLING_LAYOUTS,
+    SELLING_IMAGE_LAYOUTS,
     type MainImageInput,
 } from "../../../shared/main-image";
 import {
@@ -161,8 +165,8 @@ export class GenerationService {
     }
 
     /** 按指定模型与图片数量查询报价，不创建任务或扣费。 */
-    async quote(modelId: string, count: number, tool?: "sku") {
-        return tool === "sku" ? this.generationModelService.quote(modelId, count, tool) : this.generationModelService.quote(modelId, count);
+    async quote(modelId: string, count: number, tool?: "main" | "sku") {
+        return tool ? this.generationModelService.quote(modelId, count, tool) : this.generationModelService.quote(modelId, count);
     }
 
     /** 按创建时间倒序分页查询当前用户的生成记录，并转换为公开响应。 */
@@ -300,6 +304,7 @@ export class GenerationService {
             );
             const images: Array<{ base64: string; mediaType: string }> = [];
             const deadline = AbortSignal.timeout(5 * 60 * 1000);
+            let sellingIndex = 0;
             for (const type of mainImageVariants(generation.mainInput)) {
                 const current = await this.findOwned(generation.userId, generation.id);
                 if (current.status !== ImageGenerationStatus.PROCESSING)
@@ -307,7 +312,7 @@ export class GenerationService {
                 const result = await generateImage({
                     model: prepared.imageModel,
                     prompt: {
-                        text: mainImagePrompt(generation.mainInput, type),
+                        text: mainImagePrompt(generation.mainInput, type, type === "selling" ? sellingIndex++ : 0),
                         images: references,
                     },
                     size: mainImageSize(generation.mainInput),
@@ -472,9 +477,16 @@ export class GenerationService {
 
     /** 校验主图数量与参考图能力，在用户级事务锁内创建扣费任务，再提交队列。 */
     async submitMain(userId: string, input: MainImageDto | MainImageInput) {
+        if (!input.counts || (Object.keys(MAIN_IMAGE_TYPES) as Array<keyof MainImageInput["counts"]>).some((type) =>
+            !Number.isSafeInteger(input.counts[type]) || input.counts[type] < 0))
+            throw HttpErrorFactory.badRequest("配图数量无效，请填写非负整数");
         const total = Object.values(input.counts).reduce((sum, count) => sum + count, 0);
-        if (!Number.isInteger(total) || total < 1 || total > 4)
-            throw HttpErrorFactory.badRequest("请选择 1–4 张配图");
+        if (!Number.isSafeInteger(total) || total < 1 || total > MAIN_IMAGE_LIMIT)
+            throw HttpErrorFactory.badRequest(`请选择 1–${MAIN_IMAGE_LIMIT} 张配图`);
+        const layouts = input.sellingLayouts === undefined ? [] : input.sellingLayouts;
+        if (!Array.isArray(layouts) || layouts.length > MAX_SELLING_LAYOUTS || layouts.length > input.counts.selling ||
+            new Set(layouts).size !== layouts.length || layouts.some((id) => !SELLING_IMAGE_LAYOUTS.some((layout) => layout.id === id)))
+            throw HttpErrorFactory.badRequest("卖点图版式选择无效，请按卖点图数量重新选择");
         const { imageModel, model } = await this.generationModelService.prepare(input.modelId);
         if (
             !("supportsReferenceImages" in imageModel) ||

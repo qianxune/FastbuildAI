@@ -1,14 +1,18 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@buildingai/ui/components/ui/popover";
-import { ChevronDown, ImagePlus, LoaderCircle, Minus, Plus, RefreshCw, Settings, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ImagePlus, LayoutTemplate, LoaderCircle, Minus, Plus, RefreshCw, Settings, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 import {
+    MAIN_IMAGE_LIMIT,
     MAIN_IMAGE_TYPES,
     MAIN_LANGUAGES,
     MAIN_PLATFORMS,
     MAIN_RATIOS,
     MAIN_RESOLUTIONS,
+    MAX_SELLING_LAYOUTS,
+    SELLING_IMAGE_LAYOUTS,
     type MainImageInput,
+    type SellingImageLayoutId,
 } from "../../api/shared/main-image";
 import type { CapabilityModel } from "../../api/shared/tools";
 import {
@@ -41,6 +45,9 @@ export default function MainImageForm({
     const id = useId();
     const fileInput = useRef<HTMLInputElement>(null);
     const settingsTrigger = useRef<HTMLButtonElement>(null);
+    const layoutDialog = useRef<HTMLDialogElement>(null);
+    const [sellingLayouts, setSellingLayouts] = useState<SellingImageLayoutId[]>([]);
+    const [layoutDraft, setLayoutDraft] = useState<SellingImageLayoutId[]>([]);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const consumedMaterial = useRef<number | null>(null);
     const uploadInFlight = useRef(false);
@@ -68,13 +75,32 @@ export default function MainImageForm({
     });
     const [description, setDescription] = useState("");
     const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+    const sellingCapacity = MAX_SELLING_LAYOUTS;
+    const appliedSellingCount = Math.max(counts.selling, layoutDraft.length);
+    const appliedTotal = total - counts.selling + appliedSellingCount;
     const selectedModelId = models.some((model) => model.id === modelId)
         ? modelId
         : (models[0]?.id ?? "");
     const selectedVisionModelId = visionModels.some((model) => model.id === visionModelId)
         ? visionModelId : (visionModels[0]?.id ?? "");
     const disabled = locked || uploading || analysis.isPending;
-    const billing = useGenerationBilling(selectedModelId, total, available);
+    const billing = useGenerationBilling(selectedModelId, total, available, "main");
+
+    useEffect(() => { if (disabled) layoutDialog.current?.close(); }, [disabled]);
+
+    const updateCount = (type: keyof typeof MAIN_IMAGE_TYPES, value: number) => {
+        if (disabled || !Number.isSafeInteger(value) || value < 0 || total - counts[type] + value > MAIN_IMAGE_LIMIT) return;
+        setCounts({ ...counts, [type]: value });
+        if (type === "selling") {
+            setSellingLayouts((current) => current.slice(0, value));
+            setLayoutDraft((current) => current.slice(0, value));
+        }
+    };
+    const openLayouts = () => {
+        if (disabled || !sellingCapacity) return;
+        setLayoutDraft([...sellingLayouts]);
+        layoutDialog.current?.showModal();
+    };
 
     useEffect(() => {
         if (!materials.isSuccess || materials.isFetching || uploading) return;
@@ -164,7 +190,8 @@ export default function MainImageForm({
                     !assetIds.length ||
                     !productName.trim() ||
                     total < 1 ||
-                    total > 4
+                    total > MAIN_IMAGE_LIMIT ||
+                    !Number.isSafeInteger(total)
                 )
                     return;
                 setError(null);
@@ -178,6 +205,7 @@ export default function MainImageForm({
                     ratio,
                     resolution,
                     counts,
+                    sellingLayouts,
                     description: description.trim(),
                     instructions: "",
                 });
@@ -218,9 +246,10 @@ export default function MainImageForm({
                                     : current.length < 5 ? [...current, image.id] : current)}
                                 onDelete={() => removeImage(image)} />
                         ))}
+                    </div>
                     <button
                         type="button"
-                        className={`dz main-upload${dragging ? "dragging" : ""}`}
+                        className={`dz main-upload main-upload-zone${dragging ? " dragging" : ""}`}
                         disabled={disabled || assetIds.length >= 5}
                         onClick={() => fileInput.current?.click()}
                         onDragOver={(event) => {
@@ -234,14 +263,12 @@ export default function MainImageForm({
                             void uploadFiles(Array.from(event.dataTransfer.files));
                         }}
                     >
-                        {uploading ? (
-                            <LoaderCircle size={22} className="main-upload-spinner" />
-                        ) : (
-                            products.length ? <Plus size={22} /> : <Upload size={22} />
-                        )}
-                        <span className="dz-t">{uploading ? "上传中..." : products.length ? "继续添加" : "上传商品图"}</span>
+                        <span className="main-upload-command">
+                            {uploading ? <LoaderCircle size={16} className="main-upload-spinner" /> : <Upload size={16} />}
+                            <span>{uploading ? "上传中..." : products.length ? "继续添加图片" : "上传图片"}</span>
+                        </span>
+                        <span className="main-upload-hint">同一商品，最多 5 张</span>
                     </button>
-                    </div>
                     <p className="upload-formats">PNG / JPEG / WebP · 每张不超过 10 MB</p>
                     <MaterialPicker selectedIds={assetIds} max={5} disabled={disabled}
                         onChange={(ids, images) => {
@@ -325,12 +352,12 @@ export default function MainImageForm({
                 </div>
                 <div className="field product-description-field">
                     <div className="f-label">
-                        <label htmlFor={`${id}-description`}>商品描述</label>
+                        <label htmlFor={`${id}-description`}>商品卖点与生成要求</label>
                         <button type="button" className="analysis-button" disabled={disabled || !assetIds.length || !selectedVisionModelId}
                             title={!selectedVisionModelId ? "请在公共模型配置中启用支持视觉的语言模型" : "分析已选商品图片"}
                             onClick={() => void analyzeProduct()}>
                             {analysis.isPending ? <LoaderCircle size={14} className="main-upload-spinner" /> : <Sparkles size={14} />}
-                            {analysis.isPending ? "分析中..." : "AI 分析"}
+                            {analysis.isPending ? "分析中..." : "AI 帮写"}
                         </button>
                     </div>
                     {visionModels.length > 1 && <select className="sel analysis-model-select" aria-label="图片分析模型" value={selectedVisionModelId} onChange={(event) => setVisionModelId(event.target.value)}>
@@ -338,19 +365,18 @@ export default function MainImageForm({
                     </select>}
                     <textarea id={`${id}-description`} className="ta product-description" maxLength={3000}
                         value={description} onChange={(event) => setDescription(event.target.value)}
-                        placeholder="商品外观、材质、结构、用途及真实卖点" />
+                        placeholder={"商品名称：\n核心卖点：\n适用人群：\n生成要求与使用场景："} />
                     <span className="description-count">{description.length}/3000</span>
                 </div>
                 <div className="field">
                     <div className="f-label">
-                        配图类型 <span className="opt">共 {total}/4 张</span>
+                        套图结构配置 <span className="opt">共 {total}/{MAIN_IMAGE_LIMIT} 张</span>
                     </div>
                     <div className="main-type-grid">
                     {(
-                        Object.entries(MAIN_IMAGE_TYPES) as Array<
-                            [keyof typeof MAIN_IMAGE_TYPES, string]
-                        >
+                        (["white", "selling", "scene", "other"] as const).map((type) => [type, MAIN_IMAGE_TYPES[type]] as const)
                     ).map(([type, label]) => (
+                        <div className="main-type-block" key={type}>
                         <div className="step-row" key={type}>
                             <label className="sr-name" htmlFor={`${id}-${type}`}>
                                 {label}
@@ -362,7 +388,7 @@ export default function MainImageForm({
                                     title={`减少${label}`}
                                     disabled={counts[type] === 0}
                                     onClick={() =>
-                                        setCounts({ ...counts, [type]: counts[type] - 1 })
+                                        updateCount(type, counts[type] - 1)
                                     }
                                 >
                                     <Minus size={14} />
@@ -372,35 +398,69 @@ export default function MainImageForm({
                                     className="main-count"
                                     type="number"
                                     min={0}
-                                    max={4 - total + counts[type]}
+                                    max={MAIN_IMAGE_LIMIT - total + counts[type]}
                                     value={counts[type]}
                                     onChange={(event) => {
                                         const value = Number(event.target.value);
                                         if (
-                                            Number.isInteger(value) &&
-                                            value >= 0 &&
-                                            value <= 4 - total + counts[type]
+                                            Number.isSafeInteger(value) &&
+                                            value >= 0
                                         )
-                                            setCounts({ ...counts, [type]: value });
+                                            updateCount(type, value);
                                     }}
                                 />
                                 <button
                                     type="button"
                                     aria-label={`增加${label}`}
                                     title={`增加${label}`}
-                                    disabled={total >= 4}
+                                    disabled={disabled || total >= MAIN_IMAGE_LIMIT}
                                     onClick={() =>
-                                        setCounts({ ...counts, [type]: counts[type] + 1 })
+                                        updateCount(type, counts[type] + 1)
                                     }
                                 >
                                     <Plus size={14} />
                                 </button>
                             </div>
                         </div>
+                        {type === "selling" && <button type="button" className="selling-layout-trigger" onClick={openLayouts} disabled={disabled || !sellingCapacity}>
+                            <LayoutTemplate size={22} />
+                            <span>{sellingLayouts.length ? `已选 ${sellingLayouts.length} 个卖点图版式` : "选择卖点图版式"}</span>
+                            <ChevronRight size={16} />
+                        </button>}
+                        </div>
                     ))}
                     </div>
                 </div>
             </fieldset>
+            <dialog ref={layoutDialog} className="selling-layout-dialog" aria-labelledby={`${id}-layout-title`}
+                onClick={(event) => { if (event.target === event.currentTarget) layoutDialog.current?.close(); }}>
+                <header className="selling-layout-heading"><h3 id={`${id}-layout-title`}>选择卖点图版式</h3><button type="button" className="icon-btn" aria-label="关闭版式选择" title="关闭版式选择" onClick={() => layoutDialog.current?.close()}><X size={18} /></button></header>
+                <div className="selling-layout-body">
+                    <div className="selling-layout-gallery" aria-label="卖点图版式目录">
+                        {SELLING_IMAGE_LAYOUTS.map((layout) => {
+                            const selected = layoutDraft.includes(layout.id);
+                            return <button key={layout.id} type="button" className={`selling-layout-choice${selected ? " selected" : ""}`}
+                                aria-label={layout.name} aria-pressed={selected} disabled={disabled || (!selected && layoutDraft.length >= sellingCapacity)}
+                                onClick={() => setLayoutDraft((current) => current.includes(layout.id) ? current.filter((value) => value !== layout.id) : current.length < sellingCapacity ? [...current, layout.id] : current)}>
+                                <SellingLayoutPreview layout={layout} />
+                                <span className="selling-layout-choice-label">{layout.name}<span className="selling-layout-check">{selected && <Check size={14} />}</span></span>
+                            </button>;
+                        })}
+                    </div>
+                    <aside className="selling-layout-selection">
+                        <div className="selling-layout-selection-heading"><strong>已选版式</strong><span>{layoutDraft.length}/{MAX_SELLING_LAYOUTS}</span></div>
+                        <p className="selling-layout-summary">最多选择 {MAX_SELLING_LAYOUTS} 个版式</p>
+                        <p className="selling-layout-summary">每个版式生成 1 张，其余 {appliedSellingCount - layoutDraft.length} 张自动排版</p>
+                        {appliedSellingCount > counts.selling && <p className="selling-layout-summary">应用后卖点图 {appliedSellingCount} 张，套图共 {total - counts.selling + appliedSellingCount} 张，按新张数计费</p>}
+                        {appliedTotal > MAIN_IMAGE_LIMIT && <p className="selling-layout-summary" role="alert">套图最多 {MAIN_IMAGE_LIMIT} 张，请先调整图片数量</p>}
+                        {layoutDraft.length ? <ol className="selling-layout-selected-list">{layoutDraft.map((layoutId, index) => {
+                            const layout = SELLING_IMAGE_LAYOUTS.find((item) => item.id === layoutId)!;
+                            return <li key={layoutId}><span className="selling-layout-mini"><SellingLayoutPreview layout={layout} /></span><span><small>{String(index + 1).padStart(2, "0")}</small><strong>{layout.name}</strong></span><button type="button" className="icon-btn" title={`移除${layout.name}`} aria-label={`移除${layout.name}`} disabled={disabled} onClick={() => setLayoutDraft((current) => current.filter((value) => value !== layoutId))}><X size={15} /></button></li>;
+                        })}</ol> : <div className="selling-layout-empty"><LayoutTemplate size={28} /><strong>暂未选择版式</strong><span>卖点图将自动排版</span></div>}
+                    </aside>
+                </div>
+                <footer className="selling-layout-footer"><button type="button" className="btn btn-ghost" onClick={() => layoutDialog.current?.close()}>取消</button><button type="button" className="btn btn-lime" disabled={disabled || layoutDraft.length > sellingCapacity || appliedTotal > MAIN_IMAGE_LIMIT} onClick={() => { if (disabled || layoutDraft.length > sellingCapacity || appliedTotal > MAIN_IMAGE_LIMIT) return; setSellingLayouts([...layoutDraft]); setCounts((current) => ({ ...current, selling: Math.max(current.selling, layoutDraft.length) })); layoutDialog.current?.close(); }}>应用 {layoutDraft.length} 个版式</button></footer>
+            </dialog>
             <div className="form-foot main-form-foot">
                 <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
                 <PopoverTrigger asChild>
@@ -471,7 +531,8 @@ export default function MainImageForm({
                         !assetIds.length ||
                         !productName.trim() ||
                         total < 1 ||
-                        total > 4
+                        total > MAIN_IMAGE_LIMIT ||
+                        !Number.isSafeInteger(total)
                     }
                 >
                     <ImagePlus size={16} />
@@ -480,6 +541,17 @@ export default function MainImageForm({
             </div>
         </form>
     );
+}
+
+export function SellingLayoutPreview({ layout }: { layout: (typeof SELLING_IMAGE_LAYOUTS)[number] }) {
+    const source = `/extension/image-studio/images/${layout.image}.jpg`;
+    return <span className="selling-layout-preview" data-layout={layout.id} aria-hidden="true">
+        <strong className="selling-layout-headline">{layout.headline}</strong>
+        <img className="selling-layout-product" src={source} alt="" loading="lazy" />
+        <span className="selling-layout-detail"><img src={source} alt="" loading="lazy" /><span>{layout.detail}</span></span>
+        <span className="selling-layout-features">{layout.features.map((feature, index) => <span key={feature} data-feature={index}><img src={source} alt="" loading="lazy" /><Check size={12} /><span>{feature}</span></span>)}</span>
+        <span className="selling-layout-caption">{layout.detail}</span>
+    </span>;
 }
 
 function ProductThumbnail({

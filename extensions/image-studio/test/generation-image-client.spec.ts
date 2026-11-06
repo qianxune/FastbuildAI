@@ -6,6 +6,7 @@ jest.mock("@tanstack/react-query", () => ({
 }));
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { MAIN_IMAGE_LIMIT } from "../src/api/shared/main-image";
 import { apiHttpClient } from "../src/web/services/base";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -37,6 +38,7 @@ runInNewContext(compiledClient.outputText, {
         if (name === "@tanstack/react-query") return { useMutation, useQuery, useQueryClient };
         if (name === "react") return { useEffect: jest.fn() };
         if (name === "./works") return { collectGenerations: jest.fn() };
+        if (name === "../../api/shared/main-image") return { MAIN_IMAGE_LIMIT };
         throw new Error(`Unexpected generation client dependency: ${name}`);
     },
 });
@@ -104,7 +106,20 @@ describe("asynchronous generation client", () => {
         expect(setQueryData).toHaveBeenCalledWith(["image-studio", "generation", "task-id"], record);
         expect(invalidateQueries).toHaveBeenCalled();
     });
-    it("enables ten-output quotes only for SKU and keeps the quote cache scoped", async () => {
+    it("enables full main quotes in a separate cache scope and rejects invalid counts", async () => {
+        (useQuery as jest.Mock).mockImplementation((options) => ({ data: options.queryKey.includes("credit-balance") ? { balance: 100 } : { total: 30, unitPrice: 3, count: 10 }, isSuccess: true, isFetching: false }));
+        expect(useGenerationBilling("model", 10, true, "main").ready).toBe(true);
+        const options = (useQuery as jest.Mock).mock.calls[1][0];
+        expect(options.enabled).toBe(true);
+        expect(options.queryKey.slice(-3)).toEqual(["model", 10, "main"]);
+        await options.queryFn();
+        expect(apiHttpClient.get).toHaveBeenCalledWith("/generations/billing/quote", { params: { modelId: "model", count: 10, tool: "main" } });
+        for (const count of [11, 0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+            expect(useGenerationBilling("model", count, true, "main").ready).toBe(false);
+            expect((useQuery as jest.Mock).mock.calls.at(-1)[0].enabled).toBe(false);
+        }
+    });
+    it("enables ten-output quotes only for SKU among non-main tools and keeps the quote cache scoped", async () => {
         (useQuery as jest.Mock).mockImplementation((options) => ({ data: options.queryKey.includes("credit-balance") ? { balance: 100 } : { total: 30, unitPrice: 3, count: 10 }, isSuccess: true, isFetching: false }));
         expect(useGenerationBilling("model", 10).ready).toBe(false);
         expect((useQuery as jest.Mock).mock.calls[1][0].enabled).toBe(false);

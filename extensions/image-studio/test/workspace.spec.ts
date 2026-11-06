@@ -171,18 +171,19 @@ function form() {
     const catalog: { data: any[]; isSuccess: boolean; isFetching: boolean } = { data: [], isSuccess: false, isFetching: false };
     const analyze = jest.fn();
     const consumed = jest.fn();
+    const billing = jest.fn(() => ({ ready: true, costText: "2", quote: {}, balance: {} }));
     const view = harness("main-image-form", { "../services/generation": {
         useUploadProductImageMutation: () => ({ mutateAsync: upload }),
         useProductImagesQuery: () => catalog,
         useAnalyzeProductMutation: () => ({ mutateAsync: analyze, isPending: false }),
-        useGenerationBilling: () => ({ ready: true, costText: "2", quote: {}, balance: {} }),
+        useGenerationBilling: billing,
     } });
     const props: any = { models: [{ id: modelId }], available: true, locked: false, onSubmit: jest.fn(), onMaterialConsumed: consumed };
     const render = () => nodes(view.render(props));
     const picker = () => render().find((node) => node.type === "./material-picker")!;
     const thumbnails = () => render().filter((node) => typeof node.type === "function" && node.props.image);
     const drop = (count: number) => render().find((node) => node.props.onDrop)!.props.onDrop({ preventDefault: jest.fn(), dataTransfer: { files: Array.from({ length: count }, () => ({ type: "image/png", size: 100 })) } });
-    return { ...view, props, render, picker, thumbnails, drop, upload, analyze, consumed, catalog };
+    return { ...view, props, render, picker, thumbnails, drop, upload, analyze, consumed, catalog, billing };
 }
 
 function account() {
@@ -210,6 +211,165 @@ function account() {
     const render = () => nodes(view.render(props));
     return { ...view, window, listeners, postMessage, assign, refresh, logout, confirm, onNavigate, config, profile, props, render };
 }
+
+describe("main selling layout selection", () => {
+    it("offers the sample compositions and never applies more than four layouts", async () => {
+        const view = form();
+        const all = () => view.render();
+        const choose = (name: string) => all().find((node) => node.props["aria-label"] === name)!;
+        all().find((node) => node.type === "dialog")!.props.ref.current = { showModal: jest.fn(), close: jest.fn() };
+        all().find((node) => node.props.className === "selling-layout-trigger")!.props.onClick();
+        for (const name of ["色卡陈列", "侧栏卖点", "模块拼贴", "拱窗细节"]) choose(name).props.onClick();
+        expect(text(all().find((node) => node.props.className === "selling-layout-selection-heading"))).toContain("4/4");
+        expect(choose("竖栏大字").props.disabled).toBe(true);
+        choose("竖栏大字").props.onClick();
+        expect(choose("竖栏大字").props["aria-pressed"]).toBe(false);
+        expect(all().some((node) => node.props.layout?.id === "color-swatches")).toBe(true);
+        all().find((node) => node.type === "button" && text(node) === "应用 4 个版式")!.props.onClick();
+        view.picker().props.onChange([image(1).id], [image(1)]);
+        all().find((node) => node.props.id === "test-name")!.props.onChange({ target: { value: "Product" } });
+        await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+        expect(view.props.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ sellingLayouts: ["color-swatches", "sidebar-features", "block-collage", "arched-details"], counts: { white: 1, scene: 1, selling: 4, other: 0 } }));
+        expect(view.billing).toHaveBeenLastCalledWith(modelId, 6, true, "main");
+        expect(text(all())).toContain("共 6/10 张");
+        expect(choose("增加卖点图").props.disabled).toBe(false);
+        const sellingCount = all().find((node) => node.props.id === "test-selling")!;
+        expect(sellingCount.props.max).toBe(8);
+        sellingCount.props.onChange({ target: { value: "8" } });
+        all().find((node) => node.props.className === "selling-layout-trigger")!.props.onClick();
+        all().find((node) => node.type === "button" && text(node) === "应用 4 个版式")!.props.onClick();
+        expect(text(all())).toContain("共 10/10 张");
+        expect(choose("增加卖点图").props.disabled).toBe(true);
+        choose("增加卖点图").props.onClick();
+        all().find((node) => node.props.id === "test-selling")!.props.onChange({ target: { value: "9" } });
+        await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+        expect(view.props.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ counts: { white: 1, scene: 1, selling: 8, other: 0 } }));
+        expect(view.billing).toHaveBeenLastCalledWith(modelId, 10, true, "main");
+    });
+    it("blocks overflowing layout Apply without shrinking other outputs and preserves ten selling images", async () => {
+        const view = form();
+        const all = () => view.render();
+        const count = (type: string, value: number) => all().find((node) => node.props.id === `test-${type}`)!.props.onChange({ target: { value: String(value) } });
+        const trigger = () => all().find((node) => node.props.className === "selling-layout-trigger")!;
+        const selectFour = () => {
+            trigger().props.onClick();
+            for (const name of ["标题与细节", "材质特写", "多卖点分区", "场景与卖点"])
+                all().find((node) => node.props["aria-label"] === name)!.props.onClick();
+        };
+        all().find((node) => node.type === "dialog")!.props.ref.current = { showModal: jest.fn(), close: jest.fn() };
+        view.picker().props.onChange([image(1).id], [image(1)]);
+        all().find((node) => node.props.id === "test-name")!.props.onChange({ target: { value: "Product" } });
+        count("scene", 0);
+        count("white", 9);
+        expect(trigger().props.disabled).toBe(false);
+        selectFour();
+        expect(text(all().find((node) => node.props.role === "alert"))).toContain("套图最多 10 张");
+        const apply = all().find((node) => node.type === "button" && text(node) === "应用 4 个版式")!;
+        expect(apply.props.disabled).toBe(true);
+        apply.props.onClick();
+        all().find((node) => node.type === "button" && text(node) === "取消")!.props.onClick();
+        await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+        expect(view.props.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ sellingLayouts: [], counts: { white: 9, scene: 0, selling: 1, other: 0 } }));
+        count("white", 0);
+        count("selling", 10);
+        selectFour();
+        const validApply = all().find((node) => node.type === "button" && text(node) === "应用 4 个版式")!;
+        expect(validApply.props.disabled).toBe(false);
+        validApply.props.onClick();
+        await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+        expect(view.props.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ sellingLayouts: ["headline-detail", "split-detail", "feature-grid", "scene-caption"], counts: { white: 0, scene: 0, selling: 10, other: 0 } }));
+        expect(view.billing).toHaveBeenLastCalledWith(modelId, 10, true, "main");
+    });
+    it("uses a separate full-width upload area and transactional layout selection", async () => {
+        const view = form();
+        const all = () => view.render();
+        const trigger = () => all().find((node) => node.props.className === "selling-layout-trigger")!;
+        const dialog = all().find((node) => node.type === "dialog")!;
+        dialog.props.ref.current = { showModal: jest.fn(), close: jest.fn() };
+        expect(all().find((node) => node.props.onDrop)!.props.className).toContain("main-upload-zone");
+        expect(text(all().find((node) => node.props.className === "product-upload-row"))).not.toContain("上传图片");
+        expect(text(all())).toContain("商品卖点与生成要求");
+        const choose = (name: string) => all().find((node) => node.props["aria-label"] === name)!;
+        trigger().props.onClick();
+        choose("标题与细节").props.onClick();
+        expect(choose("标题与细节").props["aria-pressed"]).toBe(true);
+        expect(choose("材质特写").props.disabled).toBe(false);
+        all().find((node) => node.type === "button" && text(node) === "取消")!.props.onClick();
+        expect(text(trigger())).toBe("选择卖点图版式");
+        trigger().props.onClick();
+        expect(choose("标题与细节").props["aria-pressed"]).toBe(false);
+        choose("材质特写").props.onClick();
+        all().find((node) => node.type === "button" && text(node) === "应用 1 个版式")!.props.onClick();
+        expect(text(trigger())).toBe("已选 1 个卖点图版式");
+        view.picker().props.onChange([image(1).id], [image(1)]);
+        all().find((node) => node.props.id === "test-name")!.props.onChange({ target: { value: "Product" } });
+        await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+        expect(view.props.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ sellingLayouts: ["split-detail"], counts: { white: 1, scene: 1, selling: 1, other: 0 } }));
+        trigger().props.onClick();
+        choose("移除材质特写").props.onClick();
+        all().find((node) => node.type === "button" && text(node) === "应用 0 个版式")!.props.onClick();
+        expect(text(trigger())).toBe("选择卖点图版式");
+    });
+    it("trims selections when the selling count falls to zero and ignores locked count changes", () => {
+        const view = form();
+        const all = () => view.render();
+        const trigger = () => all().find((node) => node.props.className === "selling-layout-trigger")!;
+        all().find((node) => node.type === "dialog")!.props.ref.current = { showModal: jest.fn(), close: jest.fn() };
+        trigger().props.onClick();
+        all().find((node) => node.props["aria-label"] === "标题与细节")!.props.onClick();
+        all().find((node) => node.type === "button" && text(node) === "应用 1 个版式")!.props.onClick();
+        view.props.locked = true;
+        all().find((node) => node.props["aria-label"] === "减少卖点图")!.props.onClick();
+        expect(text(trigger())).toBe("已选 1 个卖点图版式");
+        view.props.locked = false;
+        all().find((node) => node.props["aria-label"] === "减少卖点图")!.props.onClick();
+        expect(trigger().props.disabled).toBe(false);
+        expect(text(trigger())).toBe("选择卖点图版式");
+    });
+    it("applies multiple layouts and grows selling output only on confirmation within ten outputs", async () => {
+        const view = form();
+        const all = () => view.render();
+        const trigger = () => all().find((node) => node.props.className === "selling-layout-trigger")!;
+        const choose = (name: string) => all().find((node) => node.props["aria-label"] === name)!;
+        all().find((node) => node.type === "dialog")!.props.ref.current = { showModal: jest.fn(), close: jest.fn() };
+        trigger().props.onClick();
+        choose("标题与细节").props.onClick();
+        choose("材质特写").props.onClick();
+        expect(choose("标题与细节").props["aria-pressed"]).toBe(true);
+        expect(choose("材质特写").props["aria-pressed"]).toBe(true);
+        expect(choose("多卖点分区").props.disabled).toBe(false);
+        choose("多卖点分区").props.onClick();
+        expect(choose("多卖点分区").props["aria-pressed"]).toBe(true);
+        choose("多卖点分区").props.onClick();
+        expect(choose("多卖点分区").props["aria-pressed"]).toBe(false);
+        expect(text(all())).toContain("应用后卖点图 2 张，套图共 4 张，按新张数计费");
+        all().find((node) => node.type === "button" && text(node) === "取消")!.props.onClick();
+        view.picker().props.onChange([image(1).id], [image(1)]);
+        all().find((node) => node.props.id === "test-name")!.props.onChange({ target: { value: "Product" } });
+        await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+        expect(view.props.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ sellingLayouts: [], counts: { white: 1, scene: 1, selling: 1, other: 0 } }));
+        trigger().props.onClick();
+        expect(choose("标题与细节").props["aria-pressed"]).toBe(false);
+        choose("材质特写").props.onClick();
+        choose("标题与细节").props.onClick();
+        all().find((node) => node.type === "button" && text(node) === "应用 2 个版式")!.props.onClick();
+        expect(text(trigger())).toBe("已选 2 个卖点图版式");
+        await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+        expect(view.props.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ sellingLayouts: ["split-detail", "headline-detail"], counts: { white: 1, scene: 1, selling: 2, other: 0 } }));
+        choose("减少卖点图").props.onClick();
+        choose("减少卖点图").props.onClick();
+        trigger().props.onClick();
+        choose("多卖点分区").props.onClick();
+        all().find((node) => node.type === "button" && text(node) === "应用 1 个版式")!.props.onClick();
+        await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+        expect(view.props.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ sellingLayouts: ["feature-grid"], counts: { white: 1, scene: 1, selling: 1, other: 0 } }));
+        choose("增加白底图").props.onClick();
+        choose("增加白底图").props.onClick();
+        choose("减少卖点图").props.onClick();
+        choose("增加白底图").props.onClick();
+        expect(trigger().props.disabled).toBe(false);
+    });
+});
 
 describe("workspace account", () => {
     it("keeps explicit hooks for portaled menu spacing and a separate identity header", () => {
@@ -294,7 +454,7 @@ describe("main image advanced settings", () => {
         expect(panel.props).toEqual(expect.objectContaining({
             className: "main-settings-popover", side: "top", align: "start", sideOffset: 8, collisionPadding: 12,
         }));
-        expect(rendered.some((node) => node.type === "dialog")).toBe(false);
+        expect(rendered.filter((node) => node.type === "dialog").map((node) => node.props.className)).toEqual(["selling-layout-dialog"]);
         expect(rendered.some((node) => node.props.className === "settings-confirm")).toBe(false);
         expect(rendered.find((node) => node.type === "PopoverTrigger")!.props.asChild).toBe(true);
         popover.props.onOpenChange(true);
@@ -1029,6 +1189,9 @@ describe("workspace integration", () => {
         const record = { ...view.active, size: "2048x2048", modelId };
         const supports = (item: any, capabilities = view.capability) => view.exports.supportsMainRetry(item, capabilities);
         expect(supports(record)).toBe(true);
+        expect(supports({ ...record, count: 10, mainInput: { ...input(), counts: { white: 1, scene: 1, selling: 8, other: 0 } } })).toBe(true);
+        expect(supports({ ...record, count: 11, mainInput: { ...input(), counts: { white: 1, scene: 1, selling: 9, other: 0 } } })).toBe(false);
+        expect(supports({ ...record, count: Number.MAX_SAFE_INTEGER + 1, mainInput: { ...input(), counts: { white: Number.MAX_SAFE_INTEGER + 1, scene: 0, selling: 0, other: 0 } } })).toBe(false);
         for (const change of [{ counts: undefined }, { counts: { white: -1, scene: 2, selling: 0, other: 0 } }, { counts: { white: 1.5, scene: 0, selling: 0, other: 0 } }, { assetIds: [] }, { assetIds: ["invalid"] }, { assetIds: [image(1).id, image(1).id] }, { modelId: "other" }, { productName: " " }, { resolution: "8K" }, { ratio: "bad" }]) expect(supports({ ...record, mainInput: { ...input(), ...change } })).toBe(false);
         expect(supports({ ...record, count: 2 })).toBe(false);
         expect(supports({ ...record, size: "1024x1024" })).toBe(false);
