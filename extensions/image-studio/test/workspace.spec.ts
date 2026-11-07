@@ -798,7 +798,7 @@ describe("workspace overview data", () => {
     it("uses existing tool and account routes with real balance and correctly signed ledger data", () => {
         const view = overview();
         const cards = view.render().filter((node) => node.type === "button" && node.props.className?.startsWith("overview-tool "));
-        expect(cards).toHaveLength(12);
+        expect(cards).toHaveLength(13);
         for (const card of cards) { card.props.onClick(); expect(view.props.onNavigate).toHaveBeenLastCalledWith("create", card.key); }
         expect(view.render().filter((node) => node.props.role === "status").map(text)).toEqual(["95", "5"]);
         expect(text(view.render())).toContain("+100"); expect(text(view.render())).toContain("-5");
@@ -1021,7 +1021,7 @@ describe("workspace integration", () => {
         expect(view.retryMutation.mutateAsync).toHaveBeenCalledWith("active");
     });
 
-    it.each(["watermark", "expand", "sku", "redraw", "cutout"] as const)("returns to %s editing on submission failure, but opens history as a result", async (tool) => {
+    it.each(["watermark", "expand", "sku", "redraw", "cutout", "recolor"] as const)("returns to %s editing on submission failure, but opens history as a result", async (tool) => {
         const view = workspace();
         const selectedModel = tool === "cutout" ? LOCAL_CUTOUT_MODEL_ID : modelId;
         const required = tool === "cutout" ? "segmentation" : "reference-image";
@@ -1029,10 +1029,10 @@ describe("workspace integration", () => {
         view.capability.tools.push({ key: tool, status: "available", requiredCapabilities: [required],
             modelIdsByCapability: { [required]: [selectedModel] }, limits: { maxInputImages: 1 } });
         view.render().find((node) => node.type === "Navigation")!.props.onNavigate("create", tool);
-        const host = tool === "expand" ? "expansion-canvas-host" : tool === "sku" ? "sku-canvas-host" : tool === "redraw" || tool === "cutout" ? "regional-canvas-host" : "watermark-canvas-host";
+        const host = tool === "expand" ? "expansion-canvas-host" : tool === "sku" ? "sku-canvas-host" : tool === "redraw" || tool === "cutout" || tool === "recolor" ? "regional-canvas-host" : "watermark-canvas-host";
         const form = () => view.render().find((node) => node.type === "./tool-form" && node.props.tool === tool)!;
         const payload: workflow.ToolWorkflowInput = { tool, modelId: selectedModel, assetIds: [image(1).id], instructions: tool === "redraw" ? "Change to black" : "", count: 1, ratio: "1:1",
-            ...(tool === "redraw" ? { design: { redrawRegions: [{ x: .1, y: .1, width: .2, height: .2 }] } } : tool === "cutout" ? { design: { backgroundColor: null } } : tool === "sku" ? { design: { skuRegions: [{ id: "region-1", region: { x: .1, y: .1, width: .2, height: .2 } }], skuVariants: [{ name: "Green", instruction: "", edits: [{ regionId: "region-1", instruction: "Make green" }] }] } } :
+            ...(tool === "recolor" ? { design: { productColor: "#a52639" } } : tool === "redraw" ? { design: { redrawRegions: [{ x: .1, y: .1, width: .2, height: .2 }] } } : tool === "cutout" ? { design: { backgroundColor: null } } : tool === "sku" ? { design: { skuRegions: [{ id: "region-1", region: { x: .1, y: .1, width: .2, height: .2 } }], skuVariants: [{ name: "Green", instruction: "", edits: [{ regionId: "region-1", instruction: "Make green" }] }] } } :
                 tool === "expand" ? { expansion: "surround", design: { expandScale: 80, expandPosition: "center" } } : { authorized: true, design: { watermarkRegions: [{ x: 0.1, y: 0.1, width: 0.2, height: 0.2 }] } }) };
         view.active.status = "completed";
         await form().props.onSubmit(payload);
@@ -1048,7 +1048,7 @@ describe("workspace integration", () => {
         view.render().find((node) => node.type === "Navigation")!.props.onNavigate("create", tool);
         expect(view.render().some((node) => node.props.className === host)).toBe(false);
     });
-    it.each(["detail", "replica", "creative", "fusion", "sku", "retouch", "redraw", "cutout"])("does not carry main results into the %s column", async (tool) => {
+    it.each(["detail", "replica", "creative", "fusion", "sku", "retouch", "redraw", "cutout", "recolor"])("does not carry main results into the %s column", async (tool) => {
         const view = workspace();
         view.active.status = "completed";
         view.active.images = [{}];
@@ -1060,7 +1060,7 @@ describe("workspace integration", () => {
         const rendered = view.render();
         expect(rendered.some((node) => node.props.generationId === "active")).toBe(false);
         expect(rendered.some((node) => node.props.className === "result-prompt")).toBe(false);
-        expect(rendered.some((node) => tool === "retouch" ? node.type === "RetouchPreview" : tool === "sku" ? node.props.className === "sku-canvas-host" : tool === "redraw" || tool === "cutout" ? node.props.className === "regional-canvas-host" : String(node.props.className).includes("preview-empty-state"))).toBe(true);
+        expect(rendered.some((node) => tool === "retouch" ? node.type === "RetouchPreview" : tool === "sku" ? node.props.className === "sku-canvas-host" : tool === "redraw" || tool === "cutout" || tool === "recolor" ? node.props.className === "regional-canvas-host" : String(node.props.className).includes("preview-empty-state"))).toBe(true);
         expect(rendered.find((node) => node.props.className === "canvas")!.props["data-empty"]).toBe(true);
         navigate("main");
         expect(view.render().some((node) => node.props.generationId === "active")).toBe(true);

@@ -84,7 +84,7 @@ const UNAVAILABLE_MESSAGES: Partial<Record<ToolKey, { title: string; description
 
 export default function ToolForm(props: ToolFormProps) {
     if (props.tool === "sku") return <SkuToolForm key={props.tool} {...props} />;
-    if (props.tool === "watermark" || props.tool === "translate" || props.tool === "retouch" || props.tool === "expand" || props.tool === "redraw" || props.tool === "cutout") return <ImageEditForm key={props.tool} {...props} tool={props.tool} />;
+    if (props.tool === "watermark" || props.tool === "translate" || props.tool === "retouch" || props.tool === "recolor" || props.tool === "expand" || props.tool === "redraw" || props.tool === "cutout") return <ImageEditForm key={props.tool} {...props} tool={props.tool} />;
     if (isSpecializedTool(props.tool)) return <SpecializedToolForm key={props.tool} {...props} tool={props.tool} />;
     if (!isToolEditKey(props.tool) && props.tool !== "suggest") {
         const message = UNAVAILABLE_MESSAGES[props.tool];

@@ -1,6 +1,6 @@
 import { LOCAL_CUTOUT_MODEL_ID, type ToolKey } from "./tools";
 
-export const TOOL_EDIT_KEYS = ["detail", "replica", "creative", "fusion", "sku", "retouch", "expand", "translate", "watermark", "redraw", "cutout"] as const;
+export const TOOL_EDIT_KEYS = ["detail", "replica", "creative", "fusion", "sku", "retouch", "recolor", "expand", "translate", "watermark", "redraw", "cutout"] as const;
 export type ToolEditKey = typeof TOOL_EDIT_KEYS[number];
 export const TOOL_RATIOS = ["1:1", "4:3", "3:4", "16:9", "9:16"] as const;
 export const TOOL_LANGUAGES = ["简体中文", "繁體中文", "English", "日本語", "한국어", "Deutsch", "Français", "Español"] as const;
@@ -11,6 +11,12 @@ export const EXPAND_POSITIONS = [
     { id: "bottom-left", label: "左下" }, { id: "bottom", label: "下方" }, { id: "bottom-right", label: "右下" },
 ] as const;
 export const TOOL_PLATFORMS = ["淘宝", "天猫", "京东", "拼多多", "抖音", "小红书", "亚马逊", "其他"] as const;
+
+export const RECOLOR_COLORS = [
+    { name: "白色", value: "#ffffff" }, { name: "浅蓝", value: "#c4e0f4" },
+    { name: "蓝色", value: "#287be5" }, { name: "红色", value: "#e73535" },
+    { name: "深红", value: "#a52639" },
+] as const;
 
 export const RETOUCH_MODES = [
     { id: "overall", label: "综合精修", instruction: "Balance exposure, lighting and visible minor surface distractions for a clean product photograph." },
@@ -88,6 +94,7 @@ export interface ToolDesign {
     redrawRegions?: Array<{ x: number; y: number; width: number; height: number }>;
     redrawEdits?: Array<{ instruction: string; referenceAssetId?: string }>;
     backgroundColor?: string | null;
+    productColor?: string;
     protectSubject?: boolean;
     retouchMode?: typeof RETOUCH_MODES[number]["id"];
     expandScale?: number;
@@ -101,6 +108,7 @@ export const TOOL_WORKFLOWS = {
     fusion: { name: "多图融合", minAssets: 2, method: "Combine the supplied reference images into one coherent product composition, preserving each referenced product's identity and plausible proportions." },
     sku: { name: "商品SKU图", minAssets: 1, method: "Create the explicitly requested SKU variant of the referenced product. Change only the requested variant; preserve its structure and all unrelated details." },
     retouch: { name: "产品精修", minAssets: 1, method: "Retouch lighting, exposure and minor surface distractions using reference-image instruction editing. Preserve real product texture and geometry." },
+    recolor: { name: "商品换色", minAssets: 1, method: "Recolor only the main product surface to the selected target color. Preserve product identity, geometry, material, texture, seams, printed patterns, embroidery, labels and logos. Keep the background, hands, accessories, lighting and composition unchanged. This is reference-image instruction editing, not pixel-locked recoloring; exact unchanged pixels or color matching are not guaranteed." },
     redraw: { name: "局部重绘", minAssets: 1, method: "Apply the user's requested change within the indicated regions of the reference image. Preserve unrelated product details and composition. Regions are instruction guidance, not a pixel mask or pixel lock." },
     cutout: { name: "一键抠图", minAssets: 1, method: "Tencent CI alpha segmentation of the owned source image with the selected background color." },
     expand: { name: "智能扩图", minAssets: 1, method: "Recompose the reference into a wider scene in the requested direction using reference-image instruction editing. Preserve the product and synthesize a consistent surrounding background. This is not pixel-locked outpainting." },
@@ -154,6 +162,7 @@ const DESIGN_FIELDS = {
     redrawRegions: ["redraw"],
     redrawEdits: ["redraw"],
     backgroundColor: ["cutout"],
+    productColor: ["recolor"],
     protectSubject: ["translate"],
     retouchMode: ["retouch"],
     expandScale: ["expand"],
@@ -180,9 +189,10 @@ function isRegion(value: unknown): boolean {
 function validateDesign(input: ToolWorkflowInput): string | null {
     const design = input.design;
     if (design === undefined) return null;
-    if (!isRecord(design) || ![...DESIGN_TOOLS, "watermark", "translate", "retouch", "expand", "redraw", "cutout"].includes(input.tool)
+    if (!isRecord(design) || ![...DESIGN_TOOLS, "watermark", "translate", "retouch", "recolor", "expand", "redraw", "cutout"].includes(input.tool)
         || Object.keys(design).some((key) => !Object.hasOwn(DESIGN_FIELDS, key) || !DESIGN_FIELDS[key as keyof typeof DESIGN_FIELDS].includes(input.tool))) return "设计输入包含不支持或不适用于当前工具的字段";
-    if ((["watermark", "translate", "retouch", "expand", "cutout"].includes(input.tool) || (input.tool === "redraw" && design.redrawEdits === undefined)) && (input.assetIds.length !== 1 || input.count !== 1)) return "单图编辑须选择恰好 1 张图片并输出 1 张";
+    if ((["watermark", "translate", "retouch", "recolor", "expand", "cutout"].includes(input.tool) || (input.tool === "redraw" && design.redrawEdits === undefined)) && (input.assetIds.length !== 1 || input.count !== 1)) return "单图编辑须选择恰好 1 张图片并输出 1 张";
+    if (input.tool === "recolor" && (typeof design.productColor !== "string" || !/^#[0-9a-f]{6}$/i.test(design.productColor))) return "请选择有效的六位商品颜色";
     if (input.tool === "cutout" && design.backgroundColor !== null
         && (typeof design.backgroundColor !== "string" || !/^#[0-9a-f]{6}$/i.test(design.backgroundColor))) return "请选择透明或有效的六位背景颜色";
     if (input.tool === "redraw" && (!Array.isArray(design.redrawRegions) || design.redrawRegions.length < 1 || design.redrawRegions.length > WATERMARK_MARK_LIMIT
@@ -268,10 +278,12 @@ export function validateToolWorkflow(input: ToolWorkflowInput): string | null {
     if ((input.tool === "cutout") !== (input.modelId === LOCAL_CUTOUT_MODEL_ID)) return "抠图仅支持专用分割服务，该服务不支持普通图片生成";
     if (!Array.isArray(input.assetIds) || input.assetIds.length < TOOL_WORKFLOWS[input.tool].minAssets || input.assetIds.length > 5 || new Set(input.assetIds).size !== input.assetIds.length || Array.from(input.assetIds).some((id) => typeof id !== "string" || !UUID.test(id))) return "请选择有效且不重复的商品参考图（最多 5 张）";
     const optionalName = ["creative", "replica", "fusion", "sku"].includes(input.tool)
-        || (["watermark", "translate", "retouch", "expand", "redraw", "cutout"].includes(input.tool) && input.design !== undefined);
+        || (["watermark", "translate", "retouch", "recolor", "expand", "redraw", "cutout"].includes(input.tool) && input.design !== undefined);
     if ((input.productName !== undefined && (typeof input.productName !== "string" || input.productName.length > 100)) || (!optionalName && !input.productName?.trim())) return "商品名称须为 1–100 字";
     if (typeof input.instructions !== "string" || input.instructions.length > 1500) return "编辑要求不能超过 1500 字";
     if (input.tool === "creative" && !input.instructions.trim()) return "请填写创意提示词";
+    if (input.tool === "recolor" && (!input.design || input.instructions.trim() || input.targetLanguage !== undefined || input.variant !== undefined
+        || input.expansion !== undefined || input.authorized !== undefined)) return "换色仅支持原图与商品颜色参数";
     if (input.tool === "redraw" && (!input.design || (input.design.redrawEdits === undefined && !input.instructions.trim()))) return "请选择重绘区域并填写修改要求";
     if (input.tool === "cutout" && (!input.design || input.instructions.trim() || input.targetLanguage !== undefined || input.variant !== undefined
         || input.expansion !== undefined || input.authorized !== undefined)) return "抠图仅支持原图与背景颜色参数";
@@ -308,6 +320,7 @@ export function toolWorkflowPrompt(input: ToolWorkflowInput, imageIndex = 0): st
     const primaryPositions = input.assetIds.flatMap((id, index) => primaryIds.includes(id) ? [index + 1] : []);
     const referencePositions = input.assetIds.flatMap((id, index) => primaryIds.includes(id) ? [] : [index + 1]);
     const workflow: string[] = [];
+    if (input.tool === "recolor") workflow.push(`Selected product surface target color (sRGB hex): ${JSON.stringify(design!.productColor)}. Change only the main product's base color, retaining realistic shading and material texture; do not recolor printed patterns, embroidery, logos, hands or background. Do not introduce new color variants or change product features.`);
     if (input.tool === "redraw") design!.redrawRegions!.forEach((region, index) => workflow.push(
         `Local redraw region ${index + 1}, normalized top-left origin (x, y, width, height): ${JSON.stringify(region)}. Apply only the user's explicit edit here; retain unrelated content. This is instruction guidance, not a pixel mask; exact boundaries and unchanged pixels are not guaranteed.`,
     ));

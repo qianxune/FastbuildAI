@@ -15,6 +15,19 @@ export function toolInput(overrides: Partial<ToolWorkflowInput> = {}): ToolWorkf
 }
 
 describe("tool workflow contract", () => {
+    it("recolors one product using a validated target color without changing the background", () => {
+        const input = toolInput({ tool: "recolor", productName: undefined, count: 1, instructions: "",
+            design: { productColor: "#a52639" } } as never);
+        expect(validateToolWorkflow(input)).toBeNull();
+        expect(toolWorkflowPrompt(input)).toContain("#a52639");
+        expect(toolWorkflowPrompt(input)).toContain("background");
+        for (const productColor of [null, "red", "#fff", "#12345g", "", 42])
+            expect(validateToolWorkflow({ ...input, design: { productColor } } as never)).not.toBeNull();
+        for (const override of [{ design: undefined }, { design: {} }, { count: 2 }, { assetIds: [firstAsset, secondAsset] },
+            { design: { productColor: "#a52639", backgroundColor: "#ffffff" } }, { targetLanguage: "English" }])
+            expect(validateToolWorkflow({ ...input, ...override } as never)).not.toBeNull();
+        expect(validateToolWorkflow({ ...input, tool: "retouch" } as never)).not.toBeNull();
+    });
     it("isolates true cutout to one local source/output and a validated background", () => {
         const input = toolInput({ tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, productName: undefined,
             count: 1, instructions: "", design: { backgroundColor: null } });
@@ -158,7 +171,7 @@ describe("tool workflow contract", () => {
     it("builds deterministic, reference-based prompts for every edit", () => {
         for (const tool of TOOL_EDIT_KEYS) {
             if (tool === "cutout") continue;
-            const input = toolInput({ tool, assetIds: tool === "redraw" ? [firstAsset] : [firstAsset, secondAsset], variant: "Blue", targetLanguage: "English", expansion: "horizontal", authorized: true,
+            const input = tool === "recolor" ? toolInput({ tool, assetIds: [firstAsset], count: 1, instructions: "", design: { productColor: "#a52639" } }) : toolInput({ tool, assetIds: tool === "redraw" ? [firstAsset] : [firstAsset, secondAsset], variant: "Blue", targetLanguage: "English", expansion: "horizontal", authorized: true,
                 ...(tool === "redraw" ? { count: 1, design: { redrawRegions: [{ x: 0, y: 0, width: .5, height: .5 }] } } : {}) });
             expect(validateToolWorkflow(input)).toBeNull();
             expect(toolWorkflowPrompt(input)).toBe(toolWorkflowPrompt(input));

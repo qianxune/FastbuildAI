@@ -3,7 +3,7 @@ import { ArrowDown, ArrowDownLeft, ArrowDownRight, ArrowLeft, ArrowRight, ArrowU
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { TOOL_REGISTRY } from "../../api/shared/tools";
-import { EXPAND_POSITIONS, RETOUCH_MODES, TOOL_LANGUAGES, TOOL_RATIOS, TOOL_WORKFLOWS, validateToolWorkflow, type ToolWorkflowInput } from "../../api/shared/tool-workflow";
+import { EXPAND_POSITIONS, RECOLOR_COLORS, RETOUCH_MODES, TOOL_LANGUAGES, TOOL_RATIOS, TOOL_WORKFLOWS, toolWorkflowSize, validateToolWorkflow, type ToolWorkflowInput } from "../../api/shared/tool-workflow";
 import { loadProductImage, useGenerationBilling, useProductImagesQuery, useUploadProductImageMutation } from "../services/generation";
 import type { ProductImage } from "../services/types";
 import { AssetRolePicker, SkuRegionEditor } from "./specialized-components";
@@ -63,7 +63,31 @@ const EXPAND_ICONS = [ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowLeft, Scan, Arrow
 const CUTOUT_COLORS = [{ name: "透明", value: null }, { name: "白色", value: "#ffffff" }, { name: "浅蓝", value: "#c4e0f4" },
     { name: "蓝色", value: "#287be5" }, { name: "红色", value: "#e73535" }, { name: "深红", value: "#a52639" }];
 
-export default function ImageEditForm({ tool, capabilities, locked, onSubmit, annotationTarget, onEditSource, taskSnapshot }: Omit<ToolFormProps, "tool"> & { tool: "watermark" | "translate" | "retouch" | "expand" | "redraw" | "cutout" }) {
+export function RecolorPreview({ image, onReady }: { image?: ProductImage; onReady: (ready: boolean) => void }) {
+    const [loaded, setLoaded] = useState<{ id: string; url: string; version: number }>();
+    const version = useRef(0);
+    const [failed, setFailed] = useState(false);
+    const [attempt, setAttempt] = useState(0);
+    useEffect(() => {
+        let active = true;
+        const currentVersion = ++version.current;
+        setLoaded(undefined); setFailed(false); onReady(false);
+        if (!image) return;
+        const release = loadProductImage(image.id, (url) => { if (active) setLoaded({ id: image.id, url, version: currentVersion }); }, () => { if (active) { setFailed(true); onReady(false); } });
+        return () => { active = false; ++version.current; release(); onReady(false); };
+    }, [image?.id, attempt, onReady]);
+    return <div className="recolor-preview" aria-label="商品换色原图预览">
+        <div className="recolor-preview-viewport">
+            {image ? failed ? <button type="button" className="recolor-preview-reload" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={18} />原图加载失败，重试</button>
+                : loaded?.id === image.id ? <figure className="recolor-preview-stage"><img key={loaded.url} src={loaded.url} alt={image.name || "商品换色原图"} draggable={false}
+                    onLoad={() => { if (loaded.version === version.current) onReady(true); }} onError={() => { if (loaded.version === version.current) { setFailed(true); onReady(false); } }} /><figcaption>原图</figcaption></figure>
+                    : <span className="specialized-loading" role="status" aria-label="商品换色原图加载中"><LoaderCircle size={22} /></span>
+                : <figure className="recolor-preview-stage recolor-preview-example"><img src="/extension/image-studio/images/mug-scene.jpg" alt="商品换色素材示例" /><figcaption>素材示例</figcaption></figure>}
+        </div>
+    </div>;
+}
+
+export default function ImageEditForm({ tool, capabilities, locked, onSubmit, annotationTarget, onEditSource, taskSnapshot }: Omit<ToolFormProps, "tool"> & { tool: "watermark" | "translate" | "retouch" | "recolor" | "expand" | "redraw" | "cutout" }) {
     const id = useId();
     const [images, setImages] = useState<ProductImage[]>([]);
     const [modelChoice, setModelChoice] = useState("");
@@ -77,12 +101,14 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
     const [selectedMark, setSelectedMark] = useState("");
     const [sourceReady, setSourceReady] = useState(false);
     const sourcePicker = useRef<HTMLInputElement>(null);
-    const regionalLayout = tool === "redraw" || tool === "cutout";
+    const regionalLayout = tool === "redraw" || tool === "cutout" || tool === "recolor";
     const canvasLayout = (tool === "watermark" && annotationTarget !== undefined) || tool === "redraw";
     const expansionLayout = tool === "expand" && annotationTarget !== undefined;
     const [backgroundColor, setBackgroundColor] = useState<string | null>(null);
     const [customBackground, setCustomBackground] = useState(false);
     const [customColor, setCustomColor] = useState("#4090ff");
+    const [productColor, setProductColor] = useState<string>("#a52639");
+    const [customProductColor, setCustomProductColor] = useState(false);
     const [expandScale, setExpandScale] = useState(80);
     const [customScale, setCustomScale] = useState(false);
     const [expandPosition, setExpandPosition] = useState<typeof EXPAND_POSITIONS[number]["id"]>("center");
@@ -102,18 +128,22 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
     const restoredTask = useRef<string | undefined>(undefined);
     useEffect(() => {
         const saved = taskSnapshot?.toolInput;
-        if (tool !== "cutout" || !taskSnapshot || saved?.tool !== "cutout" || restoredTask.current === taskSnapshot.id
+        if ((tool !== "cutout" && tool !== "recolor") || !taskSnapshot || saved?.tool !== tool || restoredTask.current === taskSnapshot.id
             || !products.isSuccess || products.isPending || products.isFetching || products.isError || !products.data
             || pending || upload.isPending || operation.current) return;
-        const color = saved.design?.backgroundColor;
-        if (color !== null && (typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color))) return;
+        const color = tool === "cutout" ? saved.design?.backgroundColor : saved.design?.productColor;
+        if ((tool === "recolor" && color === null) || (color !== null && (typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color)))) return;
         restoredTask.current = taskSnapshot.id;
         const source = products.data.find((image) => image.id === saved.assetIds[0]);
         setImages(source ? [source] : []); setSourceReady(false);
         setModelChoice(saved.modelId); setRatio(saved.ratio);
-        setBackgroundColor(color?.toLowerCase() ?? null);
-        const custom = !CUTOUT_COLORS.some((preset) => preset.value === (color?.toLowerCase() ?? null));
-        setCustomBackground(custom);
+        if (tool === "cutout") {
+            setBackgroundColor(color?.toLowerCase() ?? null);
+            setCustomBackground(!CUTOUT_COLORS.some((preset) => preset.value === (color?.toLowerCase() ?? null)));
+        } else if (color) {
+            setProductColor(color.toLowerCase());
+            setCustomProductColor(!RECOLOR_COLORS.some((preset) => preset.value === color.toLowerCase()));
+        }
         if (color) setCustomColor(color.toLowerCase());
         setError(source ? "" : "原任务素材已删除或不可用，请重新上传；生成结果仍可预览和下载");
     }, [tool, taskSnapshot?.id, products.data, products.isSuccess, products.isPending, products.isFetching, products.isError, pending, upload.isPending]);
@@ -139,9 +169,9 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
     }, [products.data, products.isSuccess, products.isPending, products.isFetching, products.isError, pending, upload.isPending]);
     const referenceAssets = tool === "redraw" ? markHistory.marks.flatMap((mark) => mark.referenceAsset ? [mark.referenceAsset.id] : []) : [];
     const assetIds = [...new Set([...images.map((image) => image.id), ...referenceAssets])];
-    const input: ToolWorkflowInput = { tool, modelId: model?.id ?? "", assetIds, instructions: tool === "cutout" || tool === "redraw" ? "" : instructions.trim(), count: 1, ratio,
+    const input: ToolWorkflowInput = { tool, modelId: model?.id ?? "", assetIds, instructions: tool === "cutout" || tool === "redraw" || tool === "recolor" ? "" : instructions.trim(), count: 1, ratio,
         ...(tool === "redraw" ? { design: { redrawRegions: markHistory.marks.map((mark) => mark.region), redrawEdits: markHistory.marks.map((mark) => ({ instruction: mark.instruction?.trim() ?? "", ...(mark.referenceAsset ? { referenceAssetId: mark.referenceAsset.id } : {}) })) } } : tool === "cutout" ? { design: { backgroundColor } }
-            : tool === "watermark" ? { authorized, design: canvasLayout ? { watermarkRegions: markHistory.marks.map((mark) => mark.region) } : { watermarkRegion: region } } : tool === "retouch" ? { design: { retouchMode } } : tool === "expand" ? { expansion: "surround", design: { expandScale, expandPosition } } : { targetLanguage: language, design: { protectSubject } }) };
+            : tool === "recolor" ? { design: { productColor } } : tool === "watermark" ? { authorized, design: canvasLayout ? { watermarkRegions: markHistory.marks.map((mark) => mark.region) } : { watermarkRegion: region } } : tool === "retouch" ? { design: { retouchMode } } : tool === "expand" ? { expansion: "surround", design: { expandScale, expandPosition } } : { targetLanguage: language, design: { protectSubject } }) };
     const validation = tool === "redraw" && assetIds.length > (model?.maxReferenceImages ?? 1) ? "当前模型参考图数量不足，请移除参考图或在高级设置中更换模型"
         : tool === "redraw" && products.isSuccess && products.data && referenceAssets.some((assetId) => !products.data.some((image) => image.id === assetId)) ? "参考素材已失效，请重新选择"
         : tool === "expand" && customScale && (!Number.isInteger(expandScale) || expandScale < 1 || expandScale > 99) ? "自定义原图占比须为 1–99 的整数" : validateToolWorkflow(input);
@@ -240,6 +270,10 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
         if (busy || current.current.locked || operation.current || !mounted.current || (value !== null && !/^#[0-9a-f]{6}$/i.test(value))) return;
         setBackgroundColor(value); setCustomBackground(custom); if (custom && value) setCustomColor(value); onEditSource?.();
     }
+    function changeProductColor(value: string, custom = false) {
+        if (busy || current.current.locked || operation.current || !mounted.current || !/^#[0-9a-f]{6}$/i.test(value)) return;
+        setProductColor(value.toLowerCase()); setCustomProductColor(custom); if (custom) setCustomColor(value.toLowerCase()); onEditSource?.();
+    }
     const footer = <footer className={`specialized-footer${tool === "redraw" ? " redraw-action-bar" : ""}${tool === "cutout" ? " cutout-action-bar" : ""}`}>
         <Popover open={settingsOpen} onOpenChange={setSettingsOpen} modal={false}>
             <PopoverTrigger asChild><button ref={settingsTrigger} type="button" className="image-edit-settings-trigger" disabled={busy}><Settings2 size={16} />高级设置<span>{tool === "cutout" ? "原图" : ratio}</span><ChevronDown size={14} /></button></PopoverTrigger>
@@ -253,28 +287,30 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
                     {tool === "cutout" ? <div className="cutout-output-size"><span>输出尺寸</span><strong>{images[0] ? `${images[0].width} × ${images[0].height}` : "原图尺寸"}</strong><span>PNG</span></div>
                         : <label htmlFor={`${id}-ratio`}>图片比例<select id={`${id}-ratio`} aria-label="图片比例" value={ratio} onChange={(event) => { if (!busy && !current.current.locked) { setRatio(event.target.value as typeof ratio); if (expansionLayout || regionalLayout) onEditSource?.(); } }}>
                             {TOOL_RATIOS.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
+                            {tool === "recolor" && <div className="cutout-output-size"><span>输出尺寸</span><strong>{toolWorkflowSize(input).replace("x", " × ")}</strong></div>}
                 </fieldset>
             </PopoverContent>
         </Popover>
         {regionalLayout && <span className="regional-output-summary">{tool === "cutout" ? images[0] ? `${images[0].width} × ${images[0].height} · PNG` : "原图 · PNG" : `${ratio} · 2K`}</span>}
         <div className="specialized-submit-row">{tool !== "retouch" && tool !== "expand" && !regionalLayout && <span className="specialized-cost" role="status">{billing.costText}</span>}<button type="submit" form={`${id}-image-edit`} className="specialized-primary" disabled={!canSubmit}>
-            {pending ? <LoaderCircle size={17} /> : tool === "watermark" ? <Eraser size={17} /> : tool === "retouch" ? <Sparkles size={17} /> : tool === "expand" ? <Maximize2 size={17} /> : tool === "redraw" ? <Paintbrush size={17} /> : tool === "cutout" ? <Scissors size={17} /> : <Languages size={17} />}
-            {tool === "watermark" ? "开始去水印" : tool === "retouch" ? "立即生成" : tool === "expand" ? "立即扩图" : tool === "redraw" ? "立即重绘" : tool === "cutout" ? "立即抠图" : "开始翻译"}{(tool === "retouch" || tool === "expand" || regionalLayout) && <small>{billing.costText}</small>}</button></div>
+            {pending ? <LoaderCircle size={17} /> : tool === "watermark" ? <Eraser size={17} /> : tool === "retouch" ? <Sparkles size={17} /> : tool === "recolor" ? <Palette size={17} /> : tool === "expand" ? <Maximize2 size={17} /> : tool === "redraw" ? <Paintbrush size={17} /> : tool === "cutout" ? <Scissors size={17} /> : <Languages size={17} />}
+            {tool === "watermark" ? "开始去水印" : tool === "retouch" ? "立即生成" : tool === "recolor" ? "立即换色" : tool === "expand" ? "立即扩图" : tool === "redraw" ? "立即重绘" : tool === "cutout" ? "立即抠图" : "开始翻译"}{(tool === "retouch" || tool === "expand" || regionalLayout) && <small>{billing.costText}</small>}</button></div>
     </footer>;
 
     return <form id={`${id}-image-edit`} className={`ftpl show specialized-form image-edit-form image-edit-${tool}${canvasLayout || regionalLayout ? " watermark-side-form" : ""}`} aria-label={TOOL_WORKFLOWS[tool].name} data-workflow={tool} onSubmit={submit} noValidate>
         {(canvasLayout || tool === "cutout") && (annotationTarget ? createPortal(<WatermarkCanvas {...editorProps} />, annotationTarget) : regionalLayout && annotationTarget === undefined && <WatermarkCanvas {...editorProps} />)}
         {expansionLayout && annotationTarget && createPortal(<ExpansionPreview image={images[0]} ratio={ratio} scale={expandScale} position={expandPosition} onReady={setSourceReady} />, annotationTarget)}
+        {tool === "recolor" && (annotationTarget ? createPortal(<RecolorPreview image={images[0]} onReady={setSourceReady} />, annotationTarget) : annotationTarget === undefined && <RecolorPreview image={images[0]} onReady={setSourceReady} />)}
         {tool !== "retouch" && tool !== "expand" && !canvasLayout && !regionalLayout && <header className="specialized-heading"><h2>{TOOL_WORKFLOWS[tool].name}</h2>{tool === "watermark" ? <Eraser size={22} /> : <Languages size={22} />}</header>}
             {!capable && <p className="specialized-message" role="status">{tool === "cutout" ? "腾讯云抠图未配置，请联系管理员启用 COS 存储及数据万象后刷新。" : "当前模型不可用于参考图编辑，请选择可用模型或联系管理员配置。"}</p>}
         <fieldset className="specialized-fields" disabled={busy}>
             <section className="specialized-band"><AssetRolePicker label={tool === "retouch" || tool === "expand" || canvasLayout || regionalLayout ? "上传图片" : "待编辑图片"} images={images} max={1} disabled={busy} original={!canvasLayout} dropzone={tool === "retouch" || tool === "expand" || regionalLayout} appearance={regionalLayout ? "links" : "default"} allowReplacement={regionalLayout} previewRegion={tool === "watermark" && !canvasLayout ? region : undefined}
                 onChange={(next) => replaceImages(next)} onFiles={uploadFiles} />
                 {(canvasLayout || expansionLayout || regionalLayout) && images.length > 0 && <div className="watermark-source-actions">
-                    <button type="button" disabled={busy} onClick={() => onEditSource?.()}><Scan size={14} />重新编辑</button>
+                    {tool !== "recolor" && <button type="button" disabled={busy} onClick={() => onEditSource?.()}><Scan size={14} />重新编辑</button>}
                     <button type="button" disabled={busy} onClick={() => sourcePicker.current?.click()}><RefreshCw size={14} />重新上传</button>
                 </div>}
-                {(canvasLayout || expansionLayout || regionalLayout) && <input ref={sourcePicker} type="file" hidden accept="image/png,image/jpeg,image/webp" aria-label={tool === "expand" ? "重新上传扩图原图" : tool === "redraw" ? "重新上传重绘原图" : tool === "cutout" ? "重新上传抠图原图" : "重新上传水印原图"} disabled={busy}
+                {(canvasLayout || expansionLayout || regionalLayout) && <input ref={sourcePicker} type="file" hidden accept="image/png,image/jpeg,image/webp" aria-label={tool === "expand" ? "重新上传扩图原图" : tool === "redraw" ? "重新上传重绘原图" : tool === "cutout" ? "重新上传抠图原图" : tool === "recolor" ? "重新上传换色原图" : "重新上传水印原图"} disabled={busy}
                     onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = "";
                         if (busy || operation.current || current.current.locked || !files.length) return;
                         if (files.length !== 1 || !files[0] || !validImageFile(files[0])) { setError("请选择不超过 10 MiB 的 PNG、JPEG 或 WebP 图片"); return; }
@@ -286,6 +322,11 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
                     onChange={() => changeBackground(color.value)} /><span className={`cutout-color-preview${color.value === null ? " cutout-color-transparent" : ""}`} style={{ backgroundColor: color.value ?? undefined, color: ["蓝色", "红色", "深红"].includes(color.name) ? "#fff" : "#263240" }}><Check size={15} /></span></label>)}
                 <label className="cutout-custom-color" data-selected={customBackground} title="自定义背景颜色">{customBackground ? <Check size={15} /> : <Palette size={20} />}<input type="color" id={`${id}-custom-color`} aria-label="自定义背景颜色" value={customColor} disabled={busy} onChange={(event) => changeBackground(event.target.value, true)} /></label>
             </div></section>}
+            {tool === "recolor" && <section className="specialized-band"><h3 id={`${id}-product-color`}>商品颜色</h3><div className="cutout-color-swatches recolor-color-swatches" role="radiogroup" aria-labelledby={`${id}-product-color`}>
+                {RECOLOR_COLORS.map((color) => <label key={color.value} title={color.name} className="cutout-color-choice"><input type="radio" name={`${id}-product-color`} aria-label={`商品颜色：${color.name}`} value={color.value} checked={!customProductColor && productColor === color.value} disabled={busy}
+                    onChange={() => changeProductColor(color.value)} /><span className="cutout-color-preview" style={{ backgroundColor: color.value }}><Check size={15} /></span></label>)}
+                <label className="cutout-custom-color" data-selected={customProductColor} style={customProductColor ? { background: productColor } : undefined} title="自定义商品颜色">{customProductColor ? <Check size={15} /> : <Palette size={20} />}<input type="color" id={`${id}-custom-product-color`} aria-label="自定义商品颜色" value={customColor} disabled={busy} onChange={(event) => changeProductColor(event.target.value, true)} /></label>
+            </div><output className="recolor-selected-color" aria-live="polite">{customProductColor ? "自定义" : RECOLOR_COLORS.find((color) => color.value === productColor)?.name} · {productColor.toUpperCase()}</output></section>}
             {tool === "redraw" && <section className="specialized-band redraw-descriptions" aria-label="重绘描述">
                 <header className="redraw-descriptions-heading"><h3>重绘描述</h3><span>{markHistory.marks.filter((mark) => mark.instruction?.trim() || mark.referenceAsset).length}/3</span></header>
                 {markHistory.marks.map((mark, index) => <div key={mark.id} className="redraw-description-row" data-selected={selectedMark === mark.id}>
@@ -324,7 +365,7 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
                     {TOOL_LANGUAGES.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
                 <label className="image-edit-check" title="保留商品及包装上的文字，仅翻译周边排版文字"><input id={`${id}-protect`} type="checkbox" checked={protectSubject} onChange={(event) => setProtectSubject(event.target.checked)} />保护商品主体</label>
             </section> : null}
-            {tool !== "cutout" && tool !== "redraw" && <section className="specialized-band"><label className="specialized-field" htmlFor={`${id}-instructions`}>补充要求（选填）<textarea id={`${id}-instructions`} rows={3} maxLength={1500} value={instructions} onChange={(event) => changeInstructions(event.target.value)} /></label></section>}
+            {tool !== "cutout" && tool !== "redraw" && tool !== "recolor" && <section className="specialized-band"><label className="specialized-field" htmlFor={`${id}-instructions`}>补充要求（选填）<textarea id={`${id}-instructions`} rows={3} maxLength={1500} value={instructions} onChange={(event) => changeInstructions(event.target.value)} /></label></section>}
         </fieldset>
         {regionOpen && images[0] && <SkuRegionEditor key={images[0].id} title="框选水印区域" image={images[0]} region={region} disabled={busy}
             onChange={(next) => { if (!busy && !current.current.locked) setRegion(next); }} onClose={() => setRegionOpen(false)} />}

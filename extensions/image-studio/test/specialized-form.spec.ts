@@ -687,7 +687,7 @@ describe("asset application in the owning creative form", () => {
     });
 });
 
-function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "expand" | "redraw" | "cutout", options: { ready?: boolean; locked?: boolean; unavailable?: boolean } = {}) {
+function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "recolor" | "expand" | "redraw" | "cutout", options: { ready?: boolean; locked?: boolean; unavailable?: boolean } = {}) {
     const onSubmit = jest.fn().mockResolvedValue(undefined), upload = jest.fn();
     const products = { data: [...images], isSuccess: true, isPending: false, isFetching: false, isError: false };
     const uploadState = { isPending: false, mutateAsync: async (file: File) => {
@@ -717,6 +717,50 @@ function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "expand"
 }
 
 describe("dedicated image editing", () => {
+    it("submits preset and custom product colors only after the original is ready", async () => {
+        const view = imageEditHarness("recolor"); view.props.annotationTarget = {}; view.props.onEditSource = jest.fn(); view.fill();
+        const preview = () => view.render().find((node) => node.type === view.exports.RecolorPreview)!.props;
+        expect(view.portals.some((node) => node.type === view.exports.RecolorPreview)).toBe(true);
+        expect(view.picker().appearance).toBe("links"); expect(view.picker().allowReplacement).toBe(true);
+        expect(view.render().filter((node) => node.props.type === "radio")).toHaveLength(5);
+        expect(view.field("instructions")).toBeUndefined(); expect(view.submitButton().props.disabled).toBe(true);
+        await view.submit(); expect(view.onSubmit).not.toHaveBeenCalled();
+        preview().onReady(true);
+        view.render().find((node) => node.props["aria-label"] === "商品颜色：蓝色")!.props.onChange();
+        await view.submit(); expect(view.onSubmit).toHaveBeenLastCalledWith({ tool: "recolor", modelId, assetIds: [images[0].id], instructions: "", count: 1, ratio: "4:3", design: { productColor: "#287be5" } });
+        view.field("custom-product-color").props.onChange({ target: { value: "#ABC123" } }); await view.submit();
+        expect(view.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ design: { productColor: "#abc123" } }));
+        expect(view.render().filter((node) => node.props.type === "radio").some((node) => node.props.checked)).toBe(false);
+        expect(view.props.onEditSource).toHaveBeenCalled();
+        const oldColor = view.field("custom-product-color"); view.props.locked = true; view.render();
+        oldColor.props.onChange({ target: { value: "#ff0000" } }); await view.submit();
+        expect(view.field("custom-product-color").props.value).toBe("#abc123"); expect(view.onSubmit).toHaveBeenCalledTimes(2);
+    });
+    it.each(["#287be5", "#ABC123"])("restores recolor source and color %s only once and preserves choices on failed replacement", async (productColor) => {
+        const view = imageEditHarness("recolor"); view.props.annotationTarget = {};
+        view.props.taskSnapshot = { id: "saved-recolor", toolKey: "recolor", toolInput: { tool: "recolor", modelId, assetIds: [images[1].id], ratio: "4:3", design: { productColor } } };
+        view.render(); view.render(); expect(view.picker().images[0].id).toBe(images[1].id); expect(view.field("ratio").props.value).toBe("4:3");
+        view.field("custom-product-color").props.onChange({ target: { value: "#112233" } });
+        view.products.data = [...view.products.data]; view.render(); expect(view.field("custom-product-color").props.value).toBe("#112233");
+        view.upload.mockRejectedValueOnce(new Error("replacement failed")); await view.picker().onFiles([{ type: "image/png", size: 100 }], true);
+        expect(view.picker().images[0].id).toBe(images[1].id); expect(view.field("custom-product-color").props.value).toBe("#112233");
+        view.props.taskSnapshot = { ...view.props.taskSnapshot, id: "deleted-recolor", toolInput: { ...view.props.taskSnapshot.toolInput, assetIds: ["deleted"] } };
+        view.render(); expect(view.picker().images).toEqual([]); expect(view.submitButton().props.disabled).toBe(true);
+    });
+    it("loads protected recolor originals, ignores stale image events and retries decoding failures", () => {
+        const release = jest.fn(), load = jest.fn().mockReturnValue(release), onReady = jest.fn();
+        const view = renderHarness("image-edit-form", "RecolorPreview", { image: images[0], onReady }, { loadProductImage: load });
+        view.render(); expect(load).toHaveBeenCalledWith(images[0].id, expect.any(Function), expect.any(Function));
+        load.mock.calls[0][1]("blob:original"); const oldImage = view.render().find((node) => node.type === "img")!;
+        expect(onReady).toHaveBeenLastCalledWith(false); oldImage.props.onLoad(); expect(onReady).toHaveBeenLastCalledWith(true);
+        expect(view.render().map(elementText).join(" ")).toContain("原图");
+        view.props.image = images[1]; view.render(); load.mock.calls[0][1]("blob:stale"); oldImage.props.onLoad();
+        expect(onReady).toHaveBeenLastCalledWith(false); expect(view.render().some((node) => node.type === "img")).toBe(false);
+        load.mock.calls[1][1]("blob:next"); view.render().find((node) => node.type === "img")!.props.onError();
+        view.render().find((node) => node.type === "button")!.props.onClick(); view.render(); expect(load).toHaveBeenCalledTimes(3);
+        view.unmount(); expect(release).toHaveBeenCalledTimes(3);
+        load.mock.calls[2][1]("blob:late"); expect(onReady).toHaveBeenLastCalledWith(false);
+    });
     it.each([null, "#287be5", "#ABC123"])("restores saved cutout background %s and source only once per task", (color) => {
         const view = imageEditHarness("cutout");
         view.props.taskSnapshot = { id: "saved-cutout", toolKey: "cutout", toolInput: { tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, assetIds: [images[1]!.id], ratio: "4:3", design: { backgroundColor: color } } };

@@ -19,6 +19,7 @@ const ENTRIES: { tool: ToolKey; image: string; companion?: string; group: string
     { tool: "fusion", image: "perfume-after", companion: "bottle-scene", group: "电商生图" },
     { tool: "expand", image: "bottle-scene", group: "AI 修图" },
     { tool: "cutout", image: "perfume-before", companion: "perfume-after", group: "AI 修图" },
+    { tool: "recolor", image: "mug-scene", group: "AI 修图" },
     { tool: "watermark", image: "mug-scene", group: "AI 修图" },
     { tool: "translate", image: "bottle-scene", group: "AI 修图" },
     { tool: "retouch", image: "sneaker-after", group: "AI 修图" },

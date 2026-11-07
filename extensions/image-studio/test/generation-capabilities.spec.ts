@@ -327,6 +327,7 @@ describe("generation capabilities", () => {
             "fusion",
             "sku",
             "retouch",
+            "recolor",
             "watermark",
             "expand",
             "translate",
@@ -348,6 +349,7 @@ describe("generation capabilities", () => {
         const single = await service.capabilities();
         expect(single.models[0].maxReferenceImages).toBe(1);
         expect(single.tools.find((tool) => tool.key === "retouch")).toMatchObject({ status: "available", limits: { maxInputImages: 1 } });
+        expect(single.tools.find((tool) => tool.key === "recolor")).toMatchObject({ status: "available", limits: { maxInputImages: 1 } });
         expect(single.tools.find((tool) => tool.key === "fusion")?.status).toBe("unavailable");
         expect(single.tools.find((tool) => tool.key === "replica")?.status).toBe("unavailable");
         image.mockReturnValue({ model: { specificationVersion: "v3", doGenerate: jest.fn(), supportsReferenceImages: true, provider: "volcengine", modelId: "doubao-seedream-5-0-lite" } });
@@ -479,7 +481,7 @@ describe("generation capabilities", () => {
         find.mockResolvedValue([]);
         const result = await service.capabilities();
         expect(result.models).toEqual([]);
-        expect(result.tools).toHaveLength(13);
+        expect(result.tools).toHaveLength(14);
         expect(result.tools.every((tool) => tool.status === "unavailable")).toBe(true);
     });
 });

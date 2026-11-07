@@ -144,6 +144,7 @@ const designRequests: ToolWorkflowInput[] = [
         redrawRegions: [{ x: .1, y: .2, width: .3, height: .4 }], redrawEdits: [{ instruction: "Replace only the pocket", referenceAssetId: secondAsset }],
     } }),
     input({ tool: "redraw", productName: undefined, count: 1, instructions: "Change the bag to black", design: { redrawRegions: [{ x: .1, y: .2, width: .3, height: .4 }] } }),
+    ...["#ffffff", "#287be5", "#ABC123"].map((productColor) => input({ tool: "recolor", productName: undefined, count: 1, instructions: "", design: { productColor } })),
 ];
 
 function fixture() {
@@ -227,6 +228,13 @@ describe("tool generation lifecycle", () => {
         jest.mocked(generateImage).mockResolvedValue({ images: [{ base64: "image", mediaType: "image/png" }] } as never);
         jest.mocked(generateText).mockResolvedValue({ text: "Observations and suggestions" } as never);
     });
+    it.each([{ design: undefined }, { design: { productColor: "red" } }, { count: 2 }, { assetIds: [assetId, secondAsset] }, { instructions: "Change the background" }, { targetLanguage: "日本語" }, { design: { productColor: "#a52639", backgroundColor: "#ffffff" } }])("rejects invalid recolor before model preparation, charging or queuing %#", async (overrides) => {
+        const state = fixture();
+        const request = input({ tool: "recolor", count: 1, instructions: "", design: { productColor: "#a52639" }, ...overrides } as Partial<ToolWorkflowInput>);
+        expect(validateSync(plainToInstance(ToolWorkflowDto, request))).not.toHaveLength(0);
+        await expect(state.service.submitTool("owner", request)).rejects.toThrow();
+        expect(state.prepare).not.toHaveBeenCalled(); expect(state.createTask).not.toHaveBeenCalled(); expect(state.add).not.toHaveBeenCalled();
+    });
     it("creates original-size Tencent cutout with configured credits without public model inference", async () => {
         const state = fixture();
         const request = input({ tool: "cutout", modelId: LOCAL_CUTOUT_MODEL_ID, productName: undefined,
@@ -249,7 +257,7 @@ describe("tool generation lifecycle", () => {
     });
     it("processes redraw regions with the existing no-retry reference-image model", async () => {
         const state = fixture();
-        const request = designRequests[designRequests.length - 1]!;
+        const request = designRequests.find((request) => request.tool === "redraw" && request.instructions === "Change the bag to black")!;
         Object.assign(state.record, { toolKey: "redraw", count: 1, toolInput: request });
         await state.service.processTask({ id: "task", userId: "owner" });
         expect(generateImage).toHaveBeenCalledTimes(1);
@@ -334,13 +342,13 @@ describe("tool generation lifecycle", () => {
         expect(result.toolInput!.design).toEqual(request.design);
         expect(generateImage).not.toHaveBeenCalled(); expect(generateText).not.toHaveBeenCalled();
     });
-    it.each(designRequests.filter((request) => ["watermark", "translate", "retouch"].includes(request.tool)))("processes one $tool output using the saved editing metadata and existing configured model", async (request) => {
+    it.each(designRequests.filter((request) => ["watermark", "translate", "retouch", "recolor"].includes(request.tool)))("processes one $tool output using the saved editing metadata and existing configured model", async (request) => {
         const state = fixture();
         Object.assign(state.record, { toolKey: request.tool, count: request.count, toolInput: request });
         await state.service.processTask({ id: "task", userId: "owner" });
         expect(generateImage).toHaveBeenCalledTimes(1);
         expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({ model: state.imageModel, n: 1, maxRetries: 0,
-            prompt: { text: expect.stringContaining(request.tool === "watermark" ? JSON.stringify(request.design!.watermarkRegion ?? request.design!.watermarkRegions![0]) : request.tool === "retouch" ? RETOUCH_MODES.find((mode) => mode.id === request.design!.retouchMode)!.instruction : "Protect the product subject"), images: [Buffer.from("owned")] } }));
+            prompt: { text: expect.stringContaining(request.tool === "watermark" ? JSON.stringify(request.design!.watermarkRegion ?? request.design!.watermarkRegions![0]) : request.tool === "recolor" ? JSON.stringify(request.design!.productColor) : request.tool === "retouch" ? RETOUCH_MODES.find((mode) => mode.id === request.design!.retouchMode)!.instruction : "Protect the product subject"), images: [Buffer.from("owned")] } }));
         for (const region of request.design?.watermarkRegions ?? []) expect((jest.mocked(generateImage).mock.calls[0][0].prompt as { text: string }).text).toContain(JSON.stringify(region));
         expect(state.persist).toHaveBeenCalledTimes(1); expect(generateText).not.toHaveBeenCalled();
     });

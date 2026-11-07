@@ -144,7 +144,7 @@ export default function ImageStudioPage() {
     const [watermarkEditing, setWatermarkEditing] = useState(false);
     const [expansionEditing, setExpansionEditing] = useState(false);
     const [skuEditing, setSkuEditing] = useState(false);
-    const [regionalEditing, setRegionalEditing] = useState<"redraw" | "cutout" | null>(null);
+    const [regionalEditing, setRegionalEditing] = useState<"redraw" | "cutout" | "recolor" | null>(null);
     const materialSequence = useRef(0);
     const [requestedAsset, setRequestedAsset] = useState<AssetApplication | null>(null);
     const [assetNotice, setAssetNotice] = useState("");
@@ -190,7 +190,7 @@ export default function ImageStudioPage() {
     const showWatermarkEditor = tool === "watermark" && view === "create" && !previewBusy && (!currentResult || watermarkEditing);
     const showExpansionEditor = tool === "expand" && view === "create" && !previewBusy && (!currentResult || expansionEditing);
     const showSkuEditor = tool === "sku" && view === "create" && !previewBusy && (!currentResult || skuEditing);
-    const showRegionalEditor = (tool === "redraw" || tool === "cutout") && view === "create" && !previewBusy && (!currentResult || regionalEditing === tool);
+    const showRegionalEditor = (tool === "redraw" || tool === "cutout" || tool === "recolor") && view === "create" && !previewBusy && (!currentResult || regionalEditing === tool);
     const locked = busy || remove.isPending || cancel.isPending;
     const pendingCount =
         generateMain.isPending && generateMain.variables
@@ -332,14 +332,14 @@ export default function ImageStudioPage() {
             if (input.tool === "watermark") setWatermarkEditing(false);
             if (input.tool === "expand") setExpansionEditing(false);
             if (input.tool === "sku") setSkuEditing(false);
-            if (input.tool === "redraw" || input.tool === "cutout") setRegionalEditing(null);
+            if (input.tool === "redraw" || input.tool === "cutout" || input.tool === "recolor") setRegionalEditing(null);
             setResult(await generateTool.mutateAsync(input));
             setPage(1);
         } catch (error) {
             if (input.tool === "watermark") setWatermarkEditing(true);
             if (input.tool === "expand") setExpansionEditing(true);
             if (input.tool === "sku") setSkuEditing(true);
-            if (input.tool === "redraw" || input.tool === "cutout") setRegionalEditing(input.tool);
+            if (input.tool === "redraw" || input.tool === "cutout" || input.tool === "recolor") setRegionalEditing(input.tool);
             setWorkflowError(errorMessage(error));
             throw error;
         }
@@ -373,7 +373,7 @@ export default function ImageStudioPage() {
             if (item.toolKey === "watermark") setWatermarkEditing(false);
             if (item.toolKey === "expand") setExpansionEditing(false);
             if (item.toolKey === "sku") setSkuEditing(false);
-            if (item.toolKey === "redraw" || item.toolKey === "cutout") setRegionalEditing(null);
+            if (item.toolKey === "redraw" || item.toolKey === "cutout" || item.toolKey === "recolor") setRegionalEditing(null);
             setShowHistory(false);
             setHistoryResult(null);
             setResult(await retry.mutateAsync(item.id));
@@ -511,7 +511,7 @@ export default function ImageStudioPage() {
                 )} />}
 
                 {/* FORM COLUMN */}
-                <div className={`workspace-create${tool === "watermark" ? " watermark-workspace" : ""}${tool === "redraw" || tool === "cutout" ? " regional-workspace" : ""}${isSpecializedTool(tool) ? ` ${SPECIALIZED_WORKSPACE_LAYOUT[tool].className}` : ""}`}
+                <div className={`workspace-create${tool === "watermark" ? " watermark-workspace" : ""}${tool === "redraw" || tool === "cutout" || tool === "recolor" ? " regional-workspace" : ""}${isSpecializedTool(tool) ? ` ${SPECIALIZED_WORKSPACE_LAYOUT[tool].className}` : ""}`}
                     data-tool={tool}
                     style={isSpecializedTool(tool) ? { "--workspace-form-width": `${SPECIALIZED_WORKSPACE_LAYOUT[tool].preferredFormWidth}px` } as CSSProperties : undefined}
                     hidden={view !== "create" && view !== "history"}>
@@ -557,7 +557,7 @@ export default function ImageStudioPage() {
                     })}
                     {tool !== "main" && !isSpecializedTool(tool) && <ToolForm tool={tool} capabilities={capabilities.data ?? { models: [], tools: [] }} locked={locked || view !== "create" || !capabilities.isSuccess || capabilities.isFetching}
                         taskSnapshot={currentResult}
-                        annotationTarget={tool === "watermark" || tool === "expand" || tool === "redraw" || tool === "cutout" ? annotationTarget : undefined} onEditSource={() => { if (tool === "redraw" || tool === "cutout") setRegionalEditing(tool); else if (tool === "expand") setExpansionEditing(true); else setWatermarkEditing(true); }}
+                        annotationTarget={tool === "watermark" || tool === "expand" || tool === "redraw" || tool === "cutout" || tool === "recolor" ? annotationTarget : undefined} onEditSource={() => { if (tool === "redraw" || tool === "cutout" || tool === "recolor") setRegionalEditing(tool); else if (tool === "expand") setExpansionEditing(true); else setWatermarkEditing(true); }}
                         onSubmit={startTool} />}
                 </section>
 
@@ -633,7 +633,7 @@ export default function ImageStudioPage() {
                                                         if (item.toolKey === "watermark") setWatermarkEditing(false);
                                                         if (item.toolKey === "expand") setExpansionEditing(false);
                                                         if (item.toolKey === "sku") setSkuEditing(false);
-                                                        if (item.toolKey === "redraw" || item.toolKey === "cutout") setRegionalEditing(null);
+                                                        if (item.toolKey === "redraw" || item.toolKey === "cutout" || item.toolKey === "recolor") setRegionalEditing(null);
                                                         if (isGenerationActive(item)) {
                                                             setResult(item);
                                                             setHistoryResult(null);

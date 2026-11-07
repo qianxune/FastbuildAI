@@ -113,7 +113,7 @@ describe("tool form contracts", () => {
         await view.submit();
         expect(view.onSubmit).not.toHaveBeenCalled();
     });
-    it.each(["watermark", "translate", "retouch"] as const)("dispatches %s to the dedicated single-image form", (tool) => {
+    it.each(["watermark", "translate", "retouch", "recolor"] as const)("dispatches %s to the dedicated single-image form", (tool) => {
         const view = harness(tool, { locked: true });
         expect(view.render().find((node) => node.type === "image-edit-form")!.props).toEqual(expect.objectContaining({ tool, locked: true, onSubmit: view.onSubmit }));
     });

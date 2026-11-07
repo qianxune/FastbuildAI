@@ -27,6 +27,7 @@ export const TOOL_REGISTRY = {
     },
     sku: { status: "intended", requiredCapabilities: ["reference-image"] },
     retouch: { status: "intended", requiredCapabilities: ["reference-image"] },
+    recolor: { status: "intended", requiredCapabilities: ["reference-image"] },
     redraw: { status: "intended", requiredCapabilities: ["reference-image"] },
     cutout: { status: "intended", requiredCapabilities: ["segmentation"] },
     watermark: { status: "intended", requiredCapabilities: ["reference-image"] },
