@@ -6,6 +6,7 @@ import { useProductImagesQuery, useUploadProductImageMutation } from "../service
 import { MATERIAL_LIMIT, materialError, materialName, uploadMaterials, validMaterialLabel } from "../services/materials";
 import type { ProductImage } from "../services/types";
 import { assetFormDirty } from "./asset-draft";
+import CustomModel from "./custom-model";
 import { MaterialDialog, MaterialPagination, MaterialThumbnail } from "./material-picker";
 import MaterialsView, { MaterialPreview } from "./materials";
 import "../styles/assets.css";
@@ -24,7 +25,9 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
     const [name, setName] = useState(original?.name ?? "");
     const [prompt, setPrompt] = useState(original?.prompt ?? "");
     const [imageIds, setImageIds] = useState<string[]>([...(original?.imageIds ?? [])]);
-    const [modelTab, setModelTab] = useState(original ? "upload" : "official");
+    const [modelTab, setModelTab] = useState(original ? "upload" : "custom");
+    const [customBusy, setCustomBusy] = useState(false);
+    const [customDirty, setCustomDirty] = useState(false);
     const [search, setSearch] = useState("");
     const [page, setPage] = useState(1);
     const [pickerOpen, setPickerOpen] = useState(false);
@@ -41,9 +44,9 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
     const input = useRef<HTMLInputElement>(null);
     const initial = useRef({ name: original?.name ?? "", prompt: original?.prompt ?? "", imageIds: [...(original?.imageIds ?? [])] });
     useEffect(() => { mounted.current = true; return () => { mounted.current = false; abort.current?.abort(); }; }, []);
-    const busy = pending || upload.isPending || save.isPending;
+    const busy = pending || upload.isPending || save.isPending || customBusy;
     const current = { name, prompt, imageIds };
-    const dirty = assetFormDirty(current, initial.current);
+    const dirty = assetFormDirty(current, initial.current) || customDirty;
     const selectionLimit = kind === "model" ? 1 : 5;
     const images = [...(products.data ?? []), ...uploaded.filter((image) => !products.data?.some((item) => item.id === image.id))];
     const filtered = images.filter((image) => materialName(image).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
@@ -102,11 +105,12 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
         finally { operation.current = false; if (mounted.current) setPending(false); }
     }
 
-    return <MaterialDialog className={`asset-dialog asset-dialog-${kind}`} title={original ? kind === "model" ? "编辑模特" : "编辑创作参考" : kind === "model" ? "创建专属模特" : "新建创作参考"} onClose={close} busy={busy}>
+    return <MaterialDialog className={`asset-dialog asset-dialog-${kind}${kind === "model" && modelTab === "custom" ? " asset-dialog-custom" : ""}`} title={original ? kind === "model" ? "编辑模特" : "编辑创作参考" : kind === "model" ? "创建专属模特" : "新建创作参考"} onClose={close} busy={busy}>
         {kind === "model" && <div className="assets-tabs" role="tablist" aria-label="模特来源">
-            {[{ id: "official", label: "官方模特" }, { id: "upload", label: "上传模特" }].map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={modelTab === tab.id} disabled={busy}
-                onClick={() => setModelTab(tab.id)}>{tab.label}</button>)}
+            {[...(!original ? [{ id: "custom", label: "定制模特" }] : []), { id: "official", label: "官方模特" }, { id: "upload", label: "上传模特" }].map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={modelTab === tab.id} disabled={busy}
+                onClick={() => { if (!busy) setModelTab(tab.id); }}>{tab.label}</button>)}
         </div>}
+        {kind === "model" && !original && <CustomModel active={modelTab === "custom"} locked={locked} limitReached={limitReached} onBusyChange={setCustomBusy} onDirtyChange={setCustomDirty} onClose={onClose} onSaved={onSaved} />}
         {kind === "model" && modelTab === "official" && <section className="assets-empty" role="tabpanel" aria-label="官方模特">
             <UserRound size={36} />
             {official.isPending ? <p role="status">正在加载官方模特...</p> : official.isError ? <><p role="alert">官方目录加载失败</p><button type="button" disabled={official.isFetching} onClick={() => void official.refetch()}><RefreshCw size={16} />重试</button></> :

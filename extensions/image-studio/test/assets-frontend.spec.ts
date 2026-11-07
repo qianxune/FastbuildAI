@@ -90,15 +90,22 @@ type AssetNode = { type: any; props: Record<string, any> };
 const assetText = (node: any): string => Array.isArray(node) ? node.map(assetText).join("") : node && typeof node === "object" ? assetText(node.props?.children) : String(node ?? "");
 const settleAssetUi = async () => { for (let turn = 0; turn < 12; turn++) await Promise.resolve(); };
 
-function assetUiHarness(editor = true, overrides: Record<string, any> = {}) {
+function assetUiHarness(editor: boolean | "custom" = true, overrides: Record<string, any> = {}) {
     const state: any[] = [], refs: any[] = [];
-    let stateCursor = 0, refCursor = 0;
-    const props: Record<string, any> = { kind: "reference", locked: false, limitReached: false, onClose: jest.fn(), onSaved: jest.fn(), onUse: jest.fn(async () => true), onUseImage: jest.fn(), ...overrides };
+    const effectDeps: any[][] = [], effects: Array<() => void> = [], cleanups: Array<(() => void) | undefined> = [];
+    let stateCursor = 0, refCursor = 0, effectCursor = 0;
+    const props: Record<string, any> = { kind: "reference", active: true, locked: false, limitReached: false, onBusyChange: jest.fn(), onDirtyChange: jest.fn(), onClose: jest.fn(), onSaved: jest.fn(), onUse: jest.fn(async () => true), onUseImage: jest.fn(), ...overrides };
     const products = { data: images, isSuccess: true, isPending: false, isError: false, isFetching: false, refetch: jest.fn() };
     const official = { data: [], isPending: false, isError: false, isFetching: false, refetch: jest.fn() };
     const catalog = { data: { items: [asset], limit: 40 }, isSuccess: true, isPending: false, isError: false, isFetching: false, refetch: jest.fn() };
     const save = { isPending: false, mutateAsync: jest.fn(async ({ input, original }) => ({ ...asset, ...input, version: (original?.version ?? 0) + 1 })) };
     const upload = { isPending: false, mutateAsync: jest.fn() };
+    const models = { data: [{ id: ids[0], name: "Image model" }], isSuccess: true, isPending: false, isError: false, isFetching: false, refetch: jest.fn() };
+    const billing = { ready: true, costText: "1 积分 · 1 积分/张" };
+    const generated = { id: ids[3], status: "queued", images: [] };
+    const generation = { mutateAsync: jest.fn(async () => generated) };
+    const taskQuery = { data: undefined as any, isError: false, isFetching: false, refetch: jest.fn() };
+    const fetchImage = jest.fn(async () => new Blob(["image"], { type: "image/png" }));
     const remove = { mutateAsync: jest.fn(async (id: string) => { catalog.data.items = catalog.data.items.filter((item) => item.id !== id); return { success: true }; }) };
     const confirm = jest.fn(() => true);
     const materialExports: any = {};
@@ -108,43 +115,188 @@ function assetUiHarness(editor = true, overrides: Record<string, any> = {}) {
     });
     const exports: any = {};
     const jsx = (type: any, childProps: any) => ({ type, props: childProps });
-    const source = readFileSync(path.join(__dirname, "../src/web/pages/assets.tsx"), "utf8");
+    const source = readFileSync(path.join(__dirname, editor === "custom" ? "../src/web/pages/custom-model.tsx" : "../src/web/pages/assets.tsx"), "utf8").replaceAll("import.meta.env", "({})");
     runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, {
-        exports, Error, AbortController, window: { confirm }, require: (name: string) => {
+        exports, Error, AbortController, Blob, File, window: { confirm }, require: (name: string) => {
             if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
             if (name === "react") return {
                 useState: (initial: any) => { const index = stateCursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial;
                     return [state[index], (value: any) => { state[index] = typeof value === "function" ? value(state[index]) : value; }]; },
-                useRef: (initial: any) => { const index = refCursor++; return refs[index] ?? (refs[index] = { current: initial }); }, useEffect: () => {},
+                useRef: (initial: any) => { const index = refCursor++; return refs[index] ?? (refs[index] = { current: initial }); },
+                useEffect: (effect: () => (() => void) | void, deps: any[]) => {
+                    if (editor !== "custom") return;
+                    const index = effectCursor++;
+                    if (!effectDeps[index] || deps.some((value, position) => !Object.is(value, effectDeps[index][position]))) {
+                        effectDeps[index] = deps;
+                        effects.push(() => { cleanups[index]?.(); cleanups[index] = effect() || undefined; });
+                    }
+                },
             };
             if (name === "../../api/shared/assets") return { validateCreativeAsset };
             if (name === "../services/materials") return materialExports;
             if (name === "./asset-draft") return { assetFormDirty };
             if (name === "../services/assets") return { useAssetsQuery: () => catalog, useOfficialModelsQuery: () => official, useSaveAssetMutation: () => save, useDeleteAssetMutation: () => remove };
-            if (name === "../services/generation") return { useProductImagesQuery: () => products, useUploadProductImageMutation: () => upload };
+            if (name === "../services/generation") return {
+                useProductImagesQuery: () => products, useUploadProductImageMutation: () => upload,
+                useImageModelsQuery: () => models, useGenerationBilling: () => billing,
+                useGenerateImageMutation: () => generation, useGenerationQuery: () => taskQuery,
+                isGenerationActive: (task: any) => task?.status === "queued" || task?.status === "processing", fetchGenerationImage: fetchImage,
+            };
             if (name === "./material-picker") return { MaterialDialog: "MaterialDialog", MaterialThumbnail: "MaterialThumbnail", MaterialPagination: "MaterialPagination" };
             if (name === "./materials") return { default: "MaterialsView", MaterialPreview: "MaterialPreview" };
             return {};
         },
     });
     function render() {
-        stateCursor = 0; refCursor = 0;
+        stateCursor = 0; refCursor = 0; effectCursor = 0;
         const nodes: AssetNode[] = [];
         function walk(node: any) { if (Array.isArray(node)) node.forEach(walk); else if (node && typeof node === "object" && "props" in node) { nodes.push(node); walk(node.props.children); } }
-        walk((editor ? exports.AssetEditor : exports.default)(props));
+        walk((editor === "custom" || !editor ? exports.default : exports.AssetEditor)(props));
+        effects.splice(0).forEach((effect) => effect());
         return nodes;
     }
     const field = (label: string) => render().find((node) => node.props["aria-label"] === label)!;
     const button = (label: string) => render().find((node) => node.type === "button" && (assetText(node) === label || node.props["aria-label"] === label))!;
     const set = (label: string, value: string) => field(label).props.onChange({ target: { value } });
     function fill() { set("资产名称", "Saved style"); field(`选择 ${ids[0]}`).props.onChange(); }
-    return { render, field, button, set, fill, props, products, official, catalog, save, upload, remove, confirm };
+    return { render, field, button, set, fill, props, products, official, catalog, save, upload, remove, confirm,
+        models, billing, generation, generated, taskQuery, fetchImage, customModelPrompt: exports.customModelPrompt, unmount: () => cleanups.forEach((cleanup) => cleanup?.()) };
 }
 
+describe("custom model generation and persistence", () => {
+    const submit = (view: ReturnType<typeof assetUiHarness>) => view.render().find((node) => node.type === "form")!.props.onSubmit({ preventDefault() {} });
+    const complete = async (view: ReturnType<typeof assetUiHarness>) => {
+        view.set("定制模特名称", "My Model"); submit(view); await settleAssetUi();
+        view.taskQuery.data = { ...view.generated, status: "completed", images: [{ url: "protected", mediaType: "image/png" }] };
+        view.render();
+    };
+    it("requires a safe name, available model, quote, material space and asset quota", () => {
+        const view = assetUiHarness("custom");
+        expect(view.button("生成").props.disabled).toBe(true);
+        view.set("定制模特名称", "My Model"); expect(view.button("生成").props.disabled).toBe(false);
+        for (const label of ["性别", "外观特征", "年龄段", "人设", "体型"]) expect(view.field(label).props.required).toBe(true);
+        view.set("定制模特名称", "../bad"); submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled();
+        view.set("定制模特名称", "My Model");
+        view.billing.ready = false; submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled(); view.billing.ready = true;
+        view.props.locked = true; submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled(); view.props.locked = false;
+        view.products.data = Array(40).fill(images[0]); submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled(); view.products.data = images;
+        view.props.limitReached = true; submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled(); view.props.limitReached = false;
+        view.models.isFetching = true; submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled();
+        view.props.active = false; expect(view.render().find((node) => node.type === "form")!.props.hidden).toBe(true);
+    });
+    it("sends one attribute-based fictional clothed upper-body model and blocks duplicate/active submissions", async () => {
+        const view = assetUiHarness("custom"); view.set("定制模特名称", "My Model"); view.set("性别", "男"); view.set("体型", "健壮");
+        submit(view); submit(view); await settleAssetUi();
+        expect(view.generation.mutateAsync).toHaveBeenCalledTimes(1);
+        const input = view.generation.mutateAsync.mock.calls[0][0] as any;
+        expect(input).toMatchObject({ modelId: ids[0], size: "1024x1536", quality: "standard", style: "natural", count: 1 });
+        expect(input.prompt).toContain("性别：男"); expect(input.prompt).toContain("体型：健壮"); expect(input.prompt).toContain("虚构人物"); expect(input.prompt).toContain("得体");
+        expect(input.prompt).toContain("上半身正面肖像"); expect(input.prompt).toContain("腰部以上"); expect(input.prompt).toContain("头部和双肩完整入镜");
+        expect(input.prompt).toContain("不展示腿部或双脚"); expect(input.prompt).not.toContain("全身正面"); expect(input.prompt).not.toContain("头部和双脚完整入镜");
+        expect(view.props.onBusyChange).toHaveBeenLastCalledWith(true);
+        expect(view.field("性别").props.disabled).toBe(true); submit(view); expect(view.generation.mutateAsync).toHaveBeenCalledTimes(1);
+        expect(view.props.onDirtyChange).toHaveBeenLastCalledWith(true);
+    });
+    it("rejects injected options before submitting", async () => {
+        const view = assetUiHarness("custom"); view.set("定制模特名称", "My Model"); view.set("性别", "injected instruction");
+        submit(view); await settleAssetUi(); expect(view.generation.mutateAsync).not.toHaveBeenCalled();
+        expect(view.render().map(assetText).join("")).toContain("有效的模特属性");
+    });
+    it("shows indeterminate progress for submission, queue and processing only", async () => {
+        const view = assetUiHarness("custom"); view.set("定制模特名称", "My Model");
+        const progress = () => view.render().find((node) => node.props.role === "progressbar");
+        expect(progress()).toBeUndefined();
+        submit(view); expect(progress()?.props["aria-valuetext"]).toBe("正在提交任务");
+        await settleAssetUi(); expect(progress()?.props["aria-valuetext"]).toBe("模特生成排队中");
+        view.taskQuery.data = { ...view.generated, status: "processing", images: [] };
+        expect(progress()?.props["aria-valuetext"]).toBe("正在生成模特");
+        expect(progress()?.props["aria-valuenow"]).toBeUndefined();
+        view.taskQuery.isError = true; expect(progress()).toBeUndefined();
+        view.taskQuery.isError = false;
+        for (const status of ["completed", "failed", "cancelled"]) {
+            view.taskQuery.data = { ...view.generated, status, images: status === "completed" ? [{ url: "protected", mediaType: "image/png" }] : [] };
+            expect(progress()).toBeUndefined();
+        }
+        view.taskQuery.data.status = "completed"; submit(view);
+        expect(progress()?.props["aria-valuetext"]).toBe("正在提交任务");
+        expect(view.render().some((node) => node.props.task?.status === "completed")).toBe(false);
+        await settleAssetUi();
+    });
+    it("keeps completed output and uploaded material after save failure without regenerating/reuploading", async () => {
+        const view = assetUiHarness("custom"); await complete(view);
+        view.upload.mutateAsync.mockResolvedValue(images[0]); view.save.mutateAsync.mockRejectedValueOnce(new Error("save unavailable"));
+        view.button("保存模特").props.onClick(); view.button("保存模特").props.onClick(); await settleAssetUi(); view.render();
+        expect(view.upload.mutateAsync).toHaveBeenCalledTimes(1); expect(view.save.mutateAsync).toHaveBeenCalledTimes(1);
+        expect(view.render().map(assetText).join("")).toContain("save unavailable"); expect(view.props.onClose).not.toHaveBeenCalled();
+        view.products.data = Array(40).fill(images[0]);
+        view.button("保存模特").props.onClick(); await settleAssetUi();
+        expect(view.upload.mutateAsync).toHaveBeenCalledTimes(1); expect(view.fetchImage).toHaveBeenCalledTimes(1);
+        expect(view.generation.mutateAsync).toHaveBeenCalledTimes(1);
+        expect(view.save.mutateAsync).toHaveBeenLastCalledWith({ input: { kind: "model", name: "My Model", prompt: expect.stringContaining("虚构人物"), imageIds: [ids[0]] } });
+        expect(view.save.mutateAsync.mock.calls[1][0].input.prompt).toBe(view.generation.mutateAsync.mock.calls[0][0].prompt);
+        expect(view.save.mutateAsync.mock.calls[1][0].input.prompt).toContain("腰部以上");
+        expect(view.props.onSaved).toHaveBeenCalledTimes(1); expect(view.props.onClose).toHaveBeenCalledTimes(1);
+    });
+    it("retries failed uploads separately and rejects oversized results without writes", async () => {
+        const view = assetUiHarness("custom"); await complete(view);
+        view.fetchImage.mockResolvedValueOnce(new Blob([new Uint8Array(10 * 1024 * 1024 + 1)], { type: "image/png" }));
+        view.button("保存模特").props.onClick(); await settleAssetUi();
+        expect(view.upload.mutateAsync).not.toHaveBeenCalled(); expect(view.save.mutateAsync).not.toHaveBeenCalled();
+        view.upload.mutateAsync.mockRejectedValueOnce(new Error("upload unavailable")).mockResolvedValueOnce(images[0]);
+        view.button("保存模特").props.onClick(); await settleAssetUi();
+        view.button("保存模特").props.onClick(); await settleAssetUi();
+        expect(view.upload.mutateAsync).toHaveBeenCalledTimes(2); expect(view.generation.mutateAsync).toHaveBeenCalledTimes(1); expect(view.save.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+    it("requires refresh after unknown task state, exposes failure and confirms paid replacement", async () => {
+        const view = assetUiHarness("custom"); await complete(view);
+        view.confirm.mockReturnValue(false); submit(view); expect(view.generation.mutateAsync).toHaveBeenCalledTimes(1);
+        view.taskQuery.data = { ...view.generated, status: "processing", images: [] }; view.taskQuery.isError = true;
+        view.button("刷新状态").props.onClick(); expect(view.taskQuery.refetch).toHaveBeenCalledTimes(1);
+        submit(view); expect(view.generation.mutateAsync).toHaveBeenCalledTimes(1);
+        view.taskQuery.isError = false; view.taskQuery.data = { ...view.generated, status: "failed", error: "provider unavailable" };
+        expect(view.render().map(assetText).join("")).toContain("provider unavailable");
+        submit(view); await settleAssetUi(); expect(view.generation.mutateAsync).toHaveBeenCalledTimes(2);
+    });
+    it("ignores a late image read after unmount", async () => {
+        const view = assetUiHarness("custom"); await complete(view);
+        let resolveImage!: (blob: Blob) => void;
+        view.fetchImage.mockImplementation(() => new Promise((resolve) => { resolveImage = resolve; }));
+        view.button("保存模特").props.onClick(); view.unmount(); resolveImage(new Blob(["image"], { type: "image/png" })); await settleAssetUi();
+        expect(view.upload.mutateAsync).not.toHaveBeenCalled(); expect(view.save.mutateAsync).not.toHaveBeenCalled();
+    });
+});
+
 describe("asset editor interactions", () => {
-    it("shows exactly two model sources and honest empty/error official states", () => {
+    it("preserves custom dirty/busy guards across source changes", () => {
         const view = assetUiHarness(true, { kind: "model" });
+        const custom = () => view.render().find((node) => node.props.onBusyChange)!;
+        const dialog = () => view.render().find((node) => node.type === "MaterialDialog")!;
+        custom().props.onDirtyChange(true);
+        view.button("官方模特").props.onClick();
+        expect(custom().props.active).toBe(false);
+        view.confirm.mockReturnValue(false); dialog().props.onClose();
+        expect(view.confirm).toHaveBeenCalledTimes(1); expect(view.props.onClose).not.toHaveBeenCalled();
+        custom().props.onBusyChange(true);
+        expect(dialog().props.busy).toBe(true);
+        expect(view.button("上传模特").props.disabled).toBe(true);
+        view.button("上传模特").props.onClick();
+        expect(custom().props.active).toBe(false);
+        dialog().props.onClose(); expect(view.confirm).toHaveBeenCalledTimes(1);
+        custom().props.onBusyChange(false); view.confirm.mockReturnValue(true);
+        dialog().props.onClose(); expect(view.props.onClose).toHaveBeenCalledTimes(1);
+    });
+    it("keeps existing model editing on the upload path without a custom generator", () => {
+        const view = assetUiHarness(true, { kind: "model", original: { ...asset, kind: "model", imageIds: [ids[0]] } });
         expect(view.render().filter((node) => node.props.role === "tab").map(assetText)).toEqual(["官方模特", "上传模特"]);
+        expect(view.button("上传模特").props["aria-selected"]).toBe(true);
+        expect(view.field("资产名称").props.value).toBe(asset.name);
+        expect(view.render().some((node) => node.props.onBusyChange)).toBe(false);
+    });
+    it("defaults to custom models and preserves honest empty/error official states", () => {
+        const view = assetUiHarness(true, { kind: "model" });
+        expect(view.render().filter((node) => node.props.role === "tab").map(assetText)).toEqual(["定制模特", "官方模特", "上传模特"]);
+        expect(view.render().find((node) => node.props.role === "tab" && node.props["aria-selected"])?.props.children).toBe("定制模特");
+        view.button("官方模特").props.onClick();
         expect(view.render().map(assetText).join("")).toContain("暂无可用的授权官方模特");
         view.official.isError = true; view.button("重试").props.onClick(); expect(view.official.refetch).toHaveBeenCalledTimes(1);
         view.render().find((node) => node.props.role === "tab" && assetText(node) === "上传模特")!.props.onClick();
