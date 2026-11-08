@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import type { GenerationQuote } from "../../api/shared/billing";
+import type { GenerationQuote, GenerationQuoteTool } from "../../api/shared/billing";
 import type { GenerationCapabilities } from "../../api/shared/tools";
 import { MAIN_IMAGE_LIMIT, type MainImageInput } from "../../api/shared/main-image";
 
@@ -35,13 +35,13 @@ export function useCreditBalanceQuery() {
     });
 }
 
-export function fetchGenerationQuote(modelId: string, count: number, tool?: "main" | "sku") {
+export function fetchGenerationQuote(modelId: string, count: number, tool?: GenerationQuoteTool) {
     return apiHttpClient.get<GenerationQuote>("/generations/billing/quote", { params: { modelId, count, ...(tool ? { tool } : {}) } });
 }
 
-export function useGenerationBilling(modelId: string, count: number, enabled = true, tool?: "main" | "sku") {
+export function useGenerationBilling(modelId: string, count: number, enabled = true, tool?: GenerationQuoteTool) {
     const balance = useCreditBalanceQuery();
-    const countLimit = tool === "main" ? MAIN_IMAGE_LIMIT : tool === "sku" ? 10 : 4;
+    const countLimit = tool === "main" ? MAIN_IMAGE_LIMIT : tool === "sku" || tool === "apparel_sku" ? 10 : 4;
     const validCount = Number.isSafeInteger(count) && count >= 1 && count <= countLimit;
     const quote = useQuery({
         queryKey: [...quoteKey, modelId, count, ...(tool ? [tool] : [])],

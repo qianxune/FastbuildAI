@@ -2,6 +2,7 @@ import { Transform } from "class-transformer";
 import { Allow, ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Length, Max, Min, ValidateBy, ValidateIf } from "class-validator";
 
 import { TOOL_EDIT_KEYS, TOOL_EXPANSIONS, TOOL_LANGUAGES, TOOL_RATIOS, validateToolWorkflow, type ToolSuggestionInput, type ToolWorkflowInput } from "../../../shared/tool-workflow";
+import { isApparelToolKey } from "../../../shared/apparel-workflow";
 
 export class ToolAssetsDto {
     @IsUUID()
@@ -47,9 +48,10 @@ export class ToolWorkflowDto implements ToolWorkflowInput {
     })
     tool!: ToolWorkflowInput["tool"];
 
+    @ValidateIf((object: ToolWorkflowDto, value) => !isApparelToolKey(object.tool) || value !== undefined)
     @IsString()
     @Length(0, 1500)
-    instructions!: string;
+    instructions?: string;
 
     @IsInt()
     @Min(1)
@@ -61,20 +63,20 @@ export class ToolWorkflowDto implements ToolWorkflowInput {
 
     @IsOptional()
     @IsIn(TOOL_LANGUAGES)
-    targetLanguage?: ToolWorkflowInput["targetLanguage"];
+    declare targetLanguage?: ToolWorkflowInput["targetLanguage"];
 
     @IsOptional()
     @IsString()
     @Length(1, 300)
-    variant?: string;
+    declare variant?: string;
 
     @IsOptional()
     @IsIn(TOOL_EXPANSIONS)
-    expansion?: ToolWorkflowInput["expansion"];
+    declare expansion?: ToolWorkflowInput["expansion"];
 
     @IsOptional()
     @IsBoolean()
-    authorized?: boolean;
+    declare authorized?: boolean;
 
     @Allow()
     design?: ToolWorkflowInput["design"];

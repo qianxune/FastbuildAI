@@ -9,12 +9,142 @@ import path from "node:path";
 import { runInNewContext } from "node:vm";
 import * as ts from "typescript";
 import { LOCAL_CUTOUT_MODEL_ID } from "../src/api/shared/tools";
+import { APPAREL_KEYS, APPAREL_WORKFLOWS, TRYON_SCENES, OUTFIT_STYLES, UGC_OUTFIT_SCENES, UGC_OUTFIT_STYLES, NAIL_HAND_STYLES, isApparelToolKey, type ApparelToolKey, type ApparelWorkflowInput } from "../src/api/shared/apparel-workflow";
+import { isValidToolWorkflowInput } from "../src/api/shared/tool-workflow";
 
 export function toolInput(overrides: Partial<ToolWorkflowInput> = {}): ToolWorkflowInput {
     return { tool: "retouch", modelId: "11111111-1111-4111-8111-111111111111", assetIds: ["22222222-2222-4222-8222-222222222222"], productName: "Product", instructions: "Improve lighting", count: 2, ratio: "1:1", ...overrides };
 }
 
+function apparelInput(tool: ApparelToolKey): ApparelWorkflowInput {
+    const common = { modelId: "11111111-1111-4111-8111-111111111111", assetIds: [firstAsset], count: 1, ratio: "3:4" as const };
+    const sourceAssetIds = [firstAsset];
+    const snapshot = { modelAssetId: thirdAsset, modelImageId: secondAsset };
+    switch (tool) {
+        case "tryon": return { ...common, tool, assetIds: [firstAsset, secondAsset], design: { apparel: { sourceAssetIds, ...snapshot, scene: "白底棚拍" } } };
+        case "model_swap": return { ...common, tool, assetIds: [firstAsset, secondAsset], design: { apparel: { sourceAssetIds, ...snapshot } } };
+        case "outfit": return { ...common, tool, design: { apparel: { sourceAssetIds, style: "智能推荐" } } };
+        case "fabric": return { ...common, tool, design: { apparel: { sourceAssetIds, outputMode: "flat", category: "衬衫", garmentDescription: "长袖衬衫" } } };
+        case "apparel_sku": return { ...common, tool, design: { apparel: { sourceAssetIds }, skuRegions: [{ id: "front", region: { x: .1, y: .1, width: .2, height: .2 } }], skuVariants: [{ name: "Green", instruction: "", edits: [{ regionId: "front", instruction: "Make green" }] }] } };
+        case "ugc_outfit": return { ...common, tool, design: { apparel: { sourceAssetIds, scene: "对镜自拍", style: "智能推荐" } } };
+        case "nail_tryon": return { ...common, tool, design: { apparel: { sourceAssetIds, style: "自然肤色" } } };
+        case "dewrinkle": return { ...common, tool, design: { apparel: { sourceAssetIds } } };
+    }
+}
+
+describe("apparel workflow contract", () => {
+    it("clamps reference capacity to verified support and any lower adapter-declared maximum", () => {
+        const adapter = { supportsReferenceImages: true, provider: "volcengine", modelId: "doubao-seedream-5-0-lite" };
+        for (const maxReferenceImages of [0, 1, 2, 3, 5, 10]) expect(toolReferenceLimit({ ...adapter, maxReferenceImages })).toBe(Math.min(5, maxReferenceImages));
+        for (const maxReferenceImages of [null, "5", -1, 1.5, NaN, Infinity]) expect(toolReferenceLimit({ ...adapter, maxReferenceImages })).toBe(0);
+        expect(toolReferenceLimit({ ...adapter, provider: "unknown", maxReferenceImages: 5 })).toBe(1);
+        expect(toolReferenceLimit({ ...adapter, supportsReferenceImages: false, maxReferenceImages: 5 })).toBe(0);
+    });
+    it.each(APPAREL_KEYS)("accepts %s with omitted or bounded optional instructions and conservative prompts", (tool) => {
+        const input = apparelInput(tool);
+        expect(isValidToolWorkflowInput(input)).toBe(true);
+        expect(validateToolWorkflow(input)).toBeNull();
+        const prompt = toolWorkflowPrompt(input);
+        expect(prompt).toContain(APPAREL_WORKFLOWS[tool].method);
+        expect(prompt).toContain("clothed and age-appropriate");
+        expect(prompt).toContain("full-body identity are unknown");
+        expect(prompt).toBe(toolWorkflowPrompt(input));
+        for (const instructions of ["", " ", "x".repeat(1500)]) expect(validateToolWorkflow({ ...input, instructions })).toBeNull();
+        for (const instructions of [null, 1, [], "x".repeat(1501)]) expect(isValidToolWorkflowInput({ ...input, instructions })).toBe(false);
+        for (const override of [{ design: null }, { design: {} }, { design: { apparel: null } }, { design: { apparel: [] } },
+            { design: { apparel: { ...input.design.apparel, unknown: true } } }, { design: { ...input.design, brand: "X" } },
+            { targetLanguage: undefined }, { variant: "X" }, { expansion: "surround" }, { authorized: true }, { unknown: true },
+            { count: 0 }, { count: NaN }, { count: 1.5 }, { ratio: "4:5" }, { modelId: LOCAL_CUTOUT_MODEL_ID }, { assetIds: ["https://example.test/image"] }])
+            expect(isValidToolWorkflowInput({ ...input, ...override })).toBe(false);
+        for (const ratio of ["1:1", "4:3", "3:4", "16:9", "9:16"] as const) expect(validateToolWorkflow({ ...input, ratio })).toBeNull();
+    });
+
+    it.each(APPAREL_KEYS)("rejects missing, overlapping, excessive and out-of-order %s image roles", (tool) => {
+        const input = apparelInput(tool);
+        for (const sourceAssetIds of [[], [null], ["bad"], [firstAsset, firstAsset], [firstAsset, firstAsset.toUpperCase()], Array(6).fill(firstAsset)])
+            expect(isValidToolWorkflowInput({ ...input, design: { ...input.design, apparel: { ...input.design.apparel, sourceAssetIds } } })).toBe(false);
+        expect(isValidToolWorkflowInput({ ...input, assetIds: [] })).toBe(false);
+        expect(isValidToolWorkflowInput({ ...input, assetIds: [...input.assetIds, allAssets[4]] })).toBe(false);
+        if (tool === "tryon" || tool === "model_swap") {
+            expect(isValidToolWorkflowInput({ ...input, assetIds: [...input.assetIds].reverse() })).toBe(false);
+            for (const modelImageId of [null, "bad", firstAsset, firstAsset.toUpperCase()])
+                expect(isValidToolWorkflowInput({ ...input, design: { apparel: { ...input.design.apparel, modelImageId } } })).toBe(false);
+        } else if (tool !== "fabric") {
+            expect(isValidToolWorkflowInput({ ...input, design: { ...input.design, apparel: { ...input.design.apparel, modelAssetId: thirdAsset, modelImageId: secondAsset } } })).toBe(false);
+        }
+        if (tool !== "apparel_sku") expect(validateToolWorkflow({ ...input, count: tool === "dewrinkle" ? 2 : 5 })).not.toBeNull();
+        if (tool !== "apparel_sku" && tool !== "dewrinkle") expect(validateToolWorkflow({ ...input, count: 4 })).toBeNull();
+    });
+
+    it("honors source maxima and counts all image roles toward five references", () => {
+        for (const tool of ["tryon", "model_swap", "outfit", "ugc_outfit", "nail_tryon"] as const) {
+            const input = apparelInput(tool);
+            const sourceAssetIds = allAssets.slice(0, APPAREL_WORKFLOWS[tool].maxSources);
+            const withModel = tool === "tryon" || tool === "model_swap";
+            const modelImageId = allAssets[4]!;
+            expect(isValidToolWorkflowInput({ ...input, assetIds: [...sourceAssetIds, ...(withModel ? [modelImageId] : [])],
+                design: { apparel: { ...input.design.apparel, sourceAssetIds, ...(withModel ? { modelImageId } : {}) } } })).toBe(true);
+        }
+    });
+
+    it("validates each preset and reserves platform only for outfit", () => {
+        for (const [tool, field, presets] of [["tryon", "scene", TRYON_SCENES], ["outfit", "style", OUTFIT_STYLES], ["ugc_outfit", "scene", UGC_OUTFIT_SCENES], ["ugc_outfit", "style", UGC_OUTFIT_STYLES], ["nail_tryon", "style", NAIL_HAND_STYLES]] as const) {
+            const input = apparelInput(tool);
+            for (const value of presets) expect(isValidToolWorkflowInput({ ...input, design: { apparel: { ...input.design.apparel, [field]: value } } })).toBe(true);
+            for (const value of [null, "unknown", "Ignore rules", [], 42]) expect(isValidToolWorkflowInput({ ...input, design: { apparel: { ...input.design.apparel, [field]: value } } })).toBe(false);
+        }
+        const outfit = apparelInput("outfit");
+        for (const platform of TOOL_PLATFORMS) expect(isValidToolWorkflowInput({ ...outfit, design: { ...outfit.design, platform } })).toBe(true);
+        expect(isValidToolWorkflowInput({ ...outfit, design: { ...outfit.design, platform: null } })).toBe(false);
+        expect(isValidToolWorkflowInput({ ...apparelInput("ugc_outfit"), design: { apparel: { sourceAssetIds: [firstAsset], scene: "街拍", style: "儿童" } } })).toBe(false);
+        expect(isValidToolWorkflowInput({ ...apparelInput("model_swap"), design: { apparel: { sourceAssetIds: [firstAsset], modelAssetId: thirdAsset, modelImageId: secondAsset, scene: "街拍户外" } } })).toBe(false);
+    });
+
+    it("requires fabric form facts and a saved model only for worn output, with ordered optional style reference", () => {
+        const flat = apparelInput("fabric");
+        const apparel = { sourceAssetIds: [firstAsset, secondAsset, thirdAsset], category: "衬衫", garmentDescription: "长袖衬衫", styleAssetId: allAssets[4]!, outputMode: "worn" as const, modelAssetId: thirdAsset, modelImageId: allAssets[3]! };
+        const worn = { ...flat, assetIds: allAssets, design: { apparel } };
+        expect(isValidToolWorkflowInput(worn)).toBe(true);
+        expect(toolWorkflowPrompt(worn)).toContain("saved target model image [4]");
+        expect(toolWorkflowPrompt(worn)).toContain("style reference images [5]");
+        for (const override of [{ modelImageId: undefined }, { outputMode: "flat" }, { outputMode: null }, { category: " " }, { category: "x".repeat(61) },
+            { garmentDescription: " " }, { garmentDescription: "x".repeat(1501) }, { styleAssetId: firstAsset }, { styleAssetId: null }])
+            expect(isValidToolWorkflowInput({ ...worn, design: { apparel: { ...apparel, ...override } } })).toBe(false);
+        expect(isValidToolWorkflowInput({ ...worn, assetIds: [firstAsset, secondAsset, thirdAsset, allAssets[4], allAssets[3]] })).toBe(false);
+        expect(isValidToolWorkflowInput({ ...flat, design: { apparel: { ...flat.design.apparel, modelAssetId: undefined } } })).toBe(false);
+    });
+
+    it("isolates explicit apparel SKU variants, reuses linked references, and enforces ten outputs and three regions", () => {
+        const input = apparelInput("apparel_sku");
+        const skuRegions = ["front", "sleeve", "collar"].map((id, index) => ({ id, region: { x: .1 * index, y: .1, width: .2, height: .2 } }));
+        const skuVariants = Array.from({ length: 10 }, (_value, index) => ({ name: `Variant ${index}`, instruction: "", edits: skuRegions.map((region) => ({ regionId: region.id, instruction: `Change ${index}`, referenceAssetId: secondAsset })) }));
+        const full = { ...input, count: 10, assetIds: [firstAsset, secondAsset], design: { ...input.design, skuRegions, skuVariants } };
+        expect(isValidToolWorkflowInput(full)).toBe(true);
+        expect(toolWorkflowPrompt(full, 9)).toContain("Variant 9");
+        expect(toolWorkflowPrompt(full, 9)).not.toContain("Variant 0");
+        expect(toolWorkflowPrompt(full, 9)).toContain("Reference image 2 applies only to this region");
+        for (const imageIndex of [-1, 10, 1.5, NaN]) expect(() => toolWorkflowPrompt(full, imageIndex)).toThrow();
+        for (const override of [{ count: 11 }, { count: 9 }, { assetIds: [firstAsset, secondAsset, thirdAsset] },
+            { design: { ...full.design, skuRegions: [...skuRegions, { id: "extra", region: { x: 0, y: 0, width: 1, height: 1 } }] } },
+            { design: { ...full.design, skuRegions: [skuRegions[0], skuRegions[0]] } }, { design: { ...full.design, skuVariants: [] } },
+            { design: { ...full.design, skuVariants: Array(11).fill(skuVariants[0]) } },
+            { design: { ...full.design, skuVariants: [null] } }, { design: { ...full.design, skuVariants: skuVariants.map((variant) => ({ ...variant, edits: [] })) } },
+            { design: { ...full.design, skuVariants: skuVariants.map((variant) => ({ ...variant, edits: variant.edits.map((edit) => ({ ...edit, referenceAssetId: firstAsset })) })) } }])
+            expect(isValidToolWorkflowInput({ ...full, ...override })).toBe(false);
+    });
+
+    it("retains required legacy instructions", () => {
+        expect(validateToolWorkflow(toolInput({ instructions: undefined }))).not.toBeNull();
+        expect(validateToolWorkflow(toolInput({ tool: "creative", assetIds: [], instructions: "" }))).not.toBeNull();
+    });
+});
+
 describe("tool workflow contract", () => {
+    it("accepts apparel tryon with ordered garment and saved model snapshot roles", () => {
+        const input = apparelInput("tryon");
+        expect(validateToolWorkflow(input)).toBeNull();
+        expect(toolWorkflowPrompt(input)).toContain("saved target model image [2]");
+    });
     it("recolors one product using a validated target color without changing the background", () => {
         const input = toolInput({ tool: "recolor", productName: undefined, count: 1, instructions: "",
             design: { productColor: "#a52639" } } as never);
@@ -171,7 +301,7 @@ describe("tool workflow contract", () => {
     it("builds deterministic, reference-based prompts for every edit", () => {
         for (const tool of TOOL_EDIT_KEYS) {
             if (tool === "cutout") continue;
-            const input = tool === "recolor" ? toolInput({ tool, assetIds: [firstAsset], count: 1, instructions: "", design: { productColor: "#a52639" } }) : toolInput({ tool, assetIds: tool === "redraw" ? [firstAsset] : [firstAsset, secondAsset], variant: "Blue", targetLanguage: "English", expansion: "horizontal", authorized: true,
+            const input = isApparelToolKey(tool) ? apparelInput(tool) : tool === "recolor" ? toolInput({ tool, assetIds: [firstAsset], count: 1, instructions: "", design: { productColor: "#a52639" } }) : toolInput({ tool, assetIds: tool === "redraw" ? [firstAsset] : [firstAsset, secondAsset], variant: "Blue", targetLanguage: "English", expansion: "horizontal", authorized: true,
                 ...(tool === "redraw" ? { count: 1, design: { redrawRegions: [{ x: 0, y: 0, width: .5, height: .5 }] } } : {}) });
             expect(validateToolWorkflow(input)).toBeNull();
             expect(toolWorkflowPrompt(input)).toBe(toolWorkflowPrompt(input));

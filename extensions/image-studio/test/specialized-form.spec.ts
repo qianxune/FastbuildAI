@@ -10,6 +10,8 @@ import { TOOL_REGISTRY, LOCAL_CUTOUT_MODEL_ID } from "../src/api/shared/tools";
 import * as workflow from "../src/api/shared/tool-workflow";
 import * as specialized from "../src/web/pages/specialized-workflow";
 import * as assetDraft from "../src/web/pages/asset-draft";
+import * as apparel from "../src/web/pages/apparel-workflow";
+import * as apparelContract from "../src/api/shared/apparel-workflow";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
@@ -139,8 +141,53 @@ describe("specialized workflow payloads", () => {
 
 type ElementNode = { type: any; props: Record<string, any> };
 const images = assetIds.map((id) => ({ id, width: 400, height: 300, mediaType: "image/png", size: 100, name: "Product" }));
-const componentTokens = { AssetRolePicker: "AssetRolePicker", FusionPresetGallery: "FusionPresetGallery", SkuRegionEditor: "SkuRegionEditor" };
+const componentTokens = { AssetRolePicker: "AssetRolePicker", FusionPresetGallery: "FusionPresetGallery", SkuRegionEditor: "SkuRegionEditor", ProtectedAsset: "ProtectedAsset" };
 const elementText = (node: any): string => Array.isArray(node) ? node.map(elementText).join("") : node && typeof node === "object" ? elementText(node.props?.children) : String(node ?? "");
+
+describe("apparel composers", () => {
+    const target = { id: assetIds[5], kind: "model", name: "Saved model", prompt: "", imageIds: [assetIds[4]], version: 1, createdAt: "", updatedAt: "" } as const;
+    const assets = [{ ...target, imageIds: [...target.imageIds] }];
+    const capabilities = { models: [{ id: modelId, capabilities: ["reference-image", "multi-image"], maxReferenceImages: 5 }],
+        tools: apparelContract.APPAREL_KEYS.map((key) => ({ key, status: "available", modelIdsByCapability: { "reference-image": [modelId], "multi-image": [modelId] }, limits: { maxInputImages: 5 } })) } as GenerationCapabilities;
+    it.each(apparelContract.APPAREL_KEYS.filter((key) => key !== "apparel_sku"))("composes and restores strict %s without forbidden roots", (tool) => {
+        const value = apparel.createApparelDraft(tool);
+        Object.assign(value, { modelId, sourceAssetIds: [assetIds[0]], target: { modelAssetId: target.id, modelImageId: assetIds[4] }, category: "Shirt", garmentDescription: "Long sleeves" });
+        const input = apparel.buildApparelInput(value, capabilities, assets, images);
+        expect(validateToolWorkflow(input)).toBeNull();
+        expect(Object.keys(input)).not.toEqual(expect.arrayContaining(["authorized", "expansion", "variant", "targetLanguage"]));
+        expect(input.assetIds).toEqual([assetIds[0], ...(apparel.apparelNeedsModel(value) ? [assetIds[4]] : [])]);
+        expect(apparel.restoreApparelDraft({ toolKey: tool, toolInput: input } as any, tool)).toEqual(expect.objectContaining({ sourceAssetIds: [assetIds[0]], instructions: "", modelId }));
+    });
+    it("counts model and style roles together, rejects conflicts and preserves excessive selections", () => {
+        const value = { ...apparel.createApparelDraft("fabric"), modelId, sourceAssetIds: assetIds.slice(0, 3), target: { modelAssetId: target.id, modelImageId: assetIds[4] },
+            outputMode: "worn" as const, styleAssetId: assetIds[3], category: "Shirt", garmentDescription: "Long sleeves" };
+        expect(apparel.buildApparelInput(value, capabilities, assets, images).assetIds).toEqual([...assetIds.slice(0, 3), assetIds[4], assetIds[3]]);
+        const limited = { ...capabilities, models: [{ ...capabilities.models[0], maxReferenceImages: 4 }] } as GenerationCapabilities;
+        expect(() => apparel.buildApparelInput(value, limited, assets, images)).toThrow("4");
+        expect(value.sourceAssetIds).toHaveLength(3);
+        expect(() => apparel.buildApparelInput({ ...value, styleAssetId: assetIds[0] }, capabilities, assets, images)).toThrow();
+        const flat = apparel.buildApparelInput({ ...value, outputMode: "flat" }, capabilities, assets, images);
+        expect(flat.assetIds).not.toContain(assetIds[4]);
+        expect(flat.design.apparel).not.toHaveProperty("modelAssetId");
+    });
+    it("uses only saved single readable models and rejects deleted or changed snapshots", () => {
+        expect(apparel.savedModelCatalog([...assets, { ...assets[0], kind: "reference" }, { ...assets[0], imageIds: [assetIds[4], assetIds[3]] }], images)).toHaveLength(1);
+        expect(apparel.savedModelCatalog(assets, [])).toEqual([]);
+        const value = { ...apparel.createApparelDraft("tryon"), modelId, sourceAssetIds: [assetIds[0]], target: { modelAssetId: target.id, modelImageId: assetIds[4] } };
+        expect(() => apparel.buildApparelInput(value, capabilities, [], images)).toThrow("目标模特");
+        expect(() => apparel.buildApparelInput(value, capabilities, [{ ...assets[0], imageIds: [assetIds[3]] }], images)).toThrow("照片已改变");
+        expect(() => apparel.buildApparelInput(value, capabilities, assets, images.slice(1))).toThrow("图片已删除");
+    });
+    it.each([1, 10])("converts %s explicit SKU variants without changing generic input", (count) => {
+        const value = draft("sku"); value.skuRegions = [{ id: "region-1", region: value.skuRegion! }];
+        value.skuVariants = Array.from({ length: count }, (_unused, index) => ({ name: `SKU ${index + 1}`, instruction: "", edits: [{ regionId: "region-1", instruction: `Color ${index + 1}` }] }));
+        const generic = buildSpecializedInput(value, 5), converted = apparel.apparelSkuInput(generic);
+        expect(converted.count).toBe(count); expect(validateToolWorkflow(converted)).toBeNull();
+        expect(Object.keys(converted.design)).toEqual(["apparel", "skuRegions", "skuVariants"]);
+        expect(generic.tool).toBe("sku"); expect(generic.design?.platform).toBe("淘宝");
+        expect(toolWorkflowPrompt(converted, count - 1)).toContain(`Color ${count}`);
+    });
+});
 
 describe("watermark annotation history and geometry", () => {
     const mark = { id: "mark-1", region: { x: .1, y: .2, width: .3, height: .2 }, points: [{ x: .2, y: .3 }] };
@@ -198,6 +245,11 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
         if (name === "../../api/shared/tool-workflow") return workflow;
         if (name === "../../api/shared/tools") return { TOOL_REGISTRY, LOCAL_CUTOUT_MODEL_ID };
         if (name === "./specialized-workflow") return specialized;
+        if (name === "./apparel-workflow") return apparel;
+        if (name === "../../api/shared/apparel-workflow") return apparelContract;
+        if (name === "./workspace-navigation") return { TOOL_LABELS: Object.fromEntries(apparelContract.APPAREL_KEYS.map((key) => [key, key])) };
+        if (name === "../services/assets") return services;
+        if (name === "../services/materials") return { MATERIAL_LIMIT: 40 };
         if (name === "./asset-draft") return assetDraft;
         if (name === "./specialized-components") return componentTokens;
         if (name === "./material-picker") return { default: "MaterialPicker", MaterialDialog: "MaterialDialog" };
@@ -218,6 +270,197 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
     }
     return { render, props, exports, portals, unmount: () => effects.forEach((effect) => effect.cleanup?.()) };
 }
+
+function apparelHarness(tool: Exclude<apparelContract.ApparelToolKey, "apparel_sku"> = "tryon") {
+    const onSubmit = jest.fn().mockResolvedValue(undefined), onEditSource = jest.fn(), onOpenAssets = jest.fn(), upload = jest.fn();
+    const products = { data: [...images], isSuccess: true, isFetching: false, isError: false, refetch: jest.fn() };
+    const assets = { data: { items: [{ id: assetIds[5], kind: "model", name: "Saved model", imageIds: [assetIds[4]] }] }, isSuccess: true, isFetching: false, isError: false, refetch: jest.fn() };
+    const capabilities = { models: [{ id: modelId, name: "Model", capabilities: ["reference-image", "multi-image"], maxReferenceImages: 5 }],
+        tools: apparelContract.APPAREL_KEYS.map((key) => ({ key, status: "available", modelIdsByCapability: { "reference-image": [modelId], "multi-image": [modelId] }, limits: { maxInputImages: 5 } })) } as GenerationCapabilities;
+    const view = renderHarness("apparel-tool-form", "default", { tool, capabilities, locked: false, onSubmit, onEditSource, onOpenAssets }, {
+        useAssetsQuery: () => assets, useProductImagesQuery: () => products, useGenerationBilling: () => ({ ready: true, costText: "1 credit" }),
+        useUploadProductImageMutation: () => ({ isPending: false, mutateAsync: upload }),
+    });
+    const source = () => view.render().find((node) => node.type === "AssetRolePicker")!.props;
+    const submit = () => view.render().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+    const ready = () => view.render().filter((node) => node.type === "ProtectedAsset" && node.props.original).forEach((node) => node.props.onReady(true));
+    const set = (label: string, value: string) => view.render().find((node) => node.props["aria-label"] === label)!.props.onChange({ target: { value } });
+    const target = () => view.render().find((node) => node.type === view.exports.ModelAssetPicker)!.props;
+    const filled = () => {
+        source().onChange([images[0]]);
+        if (tool === "tryon" || tool === "model_swap") target().onChange({ modelAssetId: assetIds[5], modelImageId: assetIds[4] });
+        if (tool === "fabric") { set("服装类别", "Shirt"); set("服装结构要求", "Long sleeves"); }
+        ready(); view.render();
+    };
+    return { ...view, source, submit, ready, set, target, filled, onSubmit, onEditSource, onOpenAssets, upload, products, assets, capabilities };
+}
+
+describe("apparel component behavior", () => {
+    it.each(apparelContract.APPAREL_KEYS.filter((key) => key !== "apparel_sku"))("submits the actual %s form with strict roles and defaults", async (tool) => {
+        const view = apparelHarness(tool); view.filled();
+        expect(view.render().find((node) => node.props.type === "submit")!.props.disabled).toBe(false);
+        await view.submit();
+        const input = view.onSubmit.mock.calls[0][0] as workflow.ToolWorkflowInput;
+        expect(validateToolWorkflow(input)).toBeNull(); expect(input.tool).toBe(tool);
+        expect(input.count).toBe(1); expect(input.ratio).toBe(tool === "dewrinkle" ? "1:1" : "3:4");
+        expect(input.assetIds).toEqual([assetIds[0], ...(["tryon", "model_swap"].includes(tool) ? [assetIds[4]] : [])]);
+        expect(view.render().some((node) => node.props["aria-label"] === "生成数量")).toBe(tool !== "dewrinkle");
+    });
+    it("uses exact preset catalogues and explicit count/ratio selections", async () => {
+        const view = apparelHarness("ugc_outfit"); view.filled();
+        const options = (label: string) => view.render().find((node) => node.props["aria-label"] === label)!.props.children.map((node: ElementNode) => node.props.value);
+        expect(options("穿搭场景")).toEqual(apparelContract.UGC_OUTFIT_SCENES);
+        expect(options("模特风格")).toEqual(apparelContract.UGC_OUTFIT_STYLES);
+        view.set("穿搭场景", "居家"); view.set("模特风格", "亚洲男性"); view.set("生成数量", "4"); view.set("图片比例", "9:16");
+        await view.submit();
+        expect(view.onSubmit.mock.calls[0][0]).toMatchObject({ count: 4, ratio: "9:16", design: { apparel: { scene: "居家", style: "亚洲男性" } } });
+        view.set("生成数量", "5"); await view.submit(); expect(view.onSubmit).toHaveBeenCalledTimes(1);
+        view.set("生成数量", "1"); view.set("模特风格", "unregistered"); await view.submit(); expect(view.onSubmit).toHaveBeenCalledTimes(1);
+    });
+    it("switches fabric between flat and saved-model outputs with one optional style", async () => {
+        const view = apparelHarness("fabric"); view.filled();
+        view.render().find((node) => node.props["aria-label"] === "指定模特穿着")!.props.onChange();
+        view.target().onChange({ modelAssetId: assetIds[5], modelImageId: assetIds[4] });
+        const style = () => view.render().find((node) => node.type === "AssetRolePicker" && node.props.label === "款式参考图")!.props;
+        style().onChange([images[3]]); view.source().onChange(images.slice(0, 3)); view.ready(); await view.submit();
+        expect(view.onSubmit.mock.calls[0][0].assetIds).toEqual([...assetIds.slice(0, 3), assetIds[4], assetIds[3]]);
+        view.render().find((node) => node.props["aria-label"] === "平铺成衣")!.props.onChange(); view.ready(); await view.submit();
+        expect(view.onSubmit.mock.calls[1][0].assetIds).toEqual([...assetIds.slice(0, 3), assetIds[3]]);
+        expect(view.onSubmit.mock.calls[1][0].design.apparel).not.toHaveProperty("modelAssetId");
+        view.set("服装类别", ""); await view.submit(); expect(view.onSubmit).toHaveBeenCalledTimes(2);
+    });
+    it("retains over-cap references and rejects conflicting roles without silently truncating", async () => {
+        const view = apparelHarness(); view.filled(); view.source().onChange(images.slice(0, 4)); view.ready();
+        view.capabilities.models[0].maxReferenceImages = 2; view.render();
+        expect(view.source().images).toHaveLength(4); await view.submit(); expect(view.onSubmit).not.toHaveBeenCalled();
+        view.source().onChange([images[0]]); view.ready(); await view.submit(); expect(view.onSubmit).toHaveBeenCalledTimes(1);
+        view.source().onChange([images[4]]); expect(view.source().images.map((image: typeof images[number]) => image.id)).toEqual([assetIds[0]]);
+        view.source().onChange([images[0], images[0]]); expect(view.source().images).toHaveLength(1);
+    });
+    it.each(["fetching", "deleted", "changed"])("rejects a retained submit when the saved model is %s", async (reason) => {
+        const view = apparelHarness(); view.filled(); const submit = view.render().find((node) => node.type === "form")!.props.onSubmit;
+        if (reason === "fetching") view.assets.isFetching = true;
+        if (reason === "deleted") view.assets.data.items = [];
+        if (reason === "changed") view.assets.data.items[0].imageIds = [assetIds[3]];
+        view.render(); await submit({ preventDefault: jest.fn() }); expect(view.onSubmit).not.toHaveBeenCalled();
+        expect(view.source().images).toHaveLength(1);
+    });
+    it.each(["outfit", "fabric", "ugc_outfit", "nail_tryon", "dewrinkle"] as const)("allows %s without the irrelevant target-directory query", async (tool) => {
+        const view = apparelHarness(tool); view.assets.isError = true; view.assets.isSuccess = false; view.filled(); await view.submit();
+        expect(view.onSubmit).toHaveBeenCalledTimes(1);
+    });
+    it("requires decoded originals and recovers without inference retries", async () => {
+        const view = apparelHarness("outfit"); view.source().onChange([images[0]]);
+        const original = () => view.render().find((node) => node.type === "ProtectedAsset" && node.props.original)!;
+        const callback = original().props.onReady; expect(original().props.onReady).toBe(callback);
+        await view.submit(); expect(view.onSubmit).not.toHaveBeenCalled();
+        callback(true); await view.submit(); expect(view.onSubmit).toHaveBeenCalledTimes(1);
+        callback(false); await view.submit(); expect(view.onSubmit).toHaveBeenCalledTimes(1);
+        callback(true); await view.submit(); expect(view.onSubmit).toHaveBeenCalledTimes(2);
+        view.products.data = []; view.render(); expect(original().props.available).toBe(false);
+        await view.submit(); expect(view.onSubmit).toHaveBeenCalledTimes(2);
+    });
+    it.each(["standalone", "portal", "inactive"])("keeps %s originals distinct from generated results", (mode) => {
+        const view = apparelHarness("nail_tryon");
+        view.props.annotationTarget = mode === "standalone" ? undefined : mode === "portal" ? {} : null;
+        view.source().onChange([images[0]]);
+        expect(view.render().filter((node) => node.props["aria-label"] === "输入参考预览")).toHaveLength(mode === "inactive" ? 0 : 1);
+        expect(view.portals).toHaveLength(mode === "portal" ? 1 : 0);
+        expect(view.render().some((node) => node.type === "ResultGrid")).toBe(false);
+    });
+    it("restores each matching task once and leaves polling and mismatched tasks out of edited drafts", async () => {
+        const view = apparelHarness("outfit");
+        const input = apparel.buildApparelInput({ ...apparel.createApparelDraft("outfit"), modelId, sourceAssetIds: [assetIds[1]], instructions: "History", count: 3 }, view.capabilities, [], images);
+        view.props.taskSnapshot = { id: "saved", toolKey: "outfit", toolInput: input }; view.render(); view.ready();
+        expect(view.source().images[0].id).toBe(assetIds[1]); expect(view.onEditSource).not.toHaveBeenCalled();
+        view.set("补充要求", "Edited"); view.props.taskSnapshot = { ...view.props.taskSnapshot }; view.render(); await view.submit();
+        expect(view.onSubmit.mock.calls[0][0]).toMatchObject({ instructions: "Edited", count: 3 });
+        view.props.taskSnapshot = { id: "other", toolKey: "tryon", toolInput: input }; view.render();
+        expect(view.render().find((node) => node.props["aria-label"] === "补充要求")!.props.value).toBe("Edited");
+        view.props.taskSnapshot = { id: "next", toolKey: "outfit", toolInput: { ...input, instructions: "Next" } }; view.render(); view.render();
+        expect(view.render().find((node) => node.props["aria-label"] === "补充要求")!.props.value).toBe("Next");
+    });
+    it.each(["lock", "unmount"])("blocks retained form edits and submissions after %s", async (reason) => {
+        const view = apparelHarness("outfit"); view.filled(); const source = view.source(), edit = view.render().find((node) => node.props["aria-label"] === "补充要求")!.props.onChange;
+        const submit = view.render().find((node) => node.type === "form")!.props.onSubmit; view.onEditSource.mockClear();
+        if (reason === "lock") { view.props.locked = true; view.render(); } else view.unmount();
+        source.onChange([images[1]]); edit({ target: { value: "Late" } }); await submit({ preventDefault: jest.fn() });
+        expect(view.onSubmit).not.toHaveBeenCalled(); expect(view.onEditSource).not.toHaveBeenCalled();
+    });
+    it("serializes inference submission without a duplicate task", async () => {
+        const view = apparelHarness("outfit"); view.filled(); let finish!: () => void;
+        view.onSubmit.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+        const submit = view.render().find((node) => node.type === "form")!.props.onSubmit;
+        const first = submit({ preventDefault: jest.fn() }); await submit({ preventDefault: jest.fn() });
+        expect(view.onSubmit).toHaveBeenCalledTimes(1); finish(); await first;
+    });
+    it.each(["type", "size", "quota", "capacity"])("rejects %s upload before storage mutation", async (reason) => {
+        const view = apparelHarness("outfit"); const file = { type: "image/png", size: 100 };
+        if (reason === "type") file.type = "image/svg+xml";
+        if (reason === "size") file.size = 10 * 1024 * 1024 + 1;
+        if (reason === "quota") view.products.data = Array(40).fill(images[0]);
+        if (reason === "capacity") view.capabilities.models[0].maxReferenceImages = 0;
+        await view.source().onFiles([file]); expect(view.upload).not.toHaveBeenCalled();
+    });
+    it("serializes valid uploads and ignores results after unmount", async () => {
+        const view = apparelHarness("outfit"); let finish!: (image: typeof images[number]) => void;
+        view.upload.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+        const source = view.source(), first = source.onFiles([{ type: "image/png", size: 100 }]);
+        await source.onFiles([{ type: "image/png", size: 100 }]); expect(view.upload).toHaveBeenCalledTimes(1);
+        view.unmount(); finish(images[0]); await first; expect(view.onEditSource).not.toHaveBeenCalled();
+    });
+    it("does not attach a late apparel upload after external locking", async () => {
+        const view = apparelHarness();
+        let finish!: (image: typeof images[number]) => void;
+        view.upload.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+        const pending = view.source().onFiles([{ type: "image/png", size: 100 }]);
+        view.props.locked = true; view.render();
+        finish(images[0]); await pending;
+        expect(view.upload).toHaveBeenCalledTimes(1);
+        expect(view.source().images).toEqual([]);
+        expect(view.onEditSource).not.toHaveBeenCalled();
+    });
+});
+
+describe("saved model picker component", () => {
+    function picker() {
+        const data = apparelHarness(), onChange = jest.fn(), onOpenAssets = jest.fn(), focus = jest.fn();
+        const view = renderHarness("apparel-tool-form", "ModelAssetPicker", { disabled: false, onChange, onOpenAssets }, {
+            useAssetsQuery: () => data.assets, useProductImagesQuery: () => data.products,
+        });
+        const button = (label: string) => view.render().find((node) => node.type === "button" && (node.props["aria-label"] === label || elementText(node) === label))!;
+        const open = () => { const trigger = button("我的模特"); trigger.props.ref.current = { focus }; trigger.props.onClick(); view.render(); };
+        return { ...view, assets: data.assets, products: data.products, onChange, onOpenAssets, focus, button, open };
+    }
+    it("offers saved single-image models only, searches, selects and returns focus", () => {
+        const view = picker(); view.assets.data.items.push({ ...view.assets.data.items[0], id: assetIds[2], kind: "reference", name: "Not a model" });
+        view.open(); expect(view.render().filter((node) => String(node.props["aria-label"]).startsWith("选择模特 "))).toHaveLength(1);
+        expect(view.render().some((node) => node.type === "input" && node.props.type === "file")).toBe(false);
+        const search = view.render().find((node) => node.props["aria-label"] === "搜索我的模特")!;
+        search.props.onChange({ target: { value: "no-match" } }); expect(elementText(view.render())).toContain("没有匹配的模特");
+        search.props.onChange({ target: { value: "saved" } }); view.button("选择模特 Saved model").props.onClick();
+        expect(view.onChange).toHaveBeenCalledWith({ modelAssetId: assetIds[5], modelImageId: assetIds[4] }); expect(view.focus).toHaveBeenCalledTimes(1);
+        view.props.value = { modelAssetId: assetIds[5], modelImageId: assetIds[4] }; view.button("移除目标模特").props.onClick();
+        expect(view.onChange).toHaveBeenLastCalledWith(undefined);
+    });
+    it.each(["empty", "loading", "error"])("renders %s catalog and retry or asset navigation without random targets", (state) => {
+        const view = picker();
+        if (state === "empty") view.assets.data.items = [];
+        if (state === "loading") view.assets.isFetching = true;
+        if (state === "error") view.assets.isError = true;
+        view.open(); expect(elementText(view.render())).toContain(state === "empty" ? "暂无可用的我的模特" : state === "loading" ? "正在加载我的模特" : "模特目录加载失败");
+        if (state === "error") { view.button("重试").props.onClick(); expect(view.assets.refetch).toHaveBeenCalledTimes(1); expect(view.products.refetch).toHaveBeenCalledTimes(1); }
+        view.button("资产库").props.onClick(); expect(view.onOpenAssets).toHaveBeenCalledTimes(1); expect(view.focus).toHaveBeenCalled(); expect(view.onChange).not.toHaveBeenCalled();
+    });
+    it.each(["changed", "fetching", "disabled", "unmounted"])("rejects retained model-row selection after %s", (state) => {
+        const view = picker(); view.open(); const select = view.button("选择模特 Saved model").props.onClick;
+        if (state === "changed") view.assets.data.items[0].imageIds = [assetIds[3]];
+        if (state === "fetching") view.assets.isFetching = true;
+        if (state === "disabled") view.props.disabled = true;
+        if (state === "unmounted") view.unmount(); else view.render();
+        select(); expect(view.onChange).not.toHaveBeenCalled();
+    });
+});
 
 describe("watermark canvas controls", () => {
     function canvas(marks: WatermarkHistory["marks"] = [], sku = false) {
@@ -376,13 +619,13 @@ describe("watermark canvas controls", () => {
     });
 });
 
-function skuHarness() {
+function skuHarness(tool: "sku" | "apparel_sku" = "sku") {
     const onSubmit = jest.fn().mockResolvedValue(undefined), upload = jest.fn();
     const billing = jest.fn().mockReturnValue({ ready: true, costText: "20 credits" });
     const products = { data: [...images], isSuccess: true, isPending: false, isFetching: false, isError: false };
-    const capabilities = { tools: [{ key: "sku", status: "available", requiredCapabilities: ["reference-image"], modelIdsByCapability: { "reference-image": [modelId] } }],
-        models: [{ id: modelId, name: "Configured model", capabilities: ["reference-image"], maxReferenceImages: 5 }] } as GenerationCapabilities;
-    const view = renderHarness("sku-tool-form", "default", { tool: "sku", capabilities, locked: false, onSubmit }, {
+    const capabilities = { tools: [{ key: tool, status: "available", limits: { maxInputImages: 5 }, requiredCapabilities: ["reference-image"], modelIdsByCapability: { "reference-image": [modelId], "multi-image": [modelId] } }],
+        models: [{ id: modelId, name: "Configured model", capabilities: tool === "apparel_sku" ? ["reference-image", "multi-image"] : ["reference-image"], maxReferenceImages: 5 }] } as GenerationCapabilities;
+    const view = renderHarness("sku-tool-form", "default", { tool, capabilities, locked: false, onSubmit }, {
         useGenerationBilling: billing, useProductImagesQuery: () => products,
         useUploadProductImageMutation: () => ({ isPending: false, mutateAsync: upload }),
     });
@@ -390,7 +633,8 @@ function skuHarness() {
     const button = (label: string) => view.render().find((node) => node.type === "button" && (node.props["aria-label"] === label || elementText(node).includes(label)))!;
     const set = (label: string, value: string) => view.render().find((node) => node.props["aria-label"] === label)!.props.onChange({ target: { value } });
     const modal = () => view.render().find((node) => node.type === view.exports.SkuRegionsModal)!;
-    const ready = () => { view.render().find((node) => node.type === view.exports.SkuTemplatePreview)!.props.onReady(true); };
+    const ready = () => { view.render().find((node) => node.type === view.exports.SkuTemplatePreview)!.props.onReady(true);
+        view.render().filter((node) => node.type === "ProtectedAsset" && node.props.original).forEach((node) => node.props.onReady(true)); };
     const marks = [1, 2, 3].map((index) => ({ id: `region-${index}`, region: { x: .1 * index, y: .1, width: .1, height: .2 } }));
     const filled = () => { role("SKU 模板图").onChange([images[0]]); button("选择变体区域").props.onClick(); modal().props.onApply(marks); ready();
         marks.forEach((_mark, index) => set(`SKU 1 变体区域 ${index + 1} 变化要求`, `SKU 1 region ${index + 1}`)); };
@@ -398,6 +642,55 @@ function skuHarness() {
     const submitButton = () => view.render().find((node) => node.props.type === "submit")!;
     return { ...view, onSubmit, upload, billing, products, capabilities, role, button, set, modal, ready, marks, filled, submit, submitButton };
 }
+
+describe("apparel SKU component", () => {
+    it.each([1, 10])("submits %i explicit variants with apparel billing and template-first deduplicated references", async (count) => {
+        const view = skuHarness("apparel_sku"); view.filled();
+        for (let index = 2; index <= count; index++) {
+            view.button("添加 SKU").props.onClick(); view.marks.forEach((_mark, region) => view.set(`SKU ${index} 变体区域 ${region + 1} 变化要求`, `Change ${index}/${region + 1}`));
+        }
+        view.role("SKU 1 变体区域 1").onChange([images[1]]);
+        if (count > 1) view.role("SKU 10 变体区域 3").onChange([images[1]]);
+        expect(view.submitButton().props.disabled).toBe(true); view.ready(); await view.submit();
+        const input = view.onSubmit.mock.calls[0][0] as workflow.ToolWorkflowInput;
+        expect(input.tool).toBe("apparel_sku"); expect(input.count).toBe(count); expect(validateToolWorkflow(input)).toBeNull();
+        expect(input.assetIds).toEqual([assetIds[0], assetIds[1]]); expect(Object.keys(input.design!)).toEqual(["apparel", "skuRegions", "skuVariants"]);
+        expect(view.billing).toHaveBeenLastCalledWith(modelId, count, true, "apparel_sku");
+        if (count === 10) { view.button("添加 SKU").props.onClick(); expect(view.render().filter((node) => node.props.className === "sku-variant")).toHaveLength(10); }
+    });
+    it("updates regional color without losing reference association or inventing variants", async () => {
+        const view = skuHarness("apparel_sku"); view.filled(); view.role("SKU 1 变体区域 1").onChange([images[1]]);
+        view.set("SKU 1 变体区域 1 颜色", "#ff0000"); view.set("SKU 1 变体区域 1 颜色", "#00ff00"); view.ready(); await view.submit();
+        const edit = view.onSubmit.mock.calls[0][0].design.skuVariants[0].edits[0];
+        expect(edit.referenceAssetId).toBe(assetIds[1]); expect(edit.instruction).toBe("SKU 1 region 1\n区域颜色：#00FF00");
+        expect(view.render().filter((node) => node.props.className === "sku-variant")).toHaveLength(1);
+        view.set("SKU 1 变体区域 1 变化要求", "x".repeat(300)); view.set("SKU 1 变体区域 1 颜色", "#ffffff");
+        expect(view.render().find((node) => node.props["aria-label"] === "SKU 1 变体区域 1 变化要求")!.props.value).toHaveLength(300);
+    });
+    it("restores geometry, names, references and settings once without replacing later edits", async () => {
+        const view = skuHarness("apparel_sku"); view.filled(); view.role("SKU 1 变体区域 2").onChange([images[2]]); view.ready(); await view.submit();
+        const input = { ...view.onSubmit.mock.calls[0][0], ratio: "3:4", instructions: "History" };
+        input.design.skuVariants[0].name = "Saved Blue";
+        const restored = skuHarness("apparel_sku"); restored.props.onEditSource = jest.fn();
+        restored.props.taskSnapshot = { id: "saved", toolKey: "apparel_sku", toolInput: input }; restored.render(); restored.ready();
+        expect(restored.props.onEditSource).not.toHaveBeenCalled(); expect(restored.role("SKU 模板图").images[0].id).toBe(assetIds[0]);
+        expect(restored.role("SKU 1 变体区域 2").images[0].id).toBe(assetIds[2]);
+        restored.set("SKU 1 名称", "Edited Blue"); restored.props.taskSnapshot = { ...restored.props.taskSnapshot }; restored.render(); await restored.submit();
+        expect(restored.onSubmit.mock.calls[0][0]).toMatchObject({ ratio: "3:4", instructions: "History", design: { skuRegions: input.design.skuRegions, skuVariants: [{ name: "Edited Blue", edits: input.design.skuVariants[0].edits }] } });
+    });
+    it.each(["template", "reference", "authorization", "fetching"])("retains inputs but blocks apparel SKU on missing %s", async (reason) => {
+        const view = skuHarness("apparel_sku"); view.filled(); view.role("SKU 1 变体区域 1").onChange([images[1]]); view.ready();
+        const submit = view.render().find((node) => node.type === "form")!.props.onSubmit;
+        if (reason === "template" || reason === "reference") view.products.data = images.filter((image) => image.id !== assetIds[reason === "template" ? 0 : 1]);
+        if (reason === "authorization") view.capabilities.tools[0].modelIdsByCapability["reference-image"] = [];
+        if (reason === "fetching") view.products.isFetching = true;
+        view.render(); await submit({ preventDefault: jest.fn() }); expect(view.onSubmit).not.toHaveBeenCalled();
+        expect(view.role("SKU 模板图").images).toHaveLength(1); expect(view.role("SKU 1 变体区域 1").images).toHaveLength(1);
+    });
+    it("does not add apparel color controls to generic SKU", () => {
+        const view = skuHarness(); view.filled(); expect(view.render().some((node) => node.props.type === "color")).toBe(false);
+    });
+});
 
 describe("multi-region SKU editor", () => {
     it("keeps the size-contained modal viewport out of flex shrink in an auto-height dialog", () => {

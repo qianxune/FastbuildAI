@@ -17,7 +17,7 @@ import {
     type ToolDefinition,
 } from "../../../shared/tools";
 import { MODEL_UNAVAILABLE } from "../constants/generation.constants";
-import { quoteGenerationCredits } from "../../../shared/billing";
+import { quoteGenerationCredits, type GenerationQuoteTool } from "../../../shared/billing";
 import { isToolEditKey, toolReferenceLimit, TOOL_RATIOS } from "../../../shared/tool-workflow";
 import { CUTOUT_MODEL, CutoutService } from "./cutout.service";
 
@@ -62,8 +62,8 @@ export class GenerationModelService {
                         "supportsReferenceImages" in imageModel &&
                         imageModel.supportsReferenceImages === true
                     ) {
-                        capabilities.push("reference-image");
                         maxReferenceImages = toolReferenceLimit(imageModel);
+                        if (maxReferenceImages > 0) capabilities.push("reference-image");
                         if (maxReferenceImages >= 2) capabilities.push("multi-image");
                     }
                 }
@@ -223,7 +223,7 @@ export class GenerationModelService {
     }
 
     /** 校验模型启用状态并按图片数量计算积分报价，不调用模型或扣费。 */
-    async quote(modelId: string, count: number, tool?: "main" | "sku") {
+    async quote(modelId: string, count: number, tool?: GenerationQuoteTool) {
         if (modelId === LOCAL_CUTOUT_MODEL_ID) {
             const cutout = this.cutoutService;
             if (!cutout || count !== 1 || tool !== undefined || !await cutout.ready()) throw HttpErrorFactory.badRequest(MODEL_UNAVAILABLE);

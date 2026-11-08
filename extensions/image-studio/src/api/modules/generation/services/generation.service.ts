@@ -34,6 +34,8 @@ import { GenerationBillingService } from "./generation-billing.service";
 import { CutoutService, cutoutSourceSize } from "./cutout.service";
 import { LOCAL_CUTOUT_MODEL_ID } from "../../../shared/tools";
 import type { AssetRecordService } from "./asset-record.service";
+import { apparelModelSnapshot, isApparelToolKey } from "../../../shared/apparel-workflow";
+import type { GenerationQuoteTool } from "../../../shared/billing";
 
 import {
     GeneratedImage,
@@ -165,7 +167,7 @@ export class GenerationService {
     }
 
     /** 按指定模型与图片数量查询报价，不创建任务或扣费。 */
-    async quote(modelId: string, count: number, tool?: "main" | "sku") {
+    async quote(modelId: string, count: number, tool?: GenerationQuoteTool) {
         return tool ? this.generationModelService.quote(modelId, count, tool) : this.generationModelService.quote(modelId, count);
     }
 
@@ -412,6 +414,11 @@ export class GenerationService {
         if (prepared && input.assetIds.length > toolReferenceLimit(prepared.imageModel))
             throw HttpErrorFactory.badRequest("所选模型不支持所需数量的参考图，请选择支持多图输入的 Seedream 模型");
         const generation = await this.withProductLock(userId, async (repository) => {
+            const snapshot = isApparelToolKey(input.tool) && input.design?.apparel ? apparelModelSnapshot(input.design.apparel) : null;
+            if (snapshot) {
+                if (!this.assetRecordService) throw HttpErrorFactory.badRequest("模特素材服务不可用，请稍后重试");
+                await this.assetRecordService.assertOwnedModel(repository.manager, userId, snapshot.modelAssetId, snapshot.modelImageId);
+            }
             const references = await this.readProductImages(userId, input.assetIds);
             const dimensions = local ? await cutoutSourceSize(references[0]!) : undefined;
             return this.generationBillingService.createTask(repository.manager, {

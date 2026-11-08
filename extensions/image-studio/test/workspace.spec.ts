@@ -6,6 +6,8 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import * as main from "../src/api/shared/main-image";
 import * as workflow from "../src/api/shared/tool-workflow";
 import * as specializedWorkflow from "../src/web/pages/specialized-workflow";
+import * as apparelContract from "../src/api/shared/apparel-workflow";
+import * as apparelWorkflow from "../src/web/pages/apparel-workflow";
 import { TOOL_REGISTRY, LOCAL_CUTOUT_MODEL_ID } from "../src/api/shared/tools";
 
 type Node = { type: any; props: Record<string, any>; key?: string };
@@ -14,6 +16,39 @@ const image = (index: number) => ({ id: `22222222-2222-4222-8222-${String(index)
 const input = () => ({ modelId, assetIds: [image(1).id], productName: "Product", brand: "", platform: main.MAIN_PLATFORMS[0], language: main.MAIN_LANGUAGES[0], ratio: "1:1", resolution: "2K", counts: { white: 1, scene: 0, selling: 0, other: 0 }, instructions: "" });
 
 describe("workspace drawer positioning", () => {
+    it.each(apparelContract.APPAREL_KEYS)("dispatches %s to its actual independent form component", (tool) => {
+        const view = harness("tool-form");
+        const props = { tool, capabilities: { tools: [], models: [] }, locked: true, onSubmit: jest.fn(), annotationTarget: null, taskSnapshot: null };
+        const rendered = view.render(props);
+        expect(rendered.type).toBe(tool === "apparel_sku" ? "./sku-tool-form" : "./apparel-tool-form");
+        expect(rendered.key).toBe(tool); expect(rendered.props).toEqual(props);
+    });
+    it("adds the apparel group with eight independent entries in desktop and mobile navigation", () => {
+        const apparel = ["tryon", "model_swap", "outfit", "fabric", "apparel_sku", "ugc_outfit", "nail_tryon", "dewrinkle"];
+        const labels = ["模特试穿", "换模特", "服饰穿搭", "材料到服装", "服饰SKU变体", "种草穿搭", "美甲上手", "服装去皱"];
+        const view = harness("workspace-navigation");
+        const onNavigate = jest.fn(), onMobileOpenChange = jest.fn();
+        const tree = nodes(view.render({ view: "create", tool: "tryon", mobileOpen: true, onNavigate, onMobileOpenChange }));
+        const contents = tree.filter((node) => typeof node.type === "function" && node.type.name === "NavigationContent");
+        expect(contents).toHaveLength(2);
+        for (const content of contents) {
+            const navigation = nodes(content.type(content.props));
+            const groups = navigation.filter((node) => node.type === "details");
+            expect(groups.map((node) => text(node.props.children[0]))).toEqual(["电商生图", "AI 修图", "服饰穿戴"]);
+            const entries = nodes(groups[2]).filter((node) => node.type === "button");
+            expect(entries.map(text)).toEqual(labels);
+            entries.forEach((entry, index) => {
+                entry.props.onClick();
+                expect(onNavigate).toHaveBeenLastCalledWith("create", apparel[index]);
+                expect(onMobileOpenChange).toHaveBeenLastCalledWith(false);
+                expect(view.exports.TOOL_LABELS[apparel[index]]).toBe(labels[index]);
+                expect(view.exports.TOOL_ICONS[apparel[index]]).toBeTruthy();
+            });
+            expect(navigation.filter((node) => node.props["aria-current"] === "true").map(text)).toEqual([labels[0]]);
+            expect(nodes(groups[0]).filter((node) => node.type === "button")).toHaveLength(6);
+            expect(nodes(groups[1]).filter((node) => node.type === "button")).toHaveLength(7);
+        }
+    });
     it("preserves task query and fragment through shared and plugin login redirects", async () => {
         const source = readFileSync(path.resolve(__dirname, "../../../packages/@buildingai/web/services/src/base.ts"), "utf8");
         const code = ts.transpileModule(source.replace(/import\.meta\.env/g, "({DEV:false})"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -143,6 +178,8 @@ function harness(file: string, modules: Record<string, any> = {}, globals: Recor
                 loadWhenVisible: (_target: any, load: () => any) => load(), ...modules[name],
             };
             if (name === "./specialized-workflow") return specializedWorkflow;
+            if (name === "../../api/shared/apparel-workflow") return apparelContract;
+            if (name === "./apparel-workflow") return apparelWorkflow;
             if (name === "../../api/shared/tools") return { TOOL_REGISTRY };
             return modules[name] ?? new Proxy({ __esModule: true, default: name }, { get: (target, key) => key in target ? target[key as keyof typeof target] : key });
         }, ...globals,
@@ -675,7 +712,7 @@ describe("workspace preferences and navigation", () => {
         expect(contents).toHaveLength(2);
         for (const content of contents) {
             const rendered = nodes(content.type(content.props));
-            expect(rendered.filter((node) => node.type === "details")).toHaveLength(2);
+            expect(rendered.filter((node) => node.type === "details")).toHaveLength(3);
             expect(rendered.filter((node) => node.type === "details").every((node) => node.props.open)).toBe(true);
             for (const key of Object.keys(TOOL_REGISTRY)) {
                 const button = rendered.find((node) => node.type === "button" && text(node) === view.exports.TOOL_LABELS[key])!;
@@ -798,7 +835,7 @@ describe("workspace overview data", () => {
     it("uses existing tool and account routes with real balance and correctly signed ledger data", () => {
         const view = overview();
         const cards = view.render().filter((node) => node.type === "button" && node.props.className?.startsWith("overview-tool "));
-        expect(cards).toHaveLength(13);
+        expect(cards).toHaveLength(21);
         for (const card of cards) { card.props.onClick(); expect(view.props.onNavigate).toHaveBeenLastCalledWith("create", card.key); }
         expect(view.render().filter((node) => node.props.role === "status").map(text)).toEqual(["95", "5"]);
         expect(text(view.render())).toContain("+100"); expect(text(view.render())).toContain("-5");
@@ -819,6 +856,17 @@ describe("workspace overview data", () => {
         for (const status of ["queued", "processing", "completed", "failed", "cancelled"]) {
             view.recent.data.items[0].status = status;
             expect(view.render().find((node) => node.props.className === `overview-task-status ${status}`)).toBeDefined();
+        }
+    });
+    it("provides all eight apparel overview entries with domain media, labels and direct routes", () => {
+        const view = overview();
+        const cards = view.render().filter((node) => apparelContract.APPAREL_KEYS.includes(node.key as apparelContract.ApparelToolKey));
+        expect(cards.map((node) => node.key)).toEqual(apparelContract.APPAREL_KEYS);
+        for (const card of cards) {
+            expect(text(card)).toContain("服饰穿戴");
+            expect(card.props["aria-label"]).toBe(harness("workspace-navigation").exports.TOOL_LABELS[card.key!]);
+            expect(nodes(card).filter((node) => node.type === "img").map((node) => node.props.src)).toEqual([apparelWorkflow.APPAREL_PREVIEW_IMAGES[card.key as apparelContract.ApparelToolKey]]);
+            card.props.onClick(); expect(view.props.onNavigate).toHaveBeenLastCalledWith("create", card.key);
         }
     });
     it("distinguishes loading, errors and empty results rather than displaying invented zero values", () => {
@@ -1211,6 +1259,75 @@ describe("workspace integration", () => {
     });
 });
 
+describe("owning-page apparel integration", () => {
+    function apparelPage(tool: apparelContract.ApparelToolKey) {
+        const view = creativeWorkspace();
+        view.capability.models[0].capabilities.push("multi-image");
+        view.capability.tools.push(...apparelContract.APPAREL_KEYS.map((key) => ({ key, status: "available", requiredCapabilities: TOOL_REGISTRY[key].requiredCapabilities,
+            modelIdsByCapability: { "reference-image": [modelId], "multi-image": [modelId] }, limits: { maxInputImages: 5 } })));
+        view.navigate("create", tool);
+        const payload: workflow.ToolWorkflowInput = tool === "apparel_sku" ? { tool, modelId, count: 10, assetIds: [image(1).id], instructions: "", ratio: "1:1", design: {
+            apparel: { sourceAssetIds: [image(1).id] },
+            skuRegions: [{ id: "region-1", region: { x: .1, y: .1, width: .2, height: .2 } }],
+            skuVariants: Array.from({ length: 10 }, (_value, index) => ({ name: `SKU ${index + 1}`, instruction: "", edits: [{ regionId: "region-1", instruction: "Make green" }] })),
+        } } : apparelWorkflow.buildApparelInput({ ...apparelWorkflow.createApparelDraft(tool), modelId, sourceAssetIds: [image(1).id], instructions: "Apparel request",
+            ...(tool === "fabric" ? { category: "Shirt", garmentDescription: "Long sleeves" } : {}),
+            ...(["tryon", "model_swap"].includes(tool) ? { target: { modelAssetId: image(9).id, modelImageId: image(2).id } } : {}),
+        }, view.capability, [{ id: image(9).id, kind: "model", name: "Saved", imageIds: [image(2).id] }] as any, [image(1), image(2)] as any);
+        Object.assign(view.active, { toolKey: tool, toolInput: payload, count: payload.count, modelId });
+        const form = () => view.form(tool);
+        const host = tool === "apparel_sku" ? "sku-canvas-host" : "apparel-canvas-host";
+        return { ...view, form, payload, host };
+    }
+    it.each(apparelContract.APPAREL_KEYS)("keeps %s originals, result, edits and active-task locks in their owning column", async (tool) => {
+        const view = apparelPage(tool), target = {};
+        view.render().find((node) => node.props.className === view.host)!.props.ref(target);
+        expect(view.form().props.annotationTarget).toBe(target);
+        expect(view.render().filter((node) => node.type === "./tool-form" && node.props.tool !== tool && node.props.annotationTarget)).toHaveLength(0);
+        await view.form().props.onSubmit(view.payload); expect(view.toolMutation.mutateAsync).toHaveBeenCalledWith(view.payload);
+        expect(view.form().props.locked).toBe(true); expect(view.query).toHaveBeenCalledWith("active");
+        expect(view.render().some((node) => String(node.props.className).includes("generation-placeholder"))).toBe(true);
+        view.navigate("create", "main");
+        expect(view.render().some((node) => String(node.props.className).includes("generation-placeholder"))).toBe(false);
+        expect(view.form().props.annotationTarget).toBeNull(); expect(view.render().some((node) => node.props.className === "workspace-active-task")).toBe(true);
+        view.active.status = "completed"; view.active.images = [{}]; view.navigate("create", tool);
+        expect(view.form().props.taskSnapshot).toBe(view.active); expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(true);
+        view.form().props.onEditSource(); expect(view.render().some((node) => node.props.className === view.host)).toBe(true);
+        expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(false);
+        view.form().props.onOpenAssets(); expect(view.render().find((node) => node.type === "Navigation")!.props.view).toBe("materials");
+        expect(view.form().props.locked).toBe(true); expect(view.form().props.annotationTarget).toBeNull();
+        expect(view.toolMutation.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+    it.each(apparelContract.APPAREL_KEYS)("opens %s history with only its matching snapshot and retains explicit retry billing", async (tool) => {
+        const view = apparelPage(tool);
+        const record = { ...view.active, toolKey: tool, toolInput: view.payload, status: "failed", count: view.payload.count, modelId, prompt: "Saved apparel" };
+        view.items.push(record); view.navigate("history", tool); expect(view.retryButton().props.disabled).toBe(false);
+        view.retryButton().props.onClick(); await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(view.quote).toHaveBeenCalledWith(modelId, view.payload.count, ...(tool === "apparel_sku" ? ["apparel_sku"] : []));
+        expect(view.retryMutation.mutateAsync).toHaveBeenCalledWith(record.id);
+        view.active.status = "failed"; view.navigate("history", tool);
+        view.render().find((node) => node.props.className === "history-open")!.props.onClick();
+        expect(view.form().props.taskSnapshot).toBe(record); expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(true);
+        expect(view.render().filter((node) => node.type === "./tool-form" && node.props.tool !== tool && node.props.taskSnapshot)).toHaveLength(0);
+        view.navigate("create", "main"); expect(view.form().props.taskSnapshot).toBeNull();
+    });
+    it.each(["count", "discriminator", "geometry", "authorization"])("blocks malformed apparel SKU %s at the owning retry boundary", (reason) => {
+        const view = apparelPage("apparel_sku"), payload = view.payload;
+        if (reason === "count") payload.count = 1;
+        if (reason === "discriminator") payload.tool = "sku";
+        if (reason === "geometry") payload.design!.skuRegions![0].region.width = 0;
+        if (reason === "authorization") view.capability.models[0].capabilities = [];
+        view.items.push({ ...view.active, toolKey: "apparel_sku", toolInput: payload, status: "failed", count: 10, modelId }); view.navigate("history");
+        expect(view.retryButton().props.disabled).toBe(true); view.retryButton().props.onClick(); expect(view.quote).not.toHaveBeenCalled();
+    });
+    it("restores apparel editing after submission failure without manufacturing a result", async () => {
+        const view = apparelPage("tryon"); view.toolMutation.mutateAsync.mockRejectedValueOnce(new Error("Rejected task"));
+        await expect(view.form().props.onSubmit(view.payload)).rejects.toThrow("Rejected task");
+        expect(view.render().some((node) => node.props.className === view.host)).toBe(true);
+        expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(false);
+    });
+});
+
 const creativeInput = (): workflow.ToolWorkflowInput => ({ tool: "creative", modelId, assetIds: [], instructions: "User creative prompt", count: 1, ratio: "1:1" });
 function creativeWorkspace() {
     const view = workspace();
@@ -1243,12 +1360,12 @@ describe("owning-page specialized integration", () => {
         view.navigate("create", "creative");
         expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(false);
     });
-    it("keeps all five keyed form slots and child types stable across tools and workspace views", () => {
+    it("keeps legacy and apparel keyed form slots stable across tools and workspace views", () => {
         const view = creativeWorkspace();
         const slots = () => view.render().filter((node) => node.props.className === "workspace-tool-form");
         const identity = slots().map((node) => [node.type, node.key, node.props.children.type, node.props.children.props.tool]);
-        expect(identity.map((entry) => entry[1])).toEqual(specializedWorkflow.SPECIALIZED_TOOLS);
-        for (const [next, tool] of [...specializedWorkflow.SPECIALIZED_TOOLS.map((tool) => ["create", tool]),
+        expect(identity.map((entry) => entry[1])).toEqual([...specializedWorkflow.SPECIALIZED_TOOLS, ...apparelContract.APPAREL_KEYS]);
+        for (const [next, tool] of [...specializedWorkflow.SPECIALIZED_TOOLS.map((tool) => ["create", tool]), ...apparelContract.APPAREL_KEYS.map((tool) => ["create", tool]),
             ["works", "creative"], ["materials", "creative"], ["history", "creative"], ["create", "retouch"], ["create", "creative"]]) {
             view.navigate(next, tool);
             expect(slots().map((node) => [node.type, node.key, node.props.children.type, node.props.children.props.tool])).toEqual(identity);

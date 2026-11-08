@@ -1,5 +1,5 @@
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@buildingai/ui/components/ui/dialog";
-import { ChevronDown, CircleHelp, Eraser, Expand, FolderOpen, History, Image, Images, Languages, Layers3, LayoutDashboard, Lightbulb, Package, Paintbrush, Palette, Scan, Scissors, Settings, Sparkles, Wand2, type LucideIcon } from "lucide-react";
+import { ChevronDown, CircleHelp, Eraser, Expand, FolderOpen, Hand, History, Image, Images, Languages, Layers3, LayoutDashboard, Lightbulb, Package, Paintbrush, Palette, Scan, Scissors, Settings, Shirt, Sparkles, SwatchBook, UserRound, UsersRound, Wand2, type LucideIcon } from "lucide-react";
 import type { ToolKey } from "../../api/shared/tools";
 
 export type WorkspaceView = "overview" | "create" | "works" | "materials" | "history";
@@ -7,16 +7,21 @@ export const TOOL_LABELS: Record<ToolKey, string> = {
     main: "商品主图", detail: "商品详情", replica: "爆款复刻", creative: "创意生图",
     fusion: "多图融合", sku: "商品SKU图", retouch: "产品精修", cutout: "一键抠图",
     recolor: "商品换色",
+    tryon: "模特试穿", model_swap: "换模特", outfit: "服饰穿搭", fabric: "材料到服装",
+    apparel_sku: "服饰SKU变体", ugc_outfit: "种草穿搭", nail_tryon: "美甲上手", dewrinkle: "服装去皱",
     watermark: "去除水印", expand: "智能扩图", translate: "图片翻译", suggest: "产品建议", redraw: "局部重绘",
 };
 export const TOOL_ICONS: Record<ToolKey, LucideIcon> = {
     main: Image, detail: Scan, replica: Layers3, creative: Sparkles, fusion: Images, sku: Package,
     retouch: Wand2, cutout: Scissors, watermark: Eraser, expand: Expand, translate: Languages, suggest: Lightbulb, redraw: Paintbrush,
     recolor: Palette,
+    tryon: Shirt, model_swap: UsersRound, outfit: UserRound, fabric: SwatchBook,
+    apparel_sku: Layers3, ugc_outfit: Sparkles, nail_tryon: Hand, dewrinkle: Wand2,
 };
 const GROUPS: { name: string; tools: ToolKey[] }[] = [
     { name: "电商生图", tools: ["main", "detail", "replica", "creative", "fusion", "sku"] },
     { name: "AI 修图", tools: ["retouch", "redraw", "cutout", "recolor", "watermark", "expand", "translate"] },
+    { name: "服饰穿戴", tools: ["tryon", "model_swap", "outfit", "fabric", "apparel_sku", "ugc_outfit", "nail_tryon", "dewrinkle"] },
 ];
 
 interface NavigationProps {

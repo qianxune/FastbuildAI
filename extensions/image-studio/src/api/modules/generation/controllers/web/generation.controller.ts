@@ -68,7 +68,7 @@ export class GenerationController {
         @Query("count", ParseIntPipe) count: number,
         @Query("tool") tool?: string,
     ) {
-        if (tool !== undefined && tool !== "sku" && tool !== "main") throw new BadRequestException("不支持的报价工作流");
+        if (tool !== undefined && tool !== "sku" && tool !== "main" && tool !== "apparel_sku") throw new BadRequestException("不支持的报价工作流");
         return tool ? this.generationService.quote(modelId, count, tool) : this.generationService.quote(modelId, count);
     }
 

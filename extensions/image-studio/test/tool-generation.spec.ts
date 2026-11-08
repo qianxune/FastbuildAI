@@ -12,6 +12,7 @@ import { LOCAL_CUTOUT_MODEL_ID } from "../src/api/shared/tools";
 import { CutoutService } from "../src/api/modules/generation/services/cutout.service";
 import { MainImageDto } from "../src/api/modules/generation/dto/main-image.dto";
 import { MAX_SELLING_LAYOUTS, SELLING_IMAGE_LAYOUTS, mainImagePrompt } from "../src/api/shared/main-image";
+import { APPAREL_WORKFLOWS, apparelModelSnapshot, type ApparelWorkflowInput } from "../src/api/shared/apparel-workflow";
 
 jest.mock("@buildingai/db/@nestjs/typeorm", () => ({ InjectRepository: () => () => undefined }));
 jest.mock("@buildingai/db/typeorm", () => ({ Repository: class {}, TableColumn: class { constructor(value: unknown) { Object.assign(this, value); } } }));
@@ -124,6 +125,22 @@ describe("main selling image layouts", () => {
     });
 });
 
+const apparelBase = { modelId, assetIds: [assetId], count: 4, ratio: "3:4" as const };
+const modelSnapshot = { modelAssetId: "44444444-4444-4444-8444-444444444444", modelImageId: secondAsset };
+const apparelRequests: ApparelWorkflowInput[] = [
+    { ...apparelBase, tool: "tryon", assetIds: [assetId, secondAsset], design: { apparel: { sourceAssetIds: [assetId], ...modelSnapshot, scene: "街拍户外" } } },
+    { ...apparelBase, tool: "model_swap", assetIds: [assetId, secondAsset], design: { apparel: { sourceAssetIds: [assetId], ...modelSnapshot } } },
+    { ...apparelBase, tool: "outfit", design: { apparel: { sourceAssetIds: [assetId], style: "亚洲女性" }, platform: "淘宝" } },
+    { ...apparelBase, tool: "fabric", design: { apparel: { sourceAssetIds: [assetId], category: "衬衫", garmentDescription: "长袖衬衫", outputMode: "flat" } } },
+    { ...apparelBase, tool: "fabric", assetIds: [assetId, secondAsset, modelSnapshot.modelAssetId], design: { apparel: { sourceAssetIds: [assetId], ...modelSnapshot, category: "衬衫", garmentDescription: "长袖衬衫", outputMode: "worn", styleAssetId: modelSnapshot.modelAssetId } } },
+    { ...apparelBase, tool: "apparel_sku", count: 10, assetIds: [assetId, secondAsset], design: { apparel: { sourceAssetIds: [assetId] },
+        skuRegions: [{ id: "front", region: { x: .1, y: .2, width: .3, height: .4 } }],
+        skuVariants: Array.from({ length: 10 }, (_value, index) => ({ name: `Apparel variant ${index + 1}`, instruction: "", edits: [{ regionId: "front", instruction: `Color ${index + 1}`, referenceAssetId: secondAsset }] })) } },
+    { ...apparelBase, tool: "ugc_outfit", design: { apparel: { sourceAssetIds: [assetId], scene: "居家", style: "智能推荐" } } },
+    { ...apparelBase, tool: "nail_tryon", design: { apparel: { sourceAssetIds: [assetId], style: "健康小麦" } } },
+    { ...apparelBase, tool: "dewrinkle", count: 1, design: { apparel: { sourceAssetIds: [assetId] } } },
+];
+
 const designRequests: ToolWorkflowInput[] = [
     input({ tool: "detail", design: { brand: "Confirmed brand", platform: "淘宝", language: "English", description: "Confirmed description", detailModules: ["hero", "selling", "specs"], outputModules: ["selling", "hero"] } }),
     input({ tool: "replica", productName: undefined, assetIds: [secondAsset, assetId], design: { productAssetIds: [assetId], replicaMode: "faithful" } }),
@@ -145,16 +162,17 @@ const designRequests: ToolWorkflowInput[] = [
     } }),
     input({ tool: "redraw", productName: undefined, count: 1, instructions: "Change the bag to black", design: { redrawRegions: [{ x: .1, y: .2, width: .3, height: .4 }] } }),
     ...["#ffffff", "#287be5", "#ABC123"].map((productColor) => input({ tool: "recolor", productName: undefined, count: 1, instructions: "", design: { productColor } })),
+    ...apparelRequests,
 ];
 
-function fixture() {
+function fixture(withAssetService = false) {
     const record = { id: "task", userId: "owner", ...input(), toolKey: "retouch", toolInput: input(), status: ImageGenerationStatus.PROCESSING, images: [], error: null };
     const builder = { where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), getExists: jest.fn().mockResolvedValue(false) };
     const repository = { manager: {} as any, findOne: jest.fn().mockResolvedValue(record), update: jest.fn().mockResolvedValue({ affected: 1 }), createQueryBuilder: jest.fn().mockReturnValue(builder) };
     const manager = { transaction: jest.fn(async (callback) => callback(manager)), query: jest.fn().mockResolvedValue([]), getRepository: jest.fn().mockReturnValue(repository) };
     repository.manager = manager;
     const model = { id: modelId, name: "Seedream", billingRule: { power: 2 } };
-    const imageModel = { provider: "volcengine", modelId: "doubao-seedream-5-0-lite", supportsReferenceImages: true };
+    const imageModel: { provider: string; modelId: string; supportsReferenceImages: boolean; maxReferenceImages?: unknown } = { provider: "volcengine", modelId: "doubao-seedream-5-0-lite", supportsReferenceImages: true };
     const prepare = jest.fn().mockResolvedValue({ model, imageModel });
     const prepareVision = jest.fn().mockResolvedValue({ model: { name: "vision" }, providerOptions: {} });
     const read = jest.fn().mockResolvedValue(Buffer.from("owned"));
@@ -169,12 +187,79 @@ function fixture() {
     const materials = { read, readThumbnail, readForAnalysis, remove, groups: jest.fn().mockResolvedValue(["Shop"]),
         updateMetadata: jest.fn(), createGroup: jest.fn(), changeGroup: jest.fn() };
     const localGenerate = jest.fn().mockResolvedValue(Buffer.from("transparent-png"));
-    const service = new GenerationService(repository as never, { prepare, prepareVision } as never, { persist, cleanup, url: () => "protected" } as never, { add } as never, materials as never, { createTask, finishUnsuccessful } as never, { generate: localGenerate, ready: CutoutService.ready, billingRule: () => ({ power: 0 }) } as never);
-    return { service, record, repository, manager, builder, prepare, imageModel, read, readThumbnail, readForAnalysis, remove, createTask, finishUnsuccessful, add, persist, cleanup, prepareVision, materials, localGenerate };
+    const assertOwnedModel = jest.fn().mockResolvedValue(undefined);
+    const service = new GenerationService(repository as never, { prepare, prepareVision } as never, { persist, cleanup, url: () => "protected" } as never, { add } as never, materials as never, { createTask, finishUnsuccessful } as never, { generate: localGenerate, ready: CutoutService.ready, billingRule: () => ({ power: 0 }) } as never, withAssetService ? { assertOwnedModel } as never : undefined);
+    return { service, record, repository, manager, builder, prepare, imageModel, read, readThumbnail, readForAnalysis, remove, createTask, finishUnsuccessful, add, persist, cleanup, prepareVision, materials, localGenerate, assertOwnedModel };
 }
+
+describe("apparel execution", () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        jest.mocked(generateImage).mockReset().mockResolvedValue({ images: [{ base64: "owned", mediaType: "image/png" }] } as never);
+    });
+
+    it.each(apparelRequests)("submits and executes $tool with frozen ordered references and exactly its requested outputs", async (request) => {
+        const state = fixture(true);
+        state.read.mockImplementation(async (_owner, id) => Buffer.from(id));
+        const submitted = await state.service.submitTool("owner", request);
+        expect(submitted.toolInput).toEqual(request);
+        expect(generateImage).not.toHaveBeenCalled();
+        const snapshot = apparelModelSnapshot(request.design.apparel);
+        if (snapshot) expect(state.assertOwnedModel).toHaveBeenCalledWith(state.manager, "owner", snapshot.modelAssetId, snapshot.modelImageId);
+        else expect(state.assertOwnedModel).not.toHaveBeenCalled();
+        Object.assign(state.record, { toolKey: request.tool, toolInput: request, count: request.count });
+        await state.service.processTask({ id: "task", userId: "owner" });
+        const calls = jest.mocked(generateImage).mock.calls.map(([call]) => call);
+        expect(calls).toHaveLength(request.count);
+        for (const [index, call] of calls.entries()) {
+            expect(call.n).toBe(1);
+            expect(call.maxRetries).toBe(0);
+            expect(call.size).toBe("1728x2304");
+            expect(call.model).toBe(state.imageModel);
+            expect(call.abortSignal).toBe(calls[0].abortSignal);
+            expect(call.prompt).toMatchObject({ images: request.assetIds.map((id) => Buffer.from(id)), text: expect.stringContaining(APPAREL_WORKFLOWS[request.tool].method) });
+            if (request.tool === "apparel_sku") {
+                const prompt = (call.prompt as { text: string }).text;
+                expect(prompt).toContain(`"name":"Apparel variant ${index + 1}"`);
+                for (const otherIndex of [0, 9].filter((other) => other !== index)) expect(prompt).not.toContain(`"name":"Apparel variant ${otherIndex + 1}"`);
+            }
+        }
+        expect(state.assertOwnedModel).toHaveBeenCalledTimes(snapshot ? 1 : 0);
+        expect(state.persist).toHaveBeenCalledTimes(1);
+        expect(generateText).not.toHaveBeenCalled();
+    });
+
+    it.each(apparelRequests)("rejects unsupported or over-capacity apparel $tool before reads and debit", async (request) => {
+        for (const maxReferenceImages of [0, request.assetIds.length - 1, null]) {
+            const state = fixture(true);
+            state.imageModel.maxReferenceImages = maxReferenceImages;
+            await expect(state.service.submitTool("owner", request)).rejects.toThrow();
+            expect(state.read).not.toHaveBeenCalled(); expect(state.assertOwnedModel).not.toHaveBeenCalled();
+            expect(state.createTask).not.toHaveBeenCalled(); expect(state.add).not.toHaveBeenCalled();
+        }
+        const state = fixture(true);
+        state.imageModel.supportsReferenceImages = false;
+        await expect(state.service.submitTool("owner", request)).rejects.toThrow();
+        expect(state.createTask).not.toHaveBeenCalled();
+    });
+
+    it.each(apparelRequests)("rejects changed adapter capacity for queued apparel $tool and invokes inherited refund", async (request) => {
+        const state = fixture(true);
+        Object.assign(state.record, { toolKey: request.tool, toolInput: request, count: request.count });
+        state.imageModel.maxReferenceImages = request.assetIds.length - 1;
+        await expect(state.service.processTask({ id: "task", userId: "owner" })).rejects.toThrow();
+        expect(generateImage).not.toHaveBeenCalled(); expect(state.read).not.toHaveBeenCalled(); expect(state.persist).not.toHaveBeenCalled();
+        expect(state.finishUnsuccessful).toHaveBeenCalledTimes(1);
+    });
+});
 
 describe("tool DTO whitelist", () => {
     const pipe = new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true });
+    it.each(apparelRequests)("rejects malformed apparel $tool at the DTO boundary before any work", async (request) => {
+        for (const override of [{ instructions: null }, { instructions: "x".repeat(1501) }, { count: request.tool === "apparel_sku" ? 11 : request.tool === "dewrinkle" ? 2 : 5 },
+            { design: { ...request.design, apparel: { ...request.design.apparel, unknown: true } } }, { targetLanguage: "English" }, { arbitraryUrl: "https://example.test" }])
+            await expect(pipe.transform({ ...request, ...override }, { type: "body", metatype: ToolWorkflowDto })).rejects.toThrow();
+    });
     it("accepts typed inputs and rejects arbitrary URLs and unknown fields", async () => {
         await expect(pipe.transform(input(), { type: "body", metatype: ToolWorkflowDto })).resolves.toBeInstanceOf(ToolWorkflowDto);
         for (const bad of [{ url: "https://example.test" }, { assetIds: ["url"] }, { modelId: "bad" }, { count: "2" }, { count: 5 }, { ratio: "bad" }, { authorized: "true" }, { targetLanguage: "bad" }, { expansion: "bad" }]) {
@@ -186,6 +271,9 @@ describe("tool DTO whitelist", () => {
         expect(validateSync(plainToInstance(ToolSuggestionDto, { modelId, assetIds: [assetId], productName: "Product", language: "invalid" }))).not.toHaveLength(0);
     });
     it.each(designRequests)("retains the complete nested design and order for $tool", async (request) => {
+        const transformed = plainToInstance(ToolWorkflowDto, request);
+        expect(Object.keys(transformed).filter((key) => !Object.hasOwn(request, key) && ["targetLanguage", "variant", "expansion", "authorized"].includes(key))).toEqual([]);
+        expect(validateSync(transformed).map(({ property, constraints }) => ({ property, constraints }))).toEqual([]);
         const result = await pipe.transform(request, { type: "body", metatype: ToolWorkflowDto });
         expect(result).toBeInstanceOf(ToolWorkflowDto);
         expect(result.design).toEqual(request.design);
@@ -223,6 +311,40 @@ describe("tool DTO whitelist", () => {
 });
 
 describe("tool generation lifecycle", () => {
+    it("checks apparel model snapshot under the lock before billing and rechecks on retry", async () => {
+        const state = fixture(true);
+        const modelAssetId = "44444444-4444-4444-8444-444444444444";
+        const request = input({ tool: "tryon", assetIds: [assetId, secondAsset], instructions: "", productName: undefined,
+            design: { apparel: { sourceAssetIds: [assetId], modelAssetId, modelImageId: secondAsset, scene: "白底棚拍" } } });
+        await state.service.submitTool("owner", request);
+        expect(state.assertOwnedModel).toHaveBeenCalledWith(state.manager, "owner", modelAssetId, secondAsset);
+        expect(state.manager.query.mock.invocationCallOrder[0]).toBeLessThan(state.assertOwnedModel.mock.invocationCallOrder[0]);
+        expect(state.assertOwnedModel.mock.invocationCallOrder[0]).toBeLessThan(state.read.mock.invocationCallOrder[0]);
+        expect(state.read.mock.invocationCallOrder[0]).toBeLessThan(state.createTask.mock.invocationCallOrder[0]);
+        Object.assign(state.record, { toolKey: "tryon", toolInput: request });
+        state.assertOwnedModel.mockRejectedValueOnce(new Error("model snapshot changed"));
+        await expect(state.service.retryTask("owner", "task")).rejects.toThrow("snapshot changed");
+        expect(state.createTask).toHaveBeenCalledTimes(1);
+        expect(state.add).toHaveBeenCalledTimes(1);
+        state.read.mockImplementation(async (_owner, id) => Buffer.from(id));
+        await state.service.processTask({ id: "task", userId: "owner" });
+        expect(state.assertOwnedModel).toHaveBeenCalledTimes(2);
+        expect(generateImage).toHaveBeenLastCalledWith(expect.objectContaining({ n: 1, maxRetries: 0,
+            prompt: { text: expect.stringContaining("saved target model image [2]"), images: [Buffer.from(assetId), Buffer.from(secondAsset)] } }));
+    });
+    it("fails closed without apparel model service or an owned model before billing", async () => {
+        const request = input({ tool: "model_swap", assetIds: [assetId, secondAsset], instructions: "", productName: undefined,
+            design: { apparel: { sourceAssetIds: [assetId], modelAssetId: modelId, modelImageId: secondAsset } } });
+        for (const state of [fixture(), fixture(true)]) {
+            state.assertOwnedModel.mockRejectedValue(new Error("invalid model"));
+            await expect(state.service.submitTool("owner", request)).rejects.toThrow();
+            expect(state.read).not.toHaveBeenCalled(); expect(state.createTask).not.toHaveBeenCalled(); expect(state.add).not.toHaveBeenCalled();
+        }
+        const state = fixture(true);
+        state.read.mockRejectedValueOnce(new Error("foreign image"));
+        await expect(state.service.submitTool("owner", request)).rejects.toThrow("foreign image");
+        expect(state.createTask).not.toHaveBeenCalled(); expect(state.add).not.toHaveBeenCalled();
+    });
     beforeEach(() => {
         jest.clearAllMocks();
         jest.mocked(generateImage).mockResolvedValue({ images: [{ base64: "image", mediaType: "image/png" }] } as never);
@@ -335,7 +457,7 @@ describe("tool generation lifecycle", () => {
         expect(generateImage).not.toHaveBeenCalled();
     });
     it.each(designRequests)("stores and returns complete $tool design without inference during submission", async (request) => {
-        const state = fixture();
+        const state = fixture(true);
         const result = await state.service.submitTool("owner", request);
         expect(state.createTask).toHaveBeenCalledWith(state.manager, expect.objectContaining({ toolKey: request.tool, toolInput: request, count: request.count, status: "queued" }), { power: 2 });
         expect(result.toolInput).toEqual(request);
@@ -462,7 +584,7 @@ describe("tool generation lifecycle", () => {
     });
     it.each(["retry", "retryTask"] as const)("%s preserves full design and asset roles for all design workflows", async (method) => {
         for (const request of designRequests) {
-            const state = fixture();
+            const state = fixture(true);
             Object.assign(state.record, { toolKey: request.tool, toolInput: request });
             const result = await state.service[method]("owner", "task");
             expect(result.toolInput).toEqual(request);

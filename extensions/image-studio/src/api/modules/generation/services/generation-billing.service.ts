@@ -10,7 +10,8 @@ import {
     ImageGenerationStatus,
 } from "../../../db/entities/image-generation.entity";
 import { quoteGenerationCredits } from "../../../shared/billing";
-import { validateToolWorkflow, type ToolWorkflowInput } from "../../../shared/tool-workflow";
+import { isValidToolWorkflowInput, validateToolWorkflow, type ToolWorkflowInput } from "../../../shared/tool-workflow";
+import { isApparelToolKey } from "../../../shared/apparel-workflow";
 import { GENERATION_FAILED, publicGenerationError } from "../constants/generation.constants";
 
 @Injectable()
@@ -34,9 +35,12 @@ export class GenerationBillingService {
     ) {
         let amount: number;
         try {
+            const apparel = input.toolKey !== undefined && isApparelToolKey(input.toolKey);
+            if (apparel && (!isValidToolWorkflowInput(input.toolInput) || input.toolInput.tool !== input.toolKey || input.toolInput.count !== input.count))
+                throw new Error("Invalid apparel task input");
             const sku = input.toolKey === "sku" && input.toolInput?.design?.skuRegions !== undefined && input.toolInput.count === input.count
                 && validateToolWorkflow(input.toolInput as ToolWorkflowInput) === null;
-            amount = quoteGenerationCredits(rule, input.count, input.toolKey === "main" ? "main" : sku ? "sku" : undefined).total;
+            amount = quoteGenerationCredits(rule, input.count, input.toolKey === "main" ? "main" : input.toolKey === "apparel_sku" ? "apparel_sku" : sku ? "sku" : undefined).total;
         } catch {
             throw HttpErrorFactory.badRequest("所选模型的积分价格配置无效，请联系管理员");
         }

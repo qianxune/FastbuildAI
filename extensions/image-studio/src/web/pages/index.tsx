@@ -34,6 +34,7 @@ import type { AssetApplication, CreativeAsset } from "../../api/shared/assets";
 import ToolForm from "./tool-form";
 import { RetouchPreview } from "./image-edit-form";
 import { isSpecializedTool, SPECIALIZED_TOOLS, SPECIALIZED_WORKSPACE_LAYOUT } from "./specialized-workflow";
+import { APPAREL_KEYS, isApparelToolKey } from "../../api/shared/apparel-workflow";
 import WorkspaceNavigation, { TOOL_LABELS, type WorkspaceView } from "./workspace-navigation";
 import WorkspaceAccount from "./workspace-account";
 import WorkspaceOverview from "./workspace-overview";
@@ -144,6 +145,7 @@ export default function ImageStudioPage() {
     const [watermarkEditing, setWatermarkEditing] = useState(false);
     const [expansionEditing, setExpansionEditing] = useState(false);
     const [skuEditing, setSkuEditing] = useState(false);
+    const [apparelEditing, setApparelEditing] = useState<ToolKey | null>(null);
     const [regionalEditing, setRegionalEditing] = useState<"redraw" | "cutout" | "recolor" | null>(null);
     const materialSequence = useRef(0);
     const [requestedAsset, setRequestedAsset] = useState<AssetApplication | null>(null);
@@ -189,7 +191,8 @@ export default function ImageStudioPage() {
     const previewBusy = submitting ? pendingTool === tool : isGenerationActive(currentResult);
     const showWatermarkEditor = tool === "watermark" && view === "create" && !previewBusy && (!currentResult || watermarkEditing);
     const showExpansionEditor = tool === "expand" && view === "create" && !previewBusy && (!currentResult || expansionEditing);
-    const showSkuEditor = tool === "sku" && view === "create" && !previewBusy && (!currentResult || skuEditing);
+    const showSkuEditor = (tool === "sku" || tool === "apparel_sku") && view === "create" && !previewBusy && (!currentResult || skuEditing);
+    const showApparelEditor = isApparelToolKey(tool) && tool !== "apparel_sku" && view === "create" && !previewBusy && (!currentResult || apparelEditing === tool);
     const showRegionalEditor = (tool === "redraw" || tool === "cutout" || tool === "recolor") && view === "create" && !previewBusy && (!currentResult || regionalEditing === tool);
     const locked = busy || remove.isPending || cancel.isPending;
     const pendingCount =
@@ -331,14 +334,16 @@ export default function ImageStudioPage() {
             setShowHistory(false);
             if (input.tool === "watermark") setWatermarkEditing(false);
             if (input.tool === "expand") setExpansionEditing(false);
-            if (input.tool === "sku") setSkuEditing(false);
+            if (input.tool === "sku" || input.tool === "apparel_sku") setSkuEditing(false);
+            if (isApparelToolKey(input.tool)) setApparelEditing(null);
             if (input.tool === "redraw" || input.tool === "cutout" || input.tool === "recolor") setRegionalEditing(null);
             setResult(await generateTool.mutateAsync(input));
             setPage(1);
         } catch (error) {
             if (input.tool === "watermark") setWatermarkEditing(true);
             if (input.tool === "expand") setExpansionEditing(true);
-            if (input.tool === "sku") setSkuEditing(true);
+            if (input.tool === "sku" || input.tool === "apparel_sku") setSkuEditing(true);
+            if (isApparelToolKey(input.tool)) setApparelEditing(input.tool);
             if (input.tool === "redraw" || input.tool === "cutout" || input.tool === "recolor") setRegionalEditing(input.tool);
             setWorkflowError(errorMessage(error));
             throw error;
@@ -346,7 +351,7 @@ export default function ImageStudioPage() {
     };
 
     const canRetry = (item: ImageGeneration) => {
-        const sku = item.toolKey === "sku" && item.toolInput?.tool === "sku" && item.toolInput.design?.skuRegions !== undefined && validateToolWorkflow(item.toolInput) === null;
+        const sku = (item.toolKey === "sku" || item.toolKey === "apparel_sku") && item.toolInput?.tool === item.toolKey && item.toolInput.design?.skuRegions !== undefined && validateToolWorkflow(item.toolInput) === null;
         if ((item.status !== "failed" && item.status !== "cancelled") ||
             !capabilities.isSuccess || capabilities.isFetching ||
             !Number.isInteger(item.count) || item.count < 1 || item.count > (sku ? 10 : 4)) return false;
@@ -366,13 +371,14 @@ export default function ImageStudioPage() {
         setWorkflowError(null);
         setRetryPreparing(item.toolKey ?? "creative");
         try {
-            const quote = item.toolKey === "main" ? await fetchGenerationQuote(item.modelId, item.count, "main") : item.toolKey === "sku" && item.toolInput?.design?.skuRegions !== undefined
-                ? await fetchGenerationQuote(item.modelId, item.count, "sku") : await fetchGenerationQuote(item.modelId, item.count);
+            const quote = item.toolKey === "main" ? await fetchGenerationQuote(item.modelId, item.count, "main") : (item.toolKey === "sku" || item.toolKey === "apparel_sku") && item.toolInput?.design?.skuRegions !== undefined
+                ? await fetchGenerationQuote(item.modelId, item.count, item.toolKey) : await fetchGenerationQuote(item.modelId, item.count);
             if (!window.confirm(`本次重试费用为 ${quote.total} 积分，是否继续？`)) return;
             setTool(item.toolKey ?? "creative");
             if (item.toolKey === "watermark") setWatermarkEditing(false);
             if (item.toolKey === "expand") setExpansionEditing(false);
-            if (item.toolKey === "sku") setSkuEditing(false);
+            if (item.toolKey === "sku" || item.toolKey === "apparel_sku") setSkuEditing(false);
+            if (item.toolKey && isApparelToolKey(item.toolKey)) setApparelEditing(null);
             if (item.toolKey === "redraw" || item.toolKey === "cutout" || item.toolKey === "recolor") setRegionalEditing(null);
             setShowHistory(false);
             setHistoryResult(null);
@@ -511,7 +517,7 @@ export default function ImageStudioPage() {
                 )} />}
 
                 {/* FORM COLUMN */}
-                <div className={`workspace-create${tool === "watermark" ? " watermark-workspace" : ""}${tool === "redraw" || tool === "cutout" || tool === "recolor" ? " regional-workspace" : ""}${isSpecializedTool(tool) ? ` ${SPECIALIZED_WORKSPACE_LAYOUT[tool].className}` : ""}`}
+                <div className={`workspace-create${tool === "watermark" ? " watermark-workspace" : ""}${isApparelToolKey(tool) ? " apparel-workspace" : ""}${tool === "redraw" || tool === "cutout" || tool === "recolor" ? " regional-workspace" : ""}${isSpecializedTool(tool) ? ` ${SPECIALIZED_WORKSPACE_LAYOUT[tool].className}` : ""}`}
                     data-tool={tool}
                     style={isSpecializedTool(tool) ? { "--workspace-form-width": `${SPECIALIZED_WORKSPACE_LAYOUT[tool].preferredFormWidth}px` } as CSSProperties : undefined}
                     hidden={view !== "create" && view !== "history"}>
@@ -544,18 +550,23 @@ export default function ImageStudioPage() {
                             onMaterialConsumed={(requestId) => setRequestedMaterial((current) => current?.requestId === requestId ? null : current)}
                         />
                     </div>
-                    {SPECIALIZED_TOOLS.map((specializedTool) => {
+                    {[...SPECIALIZED_TOOLS, ...APPAREL_KEYS].map((specializedTool) => {
                         const inactive = tool !== specializedTool || view !== "create";
                         return <div key={specializedTool} className="workspace-tool-form" data-tool-form={specializedTool} hidden={inactive} inert={inactive}>
                             <ToolForm tool={specializedTool} capabilities={capabilities.data ?? { models: [], tools: [] }}
                                 locked={inactive || locked || !capabilities.isSuccess || capabilities.isFetching}
-                                annotationTarget={specializedTool === "sku" ? (inactive ? null : annotationTarget) : undefined}
-                                onEditSource={specializedTool === "sku" ? () => { if (!inactive && !locked) setSkuEditing(true); } : undefined}
+                                annotationTarget={specializedTool === "sku" || isApparelToolKey(specializedTool) ? (inactive ? null : annotationTarget) : undefined}
+                                taskSnapshot={currentResult?.toolKey === specializedTool ? currentResult : null}
+                                onOpenAssets={() => { if (!inactive && !locked) navigate("materials"); }}
+                                onEditSource={specializedTool === "sku" || isApparelToolKey(specializedTool) ? () => { if (!inactive && !locked) {
+                                    if (specializedTool === "sku" || specializedTool === "apparel_sku") setSkuEditing(true);
+                                    else setApparelEditing(specializedTool);
+                                } } : undefined}
                                 requestedAsset={specializedTool === "creative" ? requestedAsset : null} onAssetConsumed={consumeAsset}
                                 defaultCount={preferences.value.count} onSubmit={startTool} />
                         </div>;
                     })}
-                    {tool !== "main" && !isSpecializedTool(tool) && <ToolForm tool={tool} capabilities={capabilities.data ?? { models: [], tools: [] }} locked={locked || view !== "create" || !capabilities.isSuccess || capabilities.isFetching}
+                    {tool !== "main" && !isSpecializedTool(tool) && !isApparelToolKey(tool) && <ToolForm tool={tool} capabilities={capabilities.data ?? { models: [], tools: [] }} locked={locked || view !== "create" || !capabilities.isSuccess || capabilities.isFetching}
                         taskSnapshot={currentResult}
                         annotationTarget={tool === "watermark" || tool === "expand" || tool === "redraw" || tool === "cutout" || tool === "recolor" ? annotationTarget : undefined} onEditSource={() => { if (tool === "redraw" || tool === "cutout" || tool === "recolor") setRegionalEditing(tool); else if (tool === "expand") setExpansionEditing(true); else setWatermarkEditing(true); }}
                         onSubmit={startTool} />}
@@ -632,7 +643,8 @@ export default function ImageStudioPage() {
                                                         setTool(item.toolKey ?? "creative");
                                                         if (item.toolKey === "watermark") setWatermarkEditing(false);
                                                         if (item.toolKey === "expand") setExpansionEditing(false);
-                                                        if (item.toolKey === "sku") setSkuEditing(false);
+                                                        if (item.toolKey === "sku" || item.toolKey === "apparel_sku") setSkuEditing(false);
+                                                        if (item.toolKey && isApparelToolKey(item.toolKey)) setApparelEditing(null);
                                                         if (item.toolKey === "redraw" || item.toolKey === "cutout" || item.toolKey === "recolor") setRegionalEditing(null);
                                                         if (isGenerationActive(item)) {
                                                             setResult(item);
@@ -815,7 +827,7 @@ export default function ImageStudioPage() {
                                 </div>
                             </div>
                         </div>
-                    ) : currentResult && !showWatermarkEditor && !showExpansionEditor && !showSkuEditor && !showRegionalEditor ? (
+                    ) : currentResult && !showWatermarkEditor && !showExpansionEditor && !showSkuEditor && !showRegionalEditor && !showApparelEditor ? (
                         <div className="cstate show result-preview-state">
                             <div className="canvas-inner">
                                 <div className="res-bar">
@@ -919,7 +931,7 @@ export default function ImageStudioPage() {
                                 </div>
                             </div>
                         </div>
-                    ) : showWatermarkEditor ? <div ref={setAnnotationTarget} className="watermark-canvas-host" /> : showExpansionEditor ? <div ref={setAnnotationTarget} className="expansion-canvas-host" /> : showSkuEditor ? <div ref={setAnnotationTarget} className="sku-canvas-host" /> : showRegionalEditor ? <div ref={setAnnotationTarget} className="regional-canvas-host" /> : tool === "retouch" ? <RetouchPreview /> : (
+                    ) : showWatermarkEditor ? <div ref={setAnnotationTarget} className="watermark-canvas-host" /> : showExpansionEditor ? <div ref={setAnnotationTarget} className="expansion-canvas-host" /> : showSkuEditor ? <div ref={setAnnotationTarget} className="sku-canvas-host" /> : showApparelEditor ? <div ref={setAnnotationTarget} className="apparel-canvas-host" /> : showRegionalEditor ? <div ref={setAnnotationTarget} className="regional-canvas-host" /> : tool === "retouch" ? <RetouchPreview /> : (
                         <div className="cstate show preview-empty-state">
                             <div className="preview-empty-content">
                                 <div className="preview-empty-art" aria-hidden="true">

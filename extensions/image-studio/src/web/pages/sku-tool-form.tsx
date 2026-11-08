@@ -2,11 +2,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@buildingai/ui/componen
 import { ChevronDown, CirclePlus, LoaderCircle, Pencil, Scan, Trash2, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { SKU_LIMIT, SKU_REGION_LIMIT, TOOL_RATIOS, type ToolWorkflowInput } from "../../api/shared/tool-workflow";
+import { SKU_LIMIT, SKU_REGION_LIMIT, TOOL_RATIOS, validateToolWorkflow, type ToolWorkflowInput } from "../../api/shared/tool-workflow";
 import { useGenerationBilling, useProductImagesQuery, useUploadProductImageMutation } from "../services/generation";
 import type { ProductImage } from "../services/types";
 import { MaterialDialog } from "./material-picker";
-import { AssetRolePicker } from "./specialized-components";
+import { AssetRolePicker, ProtectedAsset } from "./specialized-components";
+import { APPAREL_PREVIEW_IMAGES, apparelModels, apparelSkuInput, assertApparelCatalog } from "./apparel-workflow";
 import { buildSpecializedInput, recordWatermarkEdit, referenceLimit, specializedModels, stepWatermarkHistory, validImageFile,
     type WatermarkHistory, type WatermarkMark } from "./specialized-workflow";
 import type { ToolFormProps } from "./tool-form";
@@ -19,11 +20,11 @@ type Variant = { id: string; name: string; edits: Record<string, Edit> };
 const emptyHistory = (): WatermarkHistory => ({ marks: [], past: [], future: [] });
 const ignore = () => undefined;
 
-export function SkuTemplatePreview({ image, regions, onReady }: { image?: ProductImage; regions: WatermarkMark[]; onReady: (ready: boolean) => void }) {
+export function SkuTemplatePreview({ image, regions, onReady, apparel = false }: { image?: ProductImage; regions: WatermarkMark[]; onReady: (ready: boolean) => void; apparel?: boolean }) {
     return <div className="sku-template-preview" aria-label="SKU 模板预览">{image ?
         <WatermarkCanvas image={image} history={{ marks: regions, past: [], future: [] }} selected="" disabled variant="sku" readOnly
             onSelect={ignore} onChange={ignore} onHistory={ignore} onReady={onReady} /> :
-        <div className="sku-template-empty"><figure><img src="/extension/image-studio/images/mug-scene.jpg" alt="杯子模板素材示例" /><figcaption>模板示例</figcaption></figure><h3>商品 SKU</h3></div>}
+        <div className="sku-template-empty"><figure><img src={apparel ? APPAREL_PREVIEW_IMAGES.apparel_sku : "/extension/image-studio/images/mug-scene.jpg"} alt={apparel ? "服装模板素材示例" : "杯子模板素材示例"} /><figcaption>模板示例</figcaption></figure><h3>{apparel ? "服饰 SKU" : "商品 SKU"}</h3></div>}
     </div>;
 }
 
@@ -52,7 +53,8 @@ export function SkuRegionsModal({ image, regions, disabled, onApply, onClose }: 
     </MaterialDialog>;
 }
 
-export default function SkuToolForm({ capabilities, locked, onSubmit, annotationTarget, onEditSource }: ToolFormProps) {
+export default function SkuToolForm({ tool = "sku", capabilities, locked, onSubmit, annotationTarget, onEditSource, taskSnapshot }: Omit<ToolFormProps, "tool"> & { tool?: "sku" | "apparel_sku" }) {
+    const apparel = tool === "apparel_sku";
     const id = useId();
     const [template, setTemplate] = useState<ProductImage>();
     const [regions, setRegions] = useState<WatermarkMark[]>([]);
@@ -69,6 +71,9 @@ export default function SkuToolForm({ capabilities, locked, onSubmit, annotation
     const replacementInput = useRef<HTMLInputElement>(null);
     const operation = useRef(false);
     const mounted = useRef(true);
+    const restored = useRef<string | undefined>(undefined);
+    const [loadedReferences, setLoadedReferences] = useState<Set<string>>(() => new Set());
+    const referenceReadiness = useRef(new Map<string, (ready: boolean) => void>());
     const current = useRef({ template, regions, variants, locked });
     current.current = { template, regions, variants, locked };
     useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -78,17 +83,40 @@ export default function SkuToolForm({ capabilities, locked, onSubmit, annotation
         const image = variant.edits[region.id]?.image;
         return image ? [[image.id, image] as const] : [];
     }))).values()];
-    const models = specializedModels(capabilities, "sku", (template ? 1 : 0) + references.length);
+    const models = apparel ? apparelModels(capabilities, "apparel_sku", (template ? 1 : 0) + references.length)
+        : specializedModels(capabilities, "sku", (template ? 1 : 0) + references.length);
     const model = modelChoice ? capabilities.models.find((value) => value.id === modelChoice) : models[0];
     const capable = Boolean(model && models.some((value) => value.id === model.id));
     const limit = referenceLimit(model);
     const liveModel = useRef({ id: model?.id, limit, capable });
     liveModel.current = { id: model?.id, limit, capable };
-    const billing = useGenerationBilling(model?.id ?? "", variants.length, !locked && capable, "sku");
+    const billing = useGenerationBilling(model?.id ?? "", variants.length, !locked && capable, tool);
     const busy = locked || pending || upload.isPending;
-    const editable = () => mounted.current && !current.current.locked && !operation.current && !busy;
+    const liveBusy = useRef(busy); liveBusy.current = busy;
+    const editable = () => mounted.current && !current.current.locked && !operation.current && !liveBusy.current;
 
     useEffect(() => {
+        if (!apparel || !taskSnapshot || taskSnapshot.toolKey !== tool || restored.current === taskSnapshot.id || operation.current || pending
+            || !products.isSuccess || products.isFetching || products.isError) return;
+        restored.current = taskSnapshot.id;
+        const saved = taskSnapshot.toolInput;
+        if (!saved || saved.tool !== tool || validateToolWorkflow(saved) || !saved.design?.skuRegions || !saved.design.skuVariants) {
+            setError("历史服饰 SKU 参数无效，结果仍可查看"); return;
+        }
+        const lookup = (imageId: string): ProductImage => products.data?.find((image) => image.id === imageId)
+            ?? { id: imageId, name: "图片不可用", width: 0, height: 0, mediaType: "image/png", size: 0 };
+        const nextTemplate = lookup(saved.assetIds[0]!);
+        const nextRegions = saved.design.skuRegions.map((region) => ({ ...region, region: { ...region.region } }));
+        const nextVariants = saved.design.skuVariants.map((variant, index) => ({ id: `sku-${index + 1}`, name: variant.name,
+            edits: Object.fromEntries((variant.edits ?? []).map((edit) => [edit.regionId, { instruction: edit.instruction,
+                ...(edit.referenceAssetId ? { image: lookup(edit.referenceAssetId) } : {}) }])) }));
+        current.current = { ...current.current, template: nextTemplate, regions: nextRegions, variants: nextVariants };
+        setTemplate(nextTemplate); setRegions(nextRegions); setVariants(nextVariants); nextVariant.current = nextVariants.length + 1;
+        setModelChoice(saved.modelId); setRatio(saved.ratio); setInstructions(saved.instructions ?? ""); setReady(false); setRegionOpen(false); setError("");
+    }, [apparel, tool, taskSnapshot, products.data, products.isSuccess, products.isFetching, products.isError, pending]);
+
+    useEffect(() => {
+        if (apparel) return;
         if (!products.isSuccess || products.isPending || products.isFetching || products.isError || !products.data || pending || upload.isPending || operation.current) return;
         const ids = new Set(products.data.map((image) => image.id));
         const live = current.current;
@@ -101,7 +129,7 @@ export default function SkuToolForm({ capabilities, locked, onSubmit, annotation
                 [key, edit.image && !ids.has(edit.image.id) ? { instruction: edit.instruction } : edit])) })));
             onEditSource?.();
         }
-    }, [products.data, products.isSuccess, products.isPending, products.isFetching, products.isError, pending, upload.isPending, onEditSource]);
+    }, [apparel, products.data, products.isSuccess, products.isPending, products.isFetching, products.isError, pending, upload.isPending, onEditSource]);
 
     let input: ToolWorkflowInput | undefined;
     let validation = "";
@@ -111,12 +139,19 @@ export default function SkuToolForm({ capabilities, locked, onSubmit, annotation
             skuRegions: regions.map(({ id: regionId, region }) => ({ id: regionId, region })),
             skuVariants: variants.map((variant) => ({ name: variant.name, instruction: "", edits: regions.map((region) => ({ regionId: region.id,
                 instruction: variant.edits[region.id]?.instruction ?? "", ...(variant.edits[region.id]?.image ? { referenceAssetId: variant.edits[region.id]!.image!.id } : {}) })) })) }, limit);
-    } catch (failure) { validation = failure instanceof Error ? failure.message : "请检查 SKU 输入"; }
-    const canSubmit = !busy && capable && billing.ready && ready && Boolean(input);
+        if (apparel) {
+            input = apparelSkuInput(input);
+            if (!products.isSuccess || products.isFetching || products.isError) throw new Error("请等待素材目录加载完成");
+            assertApparelCatalog(input, [], products.data ?? []);
+        }
+    } catch (failure) { input = undefined; validation = failure instanceof Error ? failure.message : "请检查 SKU 输入"; }
+    const canSubmit = !busy && capable && billing.ready && ready && Boolean(input)
+        && (!apparel || references.every((image) => loadedReferences.has(image.id)));
+    const submission = useRef({ input, canSubmit, validation }); submission.current = { input, canSubmit, validation };
     const costLabel = billing.quote?.isSuccess && !billing.insufficient ? `本次消耗${billing.quote.data.total}积分` : billing.costText;
 
     function changeTemplate(images: ProductImage[], internal = false) {
-        if (!internal && !editable()) return false;
+        if ((!internal && !editable()) || !mounted.current || current.current.locked) return false;
         if (images.length > 1 || (images.length && !liveModel.current.limit)) { setError("请选择一张 SKU 模板图"); return false; }
         if (model) setModelChoice(model.id);
         const image = images[0];
@@ -129,13 +164,13 @@ export default function SkuToolForm({ capabilities, locked, onSubmit, annotation
     }
 
     function updateVariant(variantId: string, change: (variant: Variant) => Variant, internal = false) {
-        if (!internal && !editable()) return;
+        if ((!internal && !editable()) || !mounted.current || current.current.locked) return;
         const values = current.current.variants.map((variant) => variant.id === variantId ? change(variant) : variant);
         current.current = { ...current.current, variants: values }; setVariants(values); setError(""); onEditSource?.();
     }
 
     function changeReference(variantId: string, regionId: string, images: ProductImage[], internal = false) {
-        if ((!internal && !editable()) || images.length > 1 || !current.current.regions.some((region) => region.id === regionId)
+        if ((!internal && !editable()) || !mounted.current || current.current.locked || images.length > 1 || !current.current.regions.some((region) => region.id === regionId)
             || !current.current.variants.some((variant) => variant.id === variantId)) return false;
         const image = images[0];
         if (image?.id === current.current.template?.id) { setError("模板图不能同时作为变体参考图"); return false; }
@@ -153,6 +188,9 @@ export default function SkuToolForm({ capabilities, locked, onSubmit, annotation
         if (files.length !== 1 || !file || !validImageFile(file)) { setError("请选择一张不超过 10 MiB 的 PNG、JPEG 或 WebP 图片"); return; }
         if (!target && template && !replace) { setError("模板图最多一张，请使用重新上传"); return; }
         if (!model || !capable) { setError("请选择可用的参考图编辑模型"); return; }
+        if (apparel && (!products.isSuccess || products.isFetching || products.isError || (products.data?.length ?? 0) >= 40)) {
+            setError("请检查素材目录与 40 张素材配额"); return;
+        }
         operation.current = true; setPending(true); setError("");
         const modelId = model.id, imageId = template?.id;
         try {
@@ -176,20 +214,27 @@ export default function SkuToolForm({ capabilities, locked, onSubmit, annotation
     async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (!editable()) return;
-        if (!canSubmit || !input) { setError(validation || (!ready ? "请等待模板图加载或重新编辑" : billing.costText)); return; }
+        const latest = submission.current;
+        if (!latest.canSubmit || !latest.input) { setError(latest.validation || "请等待参考图加载并检查费用"); return; }
         operation.current = true; setPending(true); setError("");
-        try { await onSubmit(input); }
+        try { await onSubmit(latest.input); }
         catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : "提交失败，请稍后重试"); }
         finally { operation.current = false; if (mounted.current) setPending(false); }
     }
 
-    const preview = <SkuTemplatePreview image={template} regions={regions} onReady={setReady} />;
-    return <form className="ftpl show specialized-form specialized-sku sku-form" aria-label="商品SKU图" data-workflow="sku" onSubmit={submit} noValidate>
+    const preview = <><SkuTemplatePreview image={template} regions={regions} onReady={setReady} apparel={apparel} />
+        {apparel && references.length > 0 && <section className="apparel-originals" aria-label="SKU 区域参考预览">{references.map((image) => {
+            if (!referenceReadiness.current.has(image.id)) referenceReadiness.current.set(image.id, (loaded) => {
+                if (mounted.current) setLoadedReferences((previous) => { const next = new Set(previous); if (loaded) next.add(image.id); else next.delete(image.id); return next; });
+            });
+            return <figure key={image.id}><ProtectedAsset image={image} original available={image.width > 0 && image.height > 0} onReady={referenceReadiness.current.get(image.id)} /><figcaption>区域参考</figcaption></figure>;
+        })}</section>}</>;
+    return <form className="ftpl show specialized-form specialized-sku sku-form" aria-label={apparel ? "服饰SKU变体" : "商品SKU图"} data-workflow={tool} onSubmit={submit} noValidate>
         {!capable && <p className="specialized-message" role="status">{modelChoice ? "所选模型不支持当前输入，已选素材已保留。" : "当前没有可用的 SKU 图片模型。"}</p>}
         <fieldset className="specialized-fields" disabled={busy}>
             <section className="specialized-band sku-template-section">
                 <AssetRolePicker appearance="links" label="SKU 模板图" title="SKU模板图" images={template ? [template] : []} max={Math.min(1, limit)} disabled={busy} dropzone
-                    description={<p className="sku-hint">选一张结构最完整的成品图作为模板，框选要跟随SKU变动的区域，最多支持{SKU_REGION_LIMIT}个SKU变体区域</p>}
+                    description={apparel ? undefined : <p className="sku-hint">选一张结构最完整的成品图作为模板，框选要跟随SKU变动的区域，最多支持{SKU_REGION_LIMIT}个SKU变体区域</p>}
                     onChange={changeTemplate} onFiles={(files) => uploadFiles(files)} />
                 {template && <div className="sku-template-actions">
                     <button type="button" disabled={busy} onClick={() => { if (editable()) { onEditSource?.(); setRegionOpen(true); } }}>重新编辑</button>
@@ -226,6 +271,17 @@ export default function SkuToolForm({ capabilities, locked, onSubmit, annotation
                                 onChange={(images) => changeReference(variant.id, region.id, images)} onFiles={(files) => uploadFiles(files, { variantId: variant.id, regionId: region.id })} />
                             <textarea aria-label={`${label} 变化要求`} placeholder="文字说明（选填），如：改为绿色" rows={1} maxLength={300} value={edit.instruction}
                                 onChange={(event) => updateVariant(variant.id, (value) => ({ ...value, edits: { ...value.edits, [region.id]: { ...edit, instruction: event.target.value } } }))} />
+                            {apparel && <label className="apparel-color">区域颜色<input type="color" aria-label={`${label} 颜色`} disabled={busy}
+                                value={edit.instruction.match(/#[0-9a-f]{6}/i)?.[0] ?? "#000000"} onChange={(event) => {
+                                    const color = event.target.value;
+                                    if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+                                    updateVariant(variant.id, (value) => {
+                                        const previous = value.edits[region.id] ?? { instruction: "" };
+                                        const text = previous.instruction.replace(/(?:^|\n)区域颜色：#[0-9a-f]{6}/gi, "");
+                                        const instruction = `${text}${text ? "\n" : ""}区域颜色：${color.toUpperCase()}`;
+                                        return instruction.length <= 300 ? { ...value, edits: { ...value.edits, [region.id]: { ...previous, instruction } } } : value;
+                                    });
+                                }} /></label>}
                         </div>;
                     })}
                 </article>)}

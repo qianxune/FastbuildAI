@@ -47,6 +47,11 @@ jest.mock("../src/api/db/entities/image-generation.entity", () => ({
 }));
 
 describe("image studio credit quotes", () => {
+    it("prices ten apparel_sku outputs only in their explicit quote scope", () => {
+        expect(quoteGenerationCredits({ power: 3 }, 10, "apparel_sku")).toEqual({ unitPrice: 3, count: 10, total: 30 });
+        expect(() => quoteGenerationCredits({ power: 3 }, 11, "apparel_sku")).toThrow();
+        expect(() => quoteGenerationCredits({ power: 3 }, 10)).toThrow();
+    });
     it("prices up to ten main outputs and rejects eleven without lifting other tool limits", () => {
         expect(quoteGenerationCredits({ power: 3 }, 10, "main")).toEqual({ unitPrice: 3, count: 10, total: 30 });
         expect(() => quoteGenerationCredits({ power: 3 }, 11, "main")).toThrow();
@@ -226,6 +231,34 @@ describe("transactional image studio billing", () => {
         expect(state.balance()).toBe(70); expect(state.task()!.billingAmount).toBe(30);
         await state.fail(); expect(state.balance()).toBe(100);
         expect(state.addUserPower).toHaveBeenCalledTimes(1);
+    });
+
+    it("validates apparel_sku contracts before charging and refunds the frozen full amount once", async () => {
+        const state = fixture();
+        const toolInput = { tool: "apparel_sku" as const, modelId: "11111111-1111-4111-8111-111111111111", assetIds: ["22222222-2222-4222-8222-222222222222"],
+            instructions: "", count: 10, ratio: "1:1" as const, design: { apparel: { sourceAssetIds: ["22222222-2222-4222-8222-222222222222"] },
+                skuRegions: [{ id: "front", region: { x: .1, y: .1, width: .2, height: .2 } }],
+                skuVariants: Array.from({ length: 10 }, (_value, index) => ({ name: `Cloth ${index + 1}`, instruction: "", edits: [{ regionId: "front", instruction: "Make green" }] })) } };
+        for (const invalid of [undefined, null, {}, { ...toolInput, tool: "sku" }, { ...toolInput, count: 9 }, { ...toolInput, instructions: null },
+            { ...toolInput, design: { ...toolInput.design, skuVariants: [] } }, { ...toolInput, design: { ...toolInput.design, skuVariants: [null] } }]) {
+            await expect(state.service.createTask(state.manager, { userId: "owner", toolKey: "apparel_sku", count: 10, toolInput: invalid as never }, { power: 3 })).rejects.toThrow();
+        }
+        expect(state.repository.save).not.toHaveBeenCalled(); expect(state.deductUserPower).not.toHaveBeenCalled();
+        await state.transaction(() => state.service.createTask(state.manager, { userId: "owner", toolKey: "apparel_sku", count: 10, toolInput, status: ImageGenerationStatus.QUEUED }, { power: 3 }));
+        expect(state.deductUserPower).toHaveBeenCalledTimes(1); expect(state.balance()).toBe(70);
+        await Promise.all([state.cancel(), state.fail(), state.cancel()]);
+        expect(state.addUserPower).toHaveBeenCalledTimes(1); expect(state.balance()).toBe(100);
+    });
+
+    it("rejects invalid ordinary apparel and dewrinkle counts before persistence", async () => {
+        const state = fixture();
+        for (const tool of ["outfit", "dewrinkle"] as const) {
+            const toolInput = { tool, modelId: "11111111-1111-4111-8111-111111111111", assetIds: ["22222222-2222-4222-8222-222222222222"],
+                count: tool === "outfit" ? 5 : 2, instructions: "", ratio: "1:1" as const,
+                design: { apparel: { sourceAssetIds: ["22222222-2222-4222-8222-222222222222"], ...(tool === "outfit" ? { style: "智能推荐" as const } : {}) } } };
+            await expect(state.service.createTask(state.manager, { userId: "owner", toolKey: tool, count: toolInput.count, toolInput }, { power: 3 })).rejects.toThrow();
+        }
+        expect(state.repository.save).not.toHaveBeenCalled(); expect(state.deductUserPower).not.toHaveBeenCalled();
     });
 
     it.each([

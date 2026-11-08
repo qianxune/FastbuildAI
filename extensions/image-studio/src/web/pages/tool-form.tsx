@@ -12,6 +12,8 @@ import { useToolSuggestionsMutation } from "../services/tool-generation";
 import ImageEditForm from "./image-edit-form";
 import SpecializedToolForm from "./specialized-tool-form";
 import SkuToolForm from "./sku-tool-form";
+import ApparelToolForm from "./apparel-tool-form";
+import { isApparelToolKey } from "../../api/shared/apparel-workflow";
 import { isSpecializedTool } from "./specialized-workflow";
 import type { ImageGeneration } from "../services/types";
 import type { AssetApplication } from "../../api/shared/assets";
@@ -23,6 +25,7 @@ export interface ToolFormProps {
     defaultCount?: number;
     annotationTarget?: HTMLElement | null;
     onEditSource?: () => void;
+    onOpenAssets?: () => void;
     taskSnapshot?: ImageGeneration | null;
     requestedAsset?: AssetApplication | null;
     onAssetConsumed?: (requestId: number, applied: boolean, message?: string) => void;
@@ -83,7 +86,8 @@ const UNAVAILABLE_MESSAGES: Partial<Record<ToolKey, { title: string; description
 };
 
 export default function ToolForm(props: ToolFormProps) {
-    if (props.tool === "sku") return <SkuToolForm key={props.tool} {...props} />;
+    if (props.tool === "sku" || props.tool === "apparel_sku") return <SkuToolForm key={props.tool} {...props} tool={props.tool} />;
+    if (isApparelToolKey(props.tool)) return <ApparelToolForm key={props.tool} {...props} tool={props.tool} />;
     if (props.tool === "watermark" || props.tool === "translate" || props.tool === "retouch" || props.tool === "recolor" || props.tool === "expand" || props.tool === "redraw" || props.tool === "cutout") return <ImageEditForm key={props.tool} {...props} tool={props.tool} />;
     if (isSpecializedTool(props.tool)) return <SpecializedToolForm key={props.tool} {...props} tool={props.tool} />;
     if (!isToolEditKey(props.tool) && props.tool !== "suggest") {

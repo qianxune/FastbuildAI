@@ -73,6 +73,13 @@ export class AssetRecordService {
         });
     }
 
+    async assertOwnedModel(manager: EntityManager, userId: string, assetId: string, imageId: string) {
+        const record = await manager.getRepository(AssetRecord).findOne({ where: { id: assetId, userId } });
+        if (!record || record.kind !== "model" || !Array.isArray(record.imageIds) || record.imageIds.length !== 1
+            || record.imageIds[0]?.toLowerCase() !== imageId.toLowerCase())
+            throw HttpErrorFactory.badRequest("目标模特不存在或图片已更换，请重新选择模特");
+    }
+
     async assertImageUnreferenced(manager: EntityManager, userId: string, imageId: string) {
         const referenced = await manager.getRepository(AssetRecord).createQueryBuilder("asset")
             .where("asset.userId = :userId", { userId })

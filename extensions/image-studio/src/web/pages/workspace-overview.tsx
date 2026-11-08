@@ -9,8 +9,10 @@ import { loadGenerationThumbnail, loadWhenVisible, useCreditBalanceQuery, useGen
 import type { ImageGeneration } from "../services/types";
 import { requestAccountAction } from "./workspace-account";
 import { TOOL_ICONS, TOOL_LABELS, type WorkspaceView } from "./workspace-navigation";
+import { APPAREL_KEYS } from "../../api/shared/apparel-workflow";
+import { APPAREL_PREVIEW_IMAGES } from "./apparel-workflow";
 
-const asset = (name: string) => `/extension/image-studio/images/${name}.jpg`;
+const asset = (name: string) => name.startsWith("/") || name.startsWith("https://") ? name : `/extension/image-studio/images/${name}.jpg`;
 const ENTRIES: { tool: ToolKey; image: string; companion?: string; group: string }[] = [
     { tool: "main", image: "perfume-after", companion: "perfume-before", group: "电商生图" },
     { tool: "detail", image: "bottle-scene", group: "电商生图" },
@@ -25,6 +27,7 @@ const ENTRIES: { tool: ToolKey; image: string; companion?: string; group: string
     { tool: "retouch", image: "sneaker-after", group: "AI 修图" },
     { tool: "sku", image: "perfume-before", group: "电商生图" },
     { tool: "redraw", image: "sneaker-before", group: "AI 修图" },
+    ...APPAREL_KEYS.map((tool) => ({ tool, image: APPAREL_PREVIEW_IMAGES[tool], group: "服饰穿戴" })),
 ];
 const STATUSES = { queued: "排队中", processing: "生成中", completed: "已完成", failed: "失败", cancelled: "已取消" };
 

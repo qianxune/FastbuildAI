@@ -28,6 +28,8 @@ import {
     GenerationService,
 } from "../src/api/modules/generation/services/generation.service";
 import { TOOL_RATIOS } from "../src/api/shared/tool-workflow";
+import { APPAREL_KEYS } from "../src/api/shared/apparel-workflow";
+import { TOOL_KEYS } from "../src/api/shared/tools";
 
 jest.mock("@buildingai/ai-sdk", () => ({
     MODEL_TYPES: { TEXT_TO_IMAGE: "text-to-image", LLM: "llm" },
@@ -294,6 +296,30 @@ describe("generation capabilities", () => {
         expect(getProviderMock).not.toHaveBeenCalled(); expect(generateImage).not.toHaveBeenCalled();
     });
 
+    it("routes only the explicit apparel_sku quote category without provider calls", async () => {
+        const quote = jest.fn().mockResolvedValue({ unitPrice: 3, count: 10, total: 30 });
+        const controller = new GenerationController({ quote } as never);
+        await expect(controller.quote("configured-model", 10, "apparel_sku")).resolves.toEqual({ unitPrice: 3, count: 10, total: 30 });
+        expect(quote).toHaveBeenCalledWith("configured-model", 10, "apparel_sku");
+        await expect(controller.quote("configured-model", 10, "outfit")).rejects.toThrow();
+        expect(quote).toHaveBeenCalledTimes(1); expect(generateImage).not.toHaveBeenCalled();
+    });
+
+    it("advertises apparel by the selected adapter reference limit without preparing credentials", async () => {
+        const adapter = { specificationVersion: "v3", doGenerate: jest.fn(), supportsReferenceImages: true, provider: "volcengine", modelId: "doubao-seedream-5-0-lite" };
+        for (const maxReferenceImages of [0, 1, 2, 3]) {
+            image.mockReturnValue({ model: { ...adapter, maxReferenceImages } });
+            const result = await service.capabilities();
+            for (const key of APPAREL_KEYS) {
+                const requiresModel = key === "tryon" || key === "model_swap";
+                const available = maxReferenceImages >= (requiresModel ? 2 : 1);
+                expect(result.tools.find((tool) => tool.key === key)).toMatchObject({ status: available ? "available" : "unavailable", limits: { maxInputImages: available ? maxReferenceImages : 0 } });
+            }
+        }
+        expect(getProviderConfig).not.toHaveBeenCalled(); expect(getProviderAdapter).not.toHaveBeenCalled();
+        expect(generateImage).not.toHaveBeenCalled();
+    });
+
     it("quotes the configured cutout credits and never prepares image model secrets", async () => {
         jest.mocked(CutoutService.ready).mockResolvedValue(true);
         await expect(service.quote(LOCAL_CUTOUT_MODEL_ID, 1)).resolves.toMatchObject({ total: 0 });
@@ -481,7 +507,7 @@ describe("generation capabilities", () => {
         find.mockResolvedValue([]);
         const result = await service.capabilities();
         expect(result.models).toEqual([]);
-        expect(result.tools).toHaveLength(14);
+        expect(result.tools.map((tool) => tool.key)).toEqual(TOOL_KEYS);
         expect(result.tools.every((tool) => tool.status === "unavailable")).toBe(true);
     });
 });

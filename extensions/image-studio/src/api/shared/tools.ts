@@ -34,6 +34,14 @@ export const TOOL_REGISTRY = {
     expand: { status: "intended", requiredCapabilities: ["reference-image"] },
     translate: { status: "intended", requiredCapabilities: ["reference-image"] },
     suggest: { status: "intended", requiredCapabilities: ["vision"] },
+    tryon: { status: "intended", requiredCapabilities: ["reference-image", "multi-image"] },
+    model_swap: { status: "intended", requiredCapabilities: ["reference-image", "multi-image"] },
+    outfit: { status: "intended", requiredCapabilities: ["reference-image"] },
+    fabric: { status: "intended", requiredCapabilities: ["reference-image"] },
+    apparel_sku: { status: "intended", requiredCapabilities: ["reference-image"] },
+    ugc_outfit: { status: "intended", requiredCapabilities: ["reference-image"] },
+    nail_tryon: { status: "intended", requiredCapabilities: ["reference-image"] },
+    dewrinkle: { status: "intended", requiredCapabilities: ["reference-image"] },
 } as const satisfies Record<string, ToolDefinition>;
 
 export type ToolKey = keyof typeof TOOL_REGISTRY;

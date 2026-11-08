@@ -60,6 +60,23 @@ describe("asynchronous generation client", () => {
         (useQueryClient as jest.Mock).mockReturnValue({ invalidateQueries, setQueryData });
     });
 
+    it("isolates apparel_sku quotes and disables invalid or insufficient requests", async () => {
+        (useQuery as jest.Mock).mockImplementation((options) => ({ data: options.queryKey.includes("credit-balance") ? { balance: 100 } : { total: 30, unitPrice: 3, count: 10 }, isSuccess: true, isFetching: false }));
+        expect(useGenerationBilling("model", 10, true, "apparel_sku").ready).toBe(true);
+        const options = (useQuery as jest.Mock).mock.calls[1][0];
+        expect(options.queryKey.slice(-3)).toEqual(["model", 10, "apparel_sku"]);
+        await options.queryFn();
+        expect(apiHttpClient.get).toHaveBeenCalledWith("/generations/billing/quote", { params: { modelId: "model", count: 10, tool: "apparel_sku" } });
+        for (const count of [0, 11, 1.5, NaN, Infinity]) {
+            expect(useGenerationBilling("model", count, true, "apparel_sku").ready).toBe(false);
+            expect((useQuery as jest.Mock).mock.calls.at(-1)[0].enabled).toBe(false);
+        }
+        expect(useGenerationBilling("model", 10).ready).toBe(false);
+        expect(useGenerationBilling("model", 10, false, "apparel_sku").ready).toBe(false);
+        (useQuery as jest.Mock).mockImplementation((options) => ({ data: options.queryKey.includes("credit-balance") ? { balance: 20 } : { total: 30 }, isSuccess: true, isFetching: false }));
+        expect(useGenerationBilling("model", 10, true, "apparel_sku")).toMatchObject({ ready: false, insufficient: true });
+    });
+
     it.each(["queued", "processing", "completed", "failed", "cancelled"])("polls only active status %s", (status) => {
         const active = status === "queued" || status === "processing";
         useGenerationQuery("task-id");

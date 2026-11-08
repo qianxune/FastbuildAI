@@ -75,6 +75,28 @@ describe("creative asset input", () => {
 });
 
 describe("creative asset records", () => {
+    it("checks apparel model snapshots on the caller transaction and tolerates rename only", async () => {
+        const { service, manager, repository, images } = fixture();
+        const model = await service.create("owner", { ...input, kind: "model" });
+        const check = (owner: string, id = model.id, snapshot = imageId) => service.withUserLock(owner,
+            (transaction: unknown) => service.assertOwnedModel(transaction, owner, id, snapshot));
+        await expect(check("owner")).resolves.toBeUndefined();
+        expect(repository.findOne).toHaveBeenLastCalledWith({ where: { id: model.id, userId: "owner" } });
+        await expect(check("other")).rejects.toThrow("目标模特");
+        await expect(check("owner", "deleted")).rejects.toThrow("目标模特");
+        await expect(check("owner", model.id, "22222222-2222-4222-8222-222222222222")).rejects.toThrow("目标模特");
+        await service.update("owner", model.id, { ...input, kind: "model", name: "Renamed", expectedVersion: 1 });
+        await expect(check("owner")).resolves.toBeUndefined();
+        const reference = await service.create("owner", input);
+        await expect(check("owner", reference.id)).rejects.toThrow("目标模特");
+        repository.findOne.mockResolvedValueOnce({ kind: "model", imageIds: [imageId, imageId] });
+        await expect(check("owner")).rejects.toThrow("目标模特");
+        await service.remove("owner", model.id);
+        await expect(check("owner")).rejects.toThrow("目标模特");
+        expect(manager.getRepository).toHaveBeenCalled();
+        expect(images.list).toHaveBeenCalledTimes(3);
+    });
+
     it("persists owned references without copying files, exposing userId or calling generation", async () => {
         const { service, images } = fixture();
         const asset = await service.create("owner", input);

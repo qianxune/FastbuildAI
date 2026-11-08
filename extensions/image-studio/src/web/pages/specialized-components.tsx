@@ -45,8 +45,8 @@ export function FusionPresetGallery({ selected, disabled, onSelect }: FusionPres
     </div>;
 }
 
-export function ProtectedAsset({ image, original = false, onReady }: {
-    image: ProductImage; original?: boolean; onReady?: (ready: boolean) => void;
+export function ProtectedAsset({ image, original = false, onReady, available = true }: {
+    image: ProductImage; original?: boolean; onReady?: (ready: boolean) => void; available?: boolean;
 }) {
     const [loaded, setLoaded] = useState<{ id: string; url: string }>();
     const [failed, setFailed] = useState(false);
@@ -54,12 +54,14 @@ export function ProtectedAsset({ image, original = false, onReady }: {
     useEffect(() => {
         let active = true;
         setLoaded(undefined); setFailed(false); onReady?.(false);
+        if (!available) return;
         const release = (original ? loadProductImage : loadProductThumbnail)(image.id, (url) => {
-            if (active) { setLoaded({ id: image.id, url }); onReady?.(true); }
+            if (active) setLoaded({ id: image.id, url });
         }, () => { if (active) { setFailed(true); onReady?.(false); } });
-        return () => { active = false; release(); };
-    }, [image.id, original, attempt, onReady]);
-    return loaded?.id === image.id ? <img src={loaded.url} alt={image.name || "已选素材"} draggable={false} /> : failed ?
+        return () => { active = false; release(); onReady?.(false); };
+    }, [image.id, original, attempt, onReady, available]);
+    return !available ? <span role="status">图片不可用</span> : loaded?.id === image.id ? <img src={loaded.url} alt={image.name || "已选素材"} draggable={false}
+        onLoad={() => onReady?.(true)} onError={() => { setLoaded(undefined); setFailed(true); onReady?.(false); }} /> : failed ?
         <button type="button" title="重新加载图片" aria-label="重新加载图片" onClick={() => setAttempt((value) => value + 1)}><RefreshCw size={18} />加载失败，重试</button> :
         <span className="specialized-loading" role="status" aria-label="图片加载中"><LoaderCircle size={20} /></span>;
 }
