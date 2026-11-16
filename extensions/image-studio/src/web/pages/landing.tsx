@@ -1,35 +1,88 @@
 import { useAuthStore } from "@buildingai/stores";
-import {
-  ArrowRight,
-  Check,
-  ChevronRight,
-  ImageIcon,
-  Minus,
-  Plus,
-  ScanLine,
-  Sparkles,
-  WandSparkles,
-} from "lucide-react";
-import type { CSSProperties } from "react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowLeftRight, ArrowRight, Camera, Check, CreditCard, Grid2X2, Layers, ShieldCheck, Sparkles } from "lucide-react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useLocation } from "react-router-dom";
+
+import type { ToolKey } from "../../api/shared/tools";
+import { TOOL_ICONS, TOOL_LABELS } from "./workspace-navigation";
 
 const studioUrl = "/studio";
 const imageUrl = (name: string) => `/extension/image-studio/images/${name}`;
+const CATEGORIES = ["全部", "电商主图", "服饰穿搭", "AI修图"] as const;
+type Category = (typeof CATEGORIES)[number];
 
-const tickers = [
-  { target: 2000000, label: "张商品图已生成", format: "comma", small: "+" },
-  { target: 380000, label: "卖家正在使用", format: "comma", small: "+" },
-  { target: 18, label: "平均出图耗时", dec: 0, small: "s" },
-  { target: 4.9, label: "卖家满意度评分", dec: 1, small: "/5" },
+interface CatalogTool {
+  key: ToolKey;
+  group: Exclude<Category, "全部">;
+  desc: string;
+}
+
+const CATALOG: CatalogTool[] = [
+  { key: "main", group: "电商主图", desc: "白底、场景、卖点图，在同一工作流中生成" },
+  { key: "detail", group: "电商主图", desc: "卖点自动分段排版，生成详情长图" },
+  { key: "replica", group: "电商主图", desc: "复刻参考图的布景、光影与风格" },
+  { key: "creative", group: "电商主图", desc: "一句描述，生成商品场景图" },
+  { key: "fusion", group: "电商主图", desc: "多张素材融合成一张完整构图" },
+  { key: "expand", group: "电商主图", desc: "延展背景，自由转换商品图画幅" },
+  { key: "cutout", group: "AI修图", desc: "识别商品边缘，透明背景直接导出" },
+  { key: "recolor", group: "AI修图", desc: "保留版型与材质，切换商品配色" },
+  { key: "watermark", group: "AI修图", desc: "圈选水印与杂物，修复背景纹理" },
+  { key: "translate", group: "AI修图", desc: "图中文字识别与多语言替换" },
+  { key: "retouch", group: "AI修图", desc: "修复瑕疵，增强光影与材质表现" },
+  { key: "sku", group: "AI修图", desc: "多色多码，批量产出商品规格图" },
+  { key: "redraw", group: "AI修图", desc: "圈选局部区域，按描述重新绘制" },
+  { key: "tryon", group: "服饰穿搭", desc: "商品上身，指定场景与姿态" },
+  { key: "model_swap", group: "服饰穿搭", desc: "保留服装，替换为指定模特" },
+  { key: "outfit", group: "服饰穿搭", desc: "单件服装生成整套穿搭方案" },
+  { key: "fabric", group: "服饰穿搭", desc: "面料图生成成衣，预览上身效果" },
+  { key: "apparel_sku", group: "服饰穿搭", desc: "服饰多色多码，批量生成规格图" },
+  { key: "ugc_outfit", group: "服饰穿搭", desc: "将服装融入生活化穿搭场景" },
+  { key: "nail_tryon", group: "服饰穿搭", desc: "上传甲片款式，预览自然上手效果" },
+  { key: "dewrinkle", group: "服饰穿搭", desc: "抚平褶皱，保留细腻面料纹理" },
+];
+
+interface FeaturedTool extends CatalogTool {
+  title: string;
+  tag: string;
+  detail: string;
+  action: string;
+}
+
+const FEATURED: FeaturedTool[] = [
+  { key: "main", group: "电商主图", title: "商品主图生成", tag: "白底 → 置景", detail: "多图输出", action: "立即出图", desc: "白底图或随手拍一键置景，自由选择极简木纹、室外阳光等场景，让商品拥有自己的商业光影。" },
+  { key: "replica", group: "电商主图", title: "爆款光影复刻", tag: "热销同款构图", detail: "参考风格迁移", action: "上传参考图", desc: "上传同类商品的热卖参考图，提取布光、材质反光与景深构图，套用到你的商品上。" },
+  { key: "detail", group: "电商主图", title: "商品详情套图", tag: "全套详情卖点", detail: "统一视觉风格", action: "生成详情", desc: "围绕商品卖点与细节生成分段详情图，保持场景、色温与质感一致，让详情页更有完整感。" },
+  { key: "expand", group: "电商主图", title: "智能扩图与画幅转换", tag: "全向智能延展", detail: "自由画幅", action: "自由扩图", desc: "把正方形产品图延展为横版轮播 Banner 或竖版封面，适配不同渠道的展示尺寸。" },
+  { key: "tryon", group: "服饰穿搭", title: "平铺 / 假人模特试穿", tag: "平铺 → 模特", detail: "自然垂坠", action: "一键试穿", desc: "上传平铺衣服或假人台拍图，预览真人模特上身效果，搭配品牌所需的场景与姿态。" },
+  { key: "model_swap", group: "服饰穿搭", title: "模特换脸与肤色适配", tag: "跨境出海定制", detail: "指定模特", action: "更换模特", desc: "保留服装造型，使用指定模特素材替换人物形象，为不同市场建立一致的品牌视觉。" },
+  { key: "apparel_sku", group: "服饰穿搭", title: "多 SKU 服装批量换色", tag: "无需重复打样", detail: "批量变体", action: "批量换色", desc: "从一件样衣出发，配置颜色与规格变体，批量制作服饰 SKU 图片，减少重复拍摄与整理。" },
+  { key: "dewrinkle", group: "服饰穿搭", title: "服饰智能平整去皱", tag: "平整免烫", detail: "保留面料纹理", action: "一键熨平", desc: "修复运输拆包后的杂乱褶皱与折痕，保留面料本身的纹理，让商品展示更整洁。" },
+  { key: "cutout", group: "AI修图", title: "发丝级一键抠图", tag: "透明通道 PNG", detail: "透明背景", action: "快速抠图", desc: "识别毛绒、玻璃与细线等商品边缘，导出透明背景图片，便于继续置景与排版。" },
+  { key: "watermark", group: "AI修图", title: "全自动去水印与杂物", tag: "涂抹即消", detail: "背景纹理修复", action: "开始消除", desc: "圈选有权编辑的图片中的水印、杂物或无关背景，修复选区并融合周围纹理。" },
+  { key: "translate", group: "AI修图", title: "跨境主图智能翻译", tag: "原版式保留", detail: "多语言替换", action: "智能翻译", desc: "识别图片中的说明文案，替换为目标语言，帮助商品主图与包装展示适配跨境市场。" },
+  { key: "retouch", group: "AI修图", title: "产品画质与质感精修", tag: "微观细节重建", detail: "高清增强", action: "画质提升", desc: "针对商品瑕疵、光影与材质细节进行精修，清晰度与输出规格以所选模型能力为准。" },
+];
+
+const TOOL_GROUPS: { category: CatalogTool["group"]; title: string; desc: string }[] = [
+  { category: "电商主图", title: "专区一 · 爆款商品生图", desc: "白底照一键置景，参考热门光影，让主图、详情与跨渠道画幅一站完成。" },
+  { category: "服饰穿搭", title: "专区二 · 服装与模特换装", desc: "平铺衣服预览模特上身，切换人物形象与商品配色，减少重复拍摄。" },
+  { category: "AI修图", title: "专区三 · 日常修图工坊", desc: "精细抠图、水印消除、图片翻译与质感精修，让每张商品图更出彩。" },
+];
+
+const PLANS = [
+  { name: "周卡", label: "入门体验", price: "9.9", original: "29.9", credits: 100, period: "7 天", badge: "新用户专享" },
+  { name: "月卡", label: "日常测款", price: "39.9", original: "139.9", credits: 530, period: "30 天" },
+  { name: "季卡", label: "稳定换季", price: "109", original: "379", credits: 1770, period: "90 天" },
+  { name: "年卡", label: "长期创作", price: "359", original: "1249", credits: 7200, period: "365 天", badge: "用户首选 · 最受欢迎", hot: true },
+  { name: "尊享季卡", label: "企业高频", price: "1280", original: "3840", credits: 25600, period: "90 天" },
 ];
 
 export default function LandingPage() {
   const { hash } = useLocation();
   const { token, userInfo } = useAuthStore((state) => state.auth);
   const accountName = userInfo?.username || userInfo?.nickname || "我的账户";
-  const [comparison, setComparison] = useState(58);
-  const cmpRef = useRef<HTMLDivElement>(null);
+  const [category, setCategory] = useState<Category>("全部");
+  const [planMode, setPlanMode] = useState<"subscription" | "credits">("subscription");
 
   useEffect(() => {
     if (!hash) return;
@@ -43,580 +96,158 @@ export default function LandingPage() {
     return () => cancelAnimationFrame(frame);
   }, [hash]);
 
-  useEffect(() => {
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) return;
+  const moreTools = CATALOG.filter((tool) => !FEATURED.some((featured) => featured.key === tool.key)
+    && (category === "全部" || category === tool.group));
 
-    // auto comparison animation
-    let t0: number | null = null;
-    let raf: number | null = null;
-    const autoCmp = (ts: number) => {
-      if (t0 === null) t0 = ts;
-      const s = (ts - t0) / 1000;
-      setComparison(50 + 12 * Math.sin(s * 1.1));
-      raf = requestAnimationFrame(autoCmp);
-    };
-    raf = requestAnimationFrame(autoCmp);
-    const stopAuto = () => {
-      if (raf) cancelAnimationFrame(raf);
-    };
-    const el = cmpRef.current;
-    el?.addEventListener("pointerdown", stopAuto, { once: true });
-
-    // reveal observer
-    const io = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((en) => {
-          if (en.isIntersecting) {
-            en.target.classList.add("in");
-            io.unobserve(en.target);
-          }
-        });
-      },
-      { threshold: 0.12, rootMargin: "0px 0px -6% 0px" },
-    );
-    document.querySelectorAll(".rv").forEach((el) => io.observe(el));
-
-    return () => {
-      stopAuto();
-      io.disconnect();
-    };
-  }, []);
-
-  const updateComparison = (clientX: number, element: HTMLElement) => {
-    const bounds = element.getBoundingClientRect();
-    const percentage = ((clientX - bounds.left) / bounds.width) * 100;
-    setComparison(Math.min(96, Math.max(4, percentage)));
-  };
-
-  return (
-    <main className="landing">
-      {/* NAV */}
-      <header className="nav">
-        <div className="nav-in">
-          <a className="wordmark" href="#top" aria-label="出图AI 首页">
-            出图AI <span className="mark-dot" />
+  return <main className="landing">
+    <header className="nav">
+      <div className="nav-in">
+        <a className="wordmark" href="#top" aria-label="出图AI 首页">
+          <span className="lp-logo"><Camera size={19} /></span>出图AI <span className="lp-studio-label">Studio</span>
+        </a>
+        <nav className="nav-links" aria-label="首页导航">
+          <a href="#tools" onClick={() => setCategory("电商主图")}>电商生图</a>
+          <a href="#tools" onClick={() => setCategory("服饰穿搭")}>服装模特</a>
+          <a href="#tools" onClick={() => setCategory("AI修图")}>修图工具箱</a>
+          <a href="#tools" onClick={() => setCategory("全部")}>效果案例</a>
+          <a href="#pricing">收费价格</a>
+        </nav>
+        <div className="nav-right">
+          <a className="link-dim" href={studioUrl} target="_top">{token ? "控制台" : "登录"}</a>
+          <a className="btn btn-lime btn-sm" href={studioUrl} target="_top" title={token ? accountName : undefined} style={{ minWidth: 0, maxWidth: 160 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{token ? accountName : "免费开始"}</span>
           </a>
-          <nav className="nav-links">
-            <a href="#features">功能</a>
-            <a href="#pricing">价格</a>
-            <a href="#cases">案例</a>
-            <a href="#footer">更新日志</a>
-          </nav>
-          <div className="nav-right">
-            <a className="link-dim" href={studioUrl} target="_top">
-              {token ? "控制台" : "登录"}
-            </a>
-            <a
-              className="btn btn-lime btn-sm"
-              href={studioUrl}
-              target="_top"
-              title={token ? accountName : undefined}
-              style={{ minWidth: 0, maxWidth: 160 }}
-            >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {token ? accountName : "免费开始"}
-              </span>
-            </a>
+        </div>
+      </div>
+    </header>
+
+    <section className="lp-hero" id="top">
+      <div className="wrap lp-hero-layout">
+        <div className="lp-hero-copy">
+          <div className="lp-kicker"><span />商业视觉工坊 · 让好商品被看见</div>
+          <h1 className="lp-hero-title">手机随手平拍，<br /><span>轻松生成商业大片</span></h1>
+          <p className="lp-hero-sub">告别繁琐布光与昂贵影棚租赁。随手平拍即可搭配商业光影与专属场景，让每张商品图都成为你的品牌门面。</p>
+          <div className="lp-hero-cta">
+            <a className="btn btn-lime btn-lg" href={studioUrl} target="_top"><Sparkles size={17} />免费生成第一张</a>
+            <a className="btn btn-ghost btn-lg" href="#tools" onClick={() => setCategory("全部")}><Grid2X2 size={17} />浏览 12 大出图工坊</a>
+          </div>
+          <div className="lp-trust">
+            <span><Check size={15} />商品、服饰与修图一站完成</span>
+            <span><Check size={15} />支持多场景商业创作</span>
+            <span><Check size={15} />可视化配置工作流</span>
           </div>
         </div>
-      </header>
+        <HeroComparison />
+      </div>
+    </section>
 
-      {/* HERO */}
-      <section className="hero" id="top">
-        <div className="wrap hero-grid">
-          <div>
-            <span className="eyebrow rv">AI E-COMMERCE IMAGERY · 电商出图引擎 V2</span>
-            <h1 className="rv" data-d="1">
-              商品照片进，<br />
-              <span style={{ color: "var(--lime)" }}>爆款大图</span>出
-            </h1>
-            <p className="hero-sub rv" data-d="2">
-              上传一张随手拍的商品图，出图AI 自动完成布景、打光、文案排版——白底图、场景图、卖点图一次四张，直接上架。
-            </p>
-            <div className="hero-cta rv" data-d="3">
-              <a className="btn btn-lime btn-lg" href={studioUrl} target="_top">
-                免费生成第一张
-              </a>
-              <a className="btn btn-ghost btn-lg" href="#features">
-                看看能做什么
-              </a>
-            </div>
-            <p className="trust rv" data-d="4">
-              注册即送 <b>30 积分</b> · 无需信用卡 · 平均 18 秒出图
-            </p>
+    <section className="sec lp-tools" id="tools">
+      <div className="wrap">
+        <div className="lp-catalog-heading">
+          <div className="sec-head">
+            <span className="sec-eyebrow">E-COMMERCE PRODUCTION MATRIX / 01—12</span>
+            <h2 className="sec-title">一个工作台，搞定电商出图全流程</h2>
+            <p className="sec-desc">告别多工具频繁切换。白底置景、真人模特换装与精细修图，一站式解决。</p>
           </div>
-
-          <div className="hero-visual rv" data-d="2">
-            <div
-              ref={cmpRef}
-              className="cmp"
-              style={{ "--pos": `${comparison}%` } as CSSProperties}
-              onPointerDown={(event) => {
-                const el = event.currentTarget;
-                el.setPointerCapture(event.pointerId);
-                updateComparison(event.clientX, el);
-              }}
-              onPointerMove={(event) => {
-                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                  updateComparison(event.clientX, event.currentTarget);
-                }
-              }}
-              role="slider"
-              aria-label="查看 AI 生成前后对比"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              tabIndex={0}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowLeft") setComparison((v) => Math.max(4, v - 4));
-                if (event.key === "ArrowRight") setComparison((v) => Math.min(96, v + 4));
-              }}
-            >
-              <img className="cmp-img" src={imageUrl("perfume-before.jpg")} alt="商品原图" />
-              <div
-                className="cmp-after"
-                style={{ clipPath: `inset(0 calc(100% - ${comparison}%) 0 0)` }}
-              >
-                <img className="cmp-img" src={imageUrl("perfume-after.jpg")} alt="AI 生成结果" />
-              </div>
-              <div className="cmp-handle" style={{ left: `${comparison}%` }}>
-                <span className="cmp-grip">
-                  <ScanLine width={16} height={16} />
-                </span>
-              </div>
-              <span className="cmp-tag l">原图</span>
-              <span className="cmp-tag r">AI 生成</span>
-              <div className="chip chip-a">
-                <span className="chip-dot" /> 生成完成 · <b>4 张</b> · 18s
-              </div>
-              <div className="chip chip-b">-30 积分</div>
-            </div>
+          <div className="lp-tabs" role="group" aria-label="工具分类">
+            {CATEGORIES.map((item) => <button key={item} type="button" aria-pressed={category === item} className={`lp-tab${category === item ? " on" : ""}`} onClick={() => setCategory(item)}>
+              <Grid2X2 size={14} />{item === "全部" ? "全部工坊 (12)" : TOOL_GROUPS.find((group) => group.category === item)?.title.split(" · ")[1]}
+            </button>)}
           </div>
         </div>
-      </section>
-
-      {/* BENTO / 工具矩阵 */}
-      <section className="sec" id="features" style={{ borderTop: "1px solid var(--line)", paddingTop: 96 }}>
-        <div className="wrap">
-          <div className="sec-head rv">
-            <span className="sec-eyebrow">
-              <b>§02</b> — 工具矩阵
-            </span>
-            <h2 className="sec-title">一个工作台，覆盖商品出图全流程</h2>
-            <p className="sec-desc">从主图到详情页，从精修到扩图。所有工具共享同一个画布与积分体系，随取随用。</p>
-          </div>
-
-          <div className="bento">
-            <a className="tile t-main rv" href={studioUrl} target="_top">
-              <span className="tile-no">§01</span>
-              <h3>商品主图</h3>
-              <p>白底图、场景图、卖点图一次四张。拖动滑块，看看同一只鞋的两种命运。</p>
-              <div className="mini-cmp" style={{ "--pos": "62%" } as CSSProperties}>
-                <img className="cmp-img" src={imageUrl("sneaker-before.jpg")} alt="球鞋原图" />
-                <div
-                  className="cmp-after"
-                  style={{ clipPath: "inset(0 calc(100% - 62%) 0 0)" }}
-                >
-                  <img className="cmp-img" src={imageUrl("sneaker-after.jpg")} alt="球鞋出图" />
-                </div>
-                <div className="cmp-handle" style={{ left: "62%" }}>
-                  <span className="cmp-grip">
-                    <ScanLine width={14} height={14} />
+        <div className="lp-tool-groups">
+          {TOOL_GROUPS.filter((group) => category === "全部" || group.category === category).map((group) => <section className="lp-tool-group" key={group.category} aria-label={group.title}>
+            <div className="lp-group-head">
+              <span className="lp-group-number">{String(TOOL_GROUPS.indexOf(group) + 1).padStart(2, "0")}</span>
+              <div><h3>{group.title}</h3><p>{group.desc}</p></div>
+              <span className="lp-group-count">4 项能力</span>
+            </div>
+            <div className="lp-grid">
+              {FEATURED.filter((item) => item.group === group.category).map((item) => {
+                const Icon = TOOL_ICONS[item.key];
+                return <a className="lp-tool" key={item.key} href={studioUrl} target="_top" aria-label={TOOL_LABELS[item.key]}>
+                  <span className="lp-tool-media">
+                    <img src={imageUrl(`home-${item.key}.jpg`)} alt={`${item.title}效果示例`} loading="lazy" />
+                    <span className="lp-tool-tag">{item.tag}</span><span className="lp-tool-detail">{item.detail}</span>
                   </span>
-                </div>
-                <span className="cmp-tag l">原图</span>
-                <span className="cmp-tag r">出图</span>
-              </div>
-            </a>
-
-            <a className="tile t-replica rv" data-d="1" href={studioUrl} target="_top">
-              <span className="tile-no">§02</span>
-              <h3>爆款复刻</h3>
-              <p>丢一张对标图，复刻同款布景与光影</p>
-              <div className="tile-visual">
-                <img src={imageUrl("perfume-after.jpg")} alt="爆款复刻示意" />
-              </div>
-            </a>
-
-            <a className="tile t-retouch rv" data-d="2" href={studioUrl} target="_top">
-              <span className="tile-no">§03</span>
-              <h3>产品精修</h3>
-              <p>瑕疵修复、质感增强，一键到位</p>
-              <div className="tile-visual">
-                <img src={imageUrl("bottle-scene.jpg")} alt="产品精修示意" />
-              </div>
-            </a>
-
-            <a className="tile t-expand rv" href={studioUrl} target="_top">
-              <span className="tile-no">§04</span>
-              <h3>智能扩图</h3>
-              <p>1:1 变 3:4，画布向外生长</p>
-              <span className="expand-note">1:1 → 3:4</span>
-              <div className="tile-visual">
-                <div className="expand-frame">
-                  <img src={imageUrl("mug-scene.jpg")} alt="智能扩图示意" />
-                </div>
-              </div>
-            </a>
-
-            <a className="tile t-cutout rv" data-d="1" href={studioUrl} target="_top">
-              <span className="tile-no">§05</span>
-              <h3>一键抠图</h3>
-              <p>发丝级边缘，透明底直出</p>
-              <div className="tile-visual">
-                <div className="cutout-stage">
-                  <svg viewBox="0 0 96 64" fill="none">
-                    <path
-                      d="M30 44c0-10 4-18 10-22l2-8h12l2 8c6 4 10 12 10 22 0 8-4 14-10 16H40c-6-2-10-8-10-16z"
-                      fill="#F4F4F1"
-                    />
-                    <path d="M42 14h12v6H42z" fill="#CDFF57" />
-                    <rect x="34" y="12" width="28" height="3" rx="1.5" fill="none" stroke="#CDFF57" strokeWidth="1.2" strokeDasharray="3 3" />
-                  </svg>
-                </div>
-              </div>
-            </a>
-
-            <a className="tile t-sku rv" data-d="2" href={studioUrl} target="_top">
-              <span className="tile-no">§06</span>
-              <h3>商品SKU图</h3>
-              <p>多色多码，批量产出规格图</p>
-              <div className="mini-row">
-                <div className="mini-thumb">
-                  <img src={imageUrl("sneaker-after.jpg")} alt="SKU变体1" />
-                </div>
-                <div className="mini-thumb">
-                  <img src={imageUrl("mug-scene.jpg")} alt="SKU变体2" />
-                </div>
-                <div className="mini-thumb">
-                  <img src={imageUrl("bottle-scene.jpg")} alt="SKU变体3" />
-                </div>
-              </div>
-            </a>
-
-            <a className="tile t-detail rv" data-d="3" href={studioUrl} target="_top">
-              <span className="tile-no">§07</span>
-              <h3>商品详情页</h3>
-              <p>卖点排版自动生成长图</p>
-              <div className="mini-row">
-                <div className="mini-thumb">
-                  <img src={imageUrl("bottle-scene.jpg")} alt="详情页1" />
-                </div>
-                <div className="mini-thumb">
-                  <img src={imageUrl("perfume-after.jpg")} alt="详情页2" />
-                </div>
-                <div className="mini-thumb">
-                  <img src={imageUrl("sneaker-after.jpg")} alt="详情页3" />
-                </div>
-              </div>
-            </a>
-
-            <div className="tile t-stats rv">
-              <div>
-                <span className="tile-no">§08</span>
-                <div className="stat-big" style={{ fontFamily: "var(--font-disp)" }}>
-                  <Ticker target={18} />
-                  <small style={{ fontSize: 34, fontWeight: 600 }}>s</small>
-                </div>
-                <div className="stat-label">平均出图耗时</div>
-              </div>
-              <div className="stat-meta">
-                单张成本 <b>¥0.11</b>
-                <br />
-                上架达标率 <b>98.2%</b>
-                <br />
-                重拍率 <b>-72%</b>
-              </div>
+                  <span className="lp-tool-name"><Icon size={17} />{item.title}</span>
+                  <span className="lp-tool-desc">{item.desc}</span>
+                  <span className="lp-tool-cta"><span>示例展示</span><span>{item.action}<ArrowRight size={13} /></span></span>
+                </a>;
+              })}
             </div>
-          </div>
+          </section>)}
         </div>
-      </section>
+        {moreTools.length > 0 && <details className="lp-more-tools">
+          <summary>更多创作工具 <span>{moreTools.length} 项 · 工作台共 {CATALOG.length} 项工具</span></summary>
+          <div className="lp-more-grid">{moreTools.map((tool) => {
+            const Icon = TOOL_ICONS[tool.key];
+            return <a key={tool.key} href={studioUrl} target="_top"><Icon size={18} /><span><strong>{TOOL_LABELS[tool.key]}</strong><small>{tool.desc}</small></span><ArrowRight size={14} /></a>;
+          })}</div>
+        </details>}
+      </div>
+    </section>
 
-      {/* WORKFLOW */}
-      <section className="sec" style={{ paddingTop: 40 }}>
-        <div className="wrap">
-          <div className="sec-head rv">
-            <span className="sec-eyebrow">
-              <b>§03</b> — 工作流
-            </span>
-            <h2 className="sec-title">三步，从随手拍到直接上架</h2>
-          </div>
-          <div className="flow">
-            <div className="step rv">
-              <div className="step-no">01</div>
-              <h3>上传商品图</h3>
-              <p>手机随手拍即可。AI 自动识别商品主体、类目与关键卖点。</p>
-              <p className="mono-tip">支持 JPG / PNG / WEBP · 单张 ≤ 20MB</p>
-            </div>
-            <div className="step rv" data-d="1">
-              <div className="step-no">02</div>
-              <h3>选风格，配参数</h3>
-              <p>选择目标平台与配图类型，白底、场景、卖点图按需勾选。</p>
-              <p className="mono-tip">8 大平台模板 · 比例 / 清晰度可调</p>
-            </div>
-            <div className="step rv" data-d="2">
-              <div className="step-no">03</div>
-              <h3>批量出图，下载</h3>
-              <p>四张一组并行生成，满意的一键打包下载，直接上传店铺后台。</p>
-              <p className="mono-tip">批量下载 ZIP · 保留高清原始尺寸</p>
-            </div>
-          </div>
+    <section className="lp-benefits wrap" id="cases" aria-labelledby="benefits-title">
+      <div className="lp-benefits-heading"><span className="sec-eyebrow">LESS FRICTION, MORE CREATION</span><h2 id="benefits-title">商业出图，少一点繁琐</h2><p>把创作、素材与任务串成一条工作流，把时间留给更好的商品。</p></div>
+      <div className="lp-benefit-grid">
+        <article><span>减少重复拍摄<Camera size={16} /></span><strong>一站式</strong><p>主图、详情、模特与修图工具集中管理，减少跨工具切换与重复整理。</p></article>
+        <article><span>让商品上新更从容<Layers size={16} /></span><strong>批量创作</strong><p>按商品与渠道配置规格、场景和张数，在工作台跟踪每一项生成任务。</p></article>
+        <article><span>从实拍到商业展示<Sparkles size={16} /></span><strong>三步开启</strong><p>上传素材、选择工作流、配置生成。实际耗时取决于模型与任务队列。</p></article>
+      </div>
+      <div className="lp-benefit-cta"><Camera size={25} /><span><strong>新手卖家专属体验：从第一张商品图开始</strong><small>免费体验与账户权益以实际配置为准，让商业出图成为日常。</small></span><a className="btn btn-ghost" href={studioUrl} target="_top">立即免费体验<ArrowRight size={14} /></a></div>
+    </section>
+
+    <section className="sec lp-pricing" id="pricing">
+      <div className="wrap">
+        <div className="sec-head"><span className="sec-eyebrow">PRICING & SUBSCRIPTION / 商业创作方案</span><h2 className="sec-title">套餐与加油包</h2><p className="sec-desc">选择适合你的创作方式，实际套餐、价格与权益以账户中心为准。</p></div>
+        <div className="lp-pricing-tabs" role="group" aria-label="付费方式">
+          <button type="button" aria-pressed={planMode === "subscription"} onClick={() => setPlanMode("subscription")}>订阅套餐<span>方案示例</span></button>
+          <button type="button" aria-pressed={planMode === "credits"} onClick={() => setPlanMode("credits")}>加油包</button>
         </div>
-      </section>
-
-      {/* STATS BAND */}
-      <section className="stats" id="cases">
-        <div className="stats-grid">
-          {tickers.map((t, i) => (
-            <div className={`stat-cell rv${i > 0 ? "" : ""}`} key={t.label} data-d={i}>
-              <div className="stat-num" style={{ fontFamily: "var(--font-disp)" }}>
-                <Ticker target={t.target} decimals={t.dec} format={t.format} />
-                <small>{t.small}</small>
-              </div>
-              <div className="stat-cap">{t.label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* PRICING */}
-      <section className="sec" id="pricing">
-        <div className="wrap">
-          <div className="sec-head rv">
-            <span className="sec-eyebrow">
-              <b>§05</b> — 价格
-            </span>
-            <h2 className="sec-title">按积分付费，用多少买多少</h2>
-            <p className="sec-desc">1 积分 = 1 张标准图。积分永不过期，随时充值。</p>
-          </div>
+        {planMode === "subscription" ? <>
+          <p className="lp-price-disclaimer">以下为参考设计的套餐展示，不代表当前可购买的价格或权益。</p>
           <div className="price-grid">
-            <div className="price-card rv">
-              <div className="plan-name">体验版</div>
-              <div className="plan-price">¥0</div>
-              <div className="plan-credit">注册赠送 30 积分</div>
-              <ul className="feat">
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 全部 10 个出图工具
-                </li>
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 1K 标准清晰度
-                </li>
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 单张生成，含水印
-                </li>
-              </ul>
-              <a className="btn btn-ghost" href={studioUrl} target="_top">
-                免费开始
-              </a>
-            </div>
-
-            <div className="price-card hot rv" data-d="1">
-              <span className="hot-badge">最受欢迎</span>
-              <div className="plan-name">卖家版</div>
-              <div className="plan-price">
-                ¥99<small> /月</small>
-              </div>
-              <div className="plan-credit">每月 1,000 积分</div>
-              <ul className="feat">
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 全部 10 个出图工具
-                </li>
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 2K 高清 · 无水印 · 批量下载
-                </li>
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 爆款复刻 + 详情页排版
-                </li>
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 生成历史云端保存 90 天
-                </li>
-              </ul>
-              <a className="btn btn-lime" href={studioUrl} target="_top">
-                开通卖家版
-              </a>
-            </div>
-
-            <div className="price-card rv" data-d="2">
-              <div className="plan-name">团队版</div>
-              <div className="plan-price">
-                ¥399<small> /月</small>
-              </div>
-              <div className="plan-credit">每月 5,000 积分</div>
-              <ul className="feat">
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 含卖家版全部权益
-                </li>
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 5 个子账号 + 团队协作空间
-                </li>
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> API 接入 · 品牌风格自定义训练
-                </li>
-                <li>
-                  <Check width={15} height={15} style={{ color: "var(--lime)" }} /> 专属客户成功经理
-                </li>
-              </ul>
-              <a className="btn btn-ghost" href={studioUrl} target="_top">
-                联系销售
-              </a>
-            </div>
+            {PLANS.map((plan) => <article className={`price-card${plan.hot ? " hot" : ""}`} key={plan.name}>
+              {plan.badge && <span className="hot-badge">{plan.badge}</span>}
+              <div className="lp-plan-heading"><h3 className="plan-name">{plan.name}</h3><span>{plan.label}</span></div>
+              <div className="plan-price"><small>¥</small>{plan.price}<del>¥{plan.original}</del></div>
+              <div className="plan-credit"><span><Sparkles size={12} />示例 {plan.credits.toLocaleString()} 订阅积分</span><small>展示周期：{plan.period}</small></div>
+              <a className={`btn ${plan.hot || plan.badge ? "btn-lime" : "btn-ghost"}`} href={`${studioUrl}?account=subscribe`} target="_top">查看实际套餐</a>
+              <ul className="feat">{[`示例周期 ${plan.period}`, "商品主图与详情工作流", "服饰与模特创作入口", "一键抠图与图片翻译", "商品换色与局部重绘", "素材管理与生成历史", "输出规格按模型配置", "实际积分与权益见账户"].map((feature) => <li key={feature}><Check size={13} />{feature}</li>)}</ul>
+            </article>)}
           </div>
+        </> : <div className="lp-pack-panel"><CreditCard size={30} /><h3>按需补充创作积分</h3><p>加油包价格、可用额度及充值开放状态由账户中心实时提供。</p><a className="btn btn-lime" href={`${studioUrl}?account=wallet`} target="_top">查看积分加油包<ArrowRight size={14} /></a></div>}
+        <div className="lp-payment-note"><span><ShieldCheck size={14} />账户权益以实际配置为准</span><span><CreditCard size={14} />通过账户中心完成购买</span><a href={studioUrl} target="_top">前往创作工作台<ArrowRight size={13} /></a></div>
+      </div>
+    </section>
+
+    <footer id="footer">
+      <div className="wrap">
+        <div className="foot-grid">
+          <div className="foot-brand"><a className="wordmark" href="#top"><span className="lp-logo"><Sparkles size={16} /></span>出图AI</a><p>专为电商卖家与视觉创作者打造的商业出图工具，让商品、服饰与修图创作在一个工作台完成。</p></div>
+          <div className="foot-col"><h4>产品功能</h4><a href="#tools" onClick={() => setCategory("电商主图")}>电商生图</a><a href="#tools" onClick={() => setCategory("服饰穿搭")}>服装模特</a><a href="#tools" onClick={() => setCategory("AI修图")}>修图工具箱</a></div>
+          <div className="foot-col"><h4>资源与支持</h4><a href="#tools" onClick={() => setCategory("全部")}>效果案例</a><a href="#pricing">收费价格</a><a href={studioUrl} target="_top">创作工作台</a></div>
+          <div className="foot-col"><h4>商业创作</h4><p>从商品实拍到多渠道内容，组织属于你的商业视觉工作流。</p><span className="lp-footer-badges"><span>多场景工作流</span><span>统一账户管理</span></span></div>
         </div>
-      </section>
-
-      {/* FAQ */}
-      <section className="sec" style={{ paddingTop: 20 }}>
-        <div className="wrap">
-          <div className="sec-head rv">
-            <span className="sec-eyebrow">
-              <b>§06</b> — FAQ
-            </span>
-            <h2 className="sec-title">常见问题</h2>
-          </div>
-          <div className="faq rv" data-d="1">
-            <details open>
-              <summary>
-                生成的图片可以直接上架平台吗？<span style={{ fontFamily: "var(--font-mono)" }}>+</span>
-              </summary>
-              <p className="ans">
-                可以。卖家版生成的 2K 无水印图片符合淘宝、天猫、拼多多、抖音商城等主流平台的主图与详情页规范，白底图满足纯白背景要求。
-              </p>
-            </details>
-            <details>
-              <summary>
-                商品图会有「AI 生成」痕迹吗？<span style={{ fontFamily: "var(--font-mono)" }}>+</span>
-              </summary>
-              <p className="ans">
-                出图AI 只重绘背景与光影，商品主体保持原样，并针对主流平台审核规则做了适配优化。部分平台要求标注 AI 生成内容，请在发布时按平台规则勾选。
-              </p>
-            </details>
-            <details>
-              <summary>
-                积分怎么算？生成失败会扣吗？<span style={{ fontFamily: "var(--font-mono)" }}>+</span>
-              </summary>
-              <p className="ans">标准图 1 积分/张，精修 2 积分/张。生成失败自动全额退回积分，无需申请。</p>
-            </details>
-            <details>
-              <summary>
-                我的商品图会被拿去训练模型吗？<span style={{ fontFamily: "var(--font-mono)" }}>+</span>
-              </summary>
-              <p className="ans">
-                不会。上传的图片仅用于当次生成，默认 7 天后自动删除；也可在设置中开启「用后即焚」，生成完成立即删除。
-              </p>
-            </details>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="cta-band">
-        <div className="wrap">
-          <h2 className="rv">
-            下一张爆款，<span style={{ color: "var(--lime)" }}>18 秒</span>后到达
-          </h2>
-          <div className="rv" data-d="1">
-            <a className="btn btn-lime btn-lg" href={studioUrl} target="_top">
-              免费开始出图
-            </a>
-            <p className="mono-sub">NO CREDIT CARD · 30 FREE CREDITS</p>
-          </div>
-        </div>
-      </section>
-
-      {/* FOOTER */}
-      <footer id="footer">
-        <div className="wrap">
-          <div className="foot-grid">
-            <div className="foot-brand">
-              <a className="wordmark" href="#top">
-                出图AI <span className="mark-dot" />
-              </a>
-              <p>面向电商卖家的 AI 出图引擎。商品照片进，爆款大图出。</p>
-            </div>
-            <div className="foot-col">
-              <h4>产品</h4>
-              <a href="#features">功能矩阵</a>
-              <a href="#pricing">价格</a>
-              <a href={studioUrl} target="_top">创作工作台</a>
-              <a href="#footer">更新日志</a>
-            </div>
-            <div className="foot-col">
-              <h4>资源</h4>
-              <a href="#faq">帮助中心</a>
-              <a href="#footer">API 文档</a>
-              <a href="#footer">卖家案例</a>
-              <a href="#footer">社区</a>
-            </div>
-            <div className="foot-col">
-              <h4>公司</h4>
-              <a href="#footer">关于我们</a>
-              <a href="#footer">加入我们</a>
-              <a href="#footer">联系方式</a>
-              <a href="#footer">服务协议</a>
-            </div>
-          </div>
-          <div className="foot-bottom">
-            <span>© 2026 出图AI CHUTU.AI — 本页为设计原型，数据均为演示模拟</span>
-            <span>Built on FastbuildAI</span>
-          </div>
-        </div>
-      </footer>
-    </main>
-  );
+        <div className="foot-bottom"><span>© 2026 出图AI (Chutu AI Studio). 首页图片及套餐为展示示例。</span><span>Built on FastbuildAI</span></div>
+      </div>
+    </footer>
+  </main>;
 }
 
-/* Simple ticker component */
-function Ticker({
-  target,
-  decimals = 0,
-  format,
-}: {
-  target: number;
-  decimals?: number;
-  format?: string;
-}) {
-  const [value, setValue] = useState(0);
-  const ref = useRef<HTMLSpanElement>(null);
-  const started = useRef(false);
-
-  useEffect(() => {
-    if (started.current) return;
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((en) => {
-          if (en.isIntersecting && !started.current) {
-            started.current = true;
-            const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-            if (reduced) {
-              setValue(target);
-              return;
-            }
-            const dur = 1400;
-            let t0: number | null = null;
-            const frame = (ts: number) => {
-              if (t0 === null) t0 = ts;
-              const p = Math.min(1, (ts - t0) / dur);
-              const e = 1 - Math.pow(1 - p, 3);
-              setValue(target * e);
-              if (p < 1) requestAnimationFrame(frame);
-            };
-            requestAnimationFrame(frame);
-            io.unobserve(en.target);
-          }
-        });
-      },
-      { threshold: 0.5 },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [target]);
-
-  let text: string;
-  if (decimals) text = value.toFixed(decimals);
-  else if (format === "comma") text = Math.round(value).toLocaleString("en-US");
-  else text = Math.round(value).toString();
-
-  return <span ref={ref}>{text}</span>;
+export function HeroComparison() {
+  const [position, setPosition] = useState(50);
+  const style: CSSProperties & { "--compare-position": string } = { "--compare-position": `${position}%` };
+  return <div className="lp-comparison-card">
+    <div className="lp-comparison-head"><span><i />实拍样品<ArrowRight size={14} />商业主图<small>85mm · 柔光晨曦</small></span><span className="lp-comparison-hint"><ArrowLeftRight size={14} />左右滑动对比</span></div>
+    <div className="lp-comparison" style={style}>
+      <div className="lp-comparison-before"><img className="lp-comparison-image" src={imageUrl("home-hero-before.jpg")} alt="原始日常随手拍示例" fetchPriority="high" /></div>
+      <div className="lp-comparison-after"><img className="lp-comparison-image" src={imageUrl("home-hero-after.jpg")} alt="AI 商业光影置景示例" fetchPriority="high" /></div>
+      <span className="lp-comparison-line"><span><ArrowLeftRight size={19} /></span></span>
+      <span className="lp-comparison-label before">原始日常随手拍</span><span className="lp-comparison-label after">AI 商业光影置景</span>
+      <input className="lp-comparison-range" type="range" min={0} max={100} value={position} aria-label="原图显示比例" aria-valuetext={`原图 ${position}%，AI 效果 ${100 - position}%`} onChange={(event) => setPosition(Number(event.target.value))} />
+    </div>
+    <div className="lp-comparison-foot"><div className="lp-lighting-styles"><span>光影风格：</span><span>奢感丝绸</span><span>暖阳微风</span><span>静谧大理石</span></div><a href={studioUrl} target="_top"><Sparkles size={13} />套用此光影</a></div>
+  </div>;
 }

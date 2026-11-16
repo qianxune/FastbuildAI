@@ -98,6 +98,43 @@ describe("workspace drawer positioning", () => {
         auth.token = undefined;
         expect(links().map(text)).toEqual(["登录", "免费开始"]);
     });
+    it("filters the featured landing workshops while retaining the remaining tool entrances", () => {
+        const view = harness("landing", { "react-router-dom": { useLocation: () => ({ hash: "" }) } });
+        const render = () => nodes(view.render());
+        expect(render().filter((node) => node.props.className === "lp-tool")).toHaveLength(12);
+        const more = () => nodes(render().find((node) => node.props.className === "lp-more-grid")).filter((node) => node.type === "a");
+        expect(more()).toHaveLength(9);
+        render().find((node) => node.type === "button" && text(node) === "服装与模特换装")!.props.onClick();
+        const cards = render().filter((node) => node.props.className === "lp-tool");
+        expect(cards).toHaveLength(4);
+        expect(more()).toHaveLength(4);
+        expect(cards.every((node) => node.props.href === "/studio" && node.props.target === "_top")).toBe(true);
+        expect(render().filter((node) => node.props["aria-pressed"] === true).map(text)).toContain("服装与模特换装");
+        render().find((node) => node.type === "button" && text(node).includes("全部工坊"))!.props.onClick();
+        expect(render().filter((node) => node.props.className === "lp-tool")).toHaveLength(12);
+        expect(more()).toHaveLength(9);
+    });
+    it("switches landing pricing modes without presenting an invented recharge package", () => {
+        const view = harness("landing", { "react-router-dom": { useLocation: () => ({ hash: "" }) } });
+        const render = () => nodes(view.render());
+        expect(render().filter((node) => node.type === "article" && String(node.props.className).startsWith("price-card"))).toHaveLength(5);
+        render().find((node) => node.type === "button" && text(node) === "加油包")!.props.onClick();
+        const panel = render().find((node) => node.props.className === "lp-pack-panel")!;
+        expect(text(panel)).toContain("账户中心实时提供");
+        expect(nodes(panel).find((node) => node.type === "a")?.props.href).toBe("/studio?account=wallet");
+        expect(render().some((node) => String(node.props.className).startsWith("price-card"))).toBe(false);
+        render().find((node) => node.type === "button" && text(node).startsWith("订阅套餐"))!.props.onClick();
+        expect(render().filter((node) => node.type === "article" && String(node.props.className).startsWith("price-card"))).toHaveLength(5);
+    });
+    it("lets the landing comparison reveal either complete panel with accessible endpoint values", () => {
+        const view = harness("landing");
+        const render = () => nodes(view.render({}, view.exports.HeroComparison));
+        for (const position of [0, 100]) {
+            render().find((node) => node.props.type === "range")!.props.onChange({ target: { value: String(position) } });
+            expect(render().find((node) => node.props.className === "lp-comparison")?.props.style["--compare-position"]).toBe(`${position}%`);
+            expect(render().find((node) => node.props.type === "range")?.props["aria-valuetext"]).toBe(`原图 ${position}%，AI 效果 ${100 - position}%`);
+        }
+    });
     it("shows an explicitly labeled interactive retouch example instead of pretending it is a generated result", () => {
         const view = harness("image-edit-form");
         const render = () => nodes(view.render({}, view.exports.RetouchPreview));
@@ -846,6 +883,27 @@ describe("workspace overview data", () => {
         expect(view.action.mock.calls).toEqual([["profile"], ["credits"], ["wallet"]]);
         expect(view.render().some((node) => node.props.src === "never-use-public-url")).toBe(false);
     });
+    it("filters the tool matrix without changing direct creation routes or account data", () => {
+        const view = overview();
+        const cards = () => view.render().filter((node) => node.type === "button" && node.props.className?.startsWith("overview-tool "));
+        const filter = (name: string) => view.render().find((node) => node.type === "button" && node.props["aria-pressed"] !== undefined && text(node).startsWith(name))!;
+        for (const [group, count] of [["电商生图", 6], ["AI 修图", 7], ["服饰穿戴", 8], ["全部工具", 21]] as const) {
+            filter(group).props.onClick();
+            expect(cards()).toHaveLength(count);
+            expect(filter(group).props["aria-pressed"]).toBe(true);
+            for (const card of cards()) {
+                card.props.onClick();
+                expect(view.props.onNavigate).toHaveBeenLastCalledWith("create", card.key);
+            }
+            expect(view.render().filter((node) => node.props.role === "status").map(text)).toEqual(["95", "5"]);
+        }
+    });
+    it("opens the existing main image workflow from the quick creation shortcut", () => {
+        const view = overview();
+        view.render().find((node) => node.type === "button" && node.props.className === "overview-quick-create")!.props.onClick();
+        expect(view.props.onNavigate).toHaveBeenCalledWith("create", "main");
+        expect(view.props.onOpenTask).not.toHaveBeenCalled();
+    });
     it("keeps recent history on page one and opens details without creating a task", () => {
         const view = overview();
         const task = view.render().find((node) => node.props.className === "overview-task")!;
@@ -865,7 +923,8 @@ describe("workspace overview data", () => {
         for (const card of cards) {
             expect(text(card)).toContain("服饰穿戴");
             expect(card.props["aria-label"]).toBe(harness("workspace-navigation").exports.TOOL_LABELS[card.key!]);
-            expect(nodes(card).filter((node) => node.type === "img").map((node) => node.props.src)).toEqual([apparelWorkflow.APPAREL_PREVIEW_IMAGES[card.key as apparelContract.ApparelToolKey]]);
+            const image = card.key === "dewrinkle" ? apparelWorkflow.APPAREL_PREVIEW_IMAGES.dewrinkle : `/extension/image-studio/images/console-${card.key}.jpg`;
+            expect(nodes(card).filter((node) => node.type === "img").map((node) => node.props.src)).toEqual([image]);
             card.props.onClick(); expect(view.props.onNavigate).toHaveBeenLastCalledWith("create", card.key);
         }
     });

@@ -3,6 +3,8 @@ import {
     History,
     Image as ImageIcon,
     Layers3,
+    CircleHelp,
+    Settings,
     TriangleAlert,
     RefreshCw,
     Trash2,
@@ -495,6 +497,8 @@ export default function ImageStudioPage() {
                     {view !== "overview" && <><i>/</i><b>{showWorks ? "图片作品" : toolName}</b></>}
                 </nav>
                 <div className="tb-right">
+                    <button type="button" className="icon-btn workspace-topbar-action" aria-label="帮助与反馈" title="帮助与反馈" onClick={() => setHelpOpen(true)}><CircleHelp size={18} /></button>
+                    <button type="button" className="icon-btn workspace-topbar-action" aria-label="偏好设置" title="偏好设置" onClick={() => setPreferencesOpen(true)}><Settings size={18} /></button>
                     <WorkspaceAccount onNavigate={navigate} locked={locked} />
                 </div>
             </header>

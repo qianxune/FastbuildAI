@@ -1,5 +1,5 @@
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@buildingai/ui/components/ui/dialog";
-import { ChevronDown, CircleHelp, Eraser, Expand, FolderOpen, Hand, History, Image, Images, Languages, Layers3, LayoutDashboard, Lightbulb, Package, Paintbrush, Palette, Scan, Scissors, Settings, Shirt, Sparkles, SwatchBook, UserRound, UsersRound, Wand2, type LucideIcon } from "lucide-react";
+import { Camera, ChevronDown, CircleHelp, Eraser, Expand, FolderOpen, Hand, History, Image, Images, Languages, Layers3, LayoutDashboard, Lightbulb, Package, Paintbrush, Palette, Scan, Scissors, Settings, Shirt, Sparkles, SwatchBook, UserRound, UsersRound, Wand2, type LucideIcon } from "lucide-react";
 import type { ToolKey } from "../../api/shared/tools";
 
 export type WorkspaceView = "overview" | "create" | "works" | "materials" | "history";
@@ -37,6 +37,7 @@ interface NavigationProps {
 function NavigationContent({ view, tool, onNavigate, onPreferences, onHelp, onMobileOpenChange }: NavigationProps) {
     const navigate = (next: WorkspaceView, key?: ToolKey) => { onNavigate(next, key); onMobileOpenChange(false); };
     return <nav className="workspace-nav" aria-label="工作区导航">
+        <div className="workspace-nav-scroll">
         <div className="workspace-nav-primary">
             {([
                 ["overview", "创作工作台", LayoutDashboard], ["works", "我的作品", FolderOpen],
@@ -56,6 +57,7 @@ function NavigationContent({ view, tool, onNavigate, onPreferences, onHelp, onMo
         </details>)}
         <button type="button" className="workspace-nav-item" aria-current={view === "create" && tool === "suggest" ? "true" : undefined}
             onClick={() => navigate("create", "suggest")}><Lightbulb size={18} /><span>产品建议</span></button>
+        </div>
         <div className="workspace-nav-bottom">
             <button type="button" className="workspace-nav-item" onClick={() => { onMobileOpenChange(false); onPreferences(); }}><Settings size={18} /><span>偏好设置</span></button>
             <button type="button" className="workspace-nav-item" onClick={() => { onMobileOpenChange(false); onHelp(); }}><CircleHelp size={18} /><span>帮助与反馈</span></button>
@@ -65,7 +67,10 @@ function NavigationContent({ view, tool, onNavigate, onPreferences, onHelp, onMo
 
 export default function WorkspaceNavigation(props: NavigationProps) {
     return <>
-        <aside className="workspace-sidebar"><NavigationContent {...props} /></aside>
+        <aside className="workspace-sidebar">
+            <a className="workspace-brand" href="/" target="_top" aria-label="出图AI 首页"><span><Camera size={18} /></span>出图AI <small>STUDIO</small></a>
+            <NavigationContent {...props} />
+        </aside>
         <Dialog open={props.mobileOpen} onOpenChange={props.onMobileOpenChange}>
             <DialogContent className="workspace-drawer" style={{ translate: "0 0" }}>
                 <DialogTitle>出图AI</DialogTitle>

@@ -61,6 +61,7 @@ export default function WorkspaceAccount({ onNavigate, locked }: { onNavigate: (
     };
     return <>
         <button type="button" className="credits workspace-credit-button" title="积分明细" onClick={() => requestAccountAction("credits")}><Zap size={15} /><span>{credits}</span></button>
+        {recharge?.rechargeStatus && <button type="button" className="tb-charge" onClick={() => requestAccountAction("wallet")}>充值</button>}
         {balance.isError && <button type="button" className="icon-btn" title="刷新积分余额" aria-label="刷新积分余额" disabled={balance.isFetching} onClick={() => void balance.refetch()}><RefreshCw size={17} /></button>}
         <DropdownMenu>
             <DropdownMenuTrigger asChild><button type="button" className="workspace-account-trigger" aria-label="我的账户" disabled={loggingOut}>

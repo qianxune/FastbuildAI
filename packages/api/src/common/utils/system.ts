@@ -4,7 +4,7 @@ import { TerminalLogger } from "@buildingai/logger";
 import { INestApplication } from "@nestjs/common";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import type { NextFunction, Request, Response } from "express";
-import { existsSync, readFileSync } from "fs";
+import { existsSync } from "fs";
 import { networkInterfaces } from "os";
 import * as path from "path";
 
@@ -163,12 +163,12 @@ export const setAssetsDir = async (app: NestExpressApplication) => {
             ];
         });
 
-    const extensionIndexHtmlCache = new Map<string, string>();
+    const extensionIndexPaths = new Map<string, string>();
 
     extensionsMain.forEach((item) => {
         const indexPath = path.join(item.dir, "index.html");
         if (existsSync(item.dir) && existsSync(indexPath)) {
-            extensionIndexHtmlCache.set(item.prefix, readFileSync(indexPath, "utf-8"));
+            extensionIndexPaths.set(item.prefix, indexPath);
         }
     });
 
@@ -182,15 +182,18 @@ export const setAssetsDir = async (app: NestExpressApplication) => {
         }
     });
 
-    if (extensionIndexHtmlCache.size > 0) {
+    if (extensionIndexPaths.size > 0) {
         app.use((req: Request, res: Response, next: NextFunction) => {
-            const matchedPrefix = Array.from(extensionIndexHtmlCache.keys()).find(
+            const matchedPrefix = Array.from(extensionIndexPaths.keys()).find(
                 (prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`),
             );
 
             if (matchedPrefix && !res.headersSent) {
                 res.setHeader("Content-Type", "text/html; charset=utf-8");
-                return res.send(extensionIndexHtmlCache.get(matchedPrefix)!);
+                res.setHeader("Cache-Control", "no-cache");
+                return res.sendFile("index.html", {
+                    root: path.dirname(extensionIndexPaths.get(matchedPrefix)!),
+                });
             }
 
             next();
