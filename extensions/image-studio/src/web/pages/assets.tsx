@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { validateCreativeAsset, type CreativeAsset, type CreativeAssetKind } from "../../api/shared/assets";
 import { useAssetsQuery, useDeleteAssetMutation, useOfficialModelsQuery, useSaveAssetMutation } from "../services/assets";
 import { useProductImagesQuery, useUploadProductImageMutation } from "../services/generation";
-import { MATERIAL_LIMIT, materialError, materialName, uploadMaterials, validMaterialLabel } from "../services/materials";
+import { materialError, materialName, uploadMaterials, validMaterialLabel } from "../services/materials";
 import type { ProductImage } from "../services/types";
 import { assetFormDirty } from "./asset-draft";
 import CustomModel from "./custom-model";
@@ -72,7 +72,7 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
         const failed: File[] = [];
         abort.current = new AbortController();
         try {
-            const result = await uploadMaterials(files, images.length, async (file) => {
+            const result = await uploadMaterials(files, async (file) => {
                 try { return await upload.mutateAsync(file); }
                 catch (reason) { failed.push(file); throw reason; }
             }, abort.current.signal, (done, total) => { if (mounted.current) setProgress({ done, total }); });
@@ -120,16 +120,25 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
         {showForm && <form className="asset-editor" noValidate onSubmit={(event) => { event.preventDefault(); void persist(false); }}>
             <label><span>{kind === "model" ? "模特名称" : "参考名称"}<span className="asset-required"> *</span></span><input autoFocus aria-label="资产名称" placeholder={kind === "model" ? "请输入模特名称" : "请输入参考名称"} required maxLength={120} disabled={busy} value={name} onChange={(event) => setName(event.target.value)} /></label>
             <label>{kind === "model" ? "描述" : "Prompt"}<textarea aria-label="资产 Prompt" placeholder={kind === "model" ? "请输入模特描述" : "请输入 Prompt"} maxLength={1500} rows={4} disabled={busy} value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
-            <div className="assets-picker-heading"><h3>{kind === "model" ? "模特照片" : "参考内容"}<span className="asset-required"> *</span></h3>{imageIds.length > 0 && <span>{imageIds.length} / {selectionLimit}</span>}</div>
-            <div className="assets-selection" aria-label="已选资产图片">
+            <div className="assets-picker-heading image-upload-heading">
+                <div className="image-upload-title"><h3>{kind === "model" ? "模特照片" : "参考内容"}<span className="asset-required"> *</span></h3><span>{imageIds.length} / {selectionLimit}</span></div>
+                <div className="image-upload-library">
+                    <button className="asset-existing-picker materials-picker-trigger" type="button" title="从素材库选择" aria-label="从素材库选择" disabled={busy || !products.isSuccess || products.isFetching} onClick={() => setPickerOpen((previous) => !previous)}><FolderOpen size={16} /><span>从素材库选择</span></button>
+                </div>
+            </div>
+            {imageIds.length > 0 ? <div className="assets-selection image-upload-thumbnails" aria-label="已选资产图片">
                 {imageIds.map((imageId, index) => {
                     const image = images.find((item) => item.id === imageId);
                     return <div className="assets-selected" key={imageId}>{image ? <MaterialThumbnail image={image} /> : <span role="alert">图片已不存在</span>}
                         <button type="button" title="移除选择" aria-label={`移除图片 ${index + 1}`} disabled={busy} onClick={() => setImageIds((previous) => previous.filter((id) => id !== imageId))}><X size={16} /></button></div>;
                 })}
-                <button className="asset-upload-tile" type="button" disabled={busy || !products.isSuccess || products.isFetching || images.length >= MATERIAL_LIMIT || imageIds.length >= selectionLimit} onClick={() => input.current?.click()}><Plus size={19} /><span>上传内容</span></button>
-                <button className="asset-existing-picker" type="button" title="从素材库选择" aria-label="从素材库选择" disabled={busy || !products.isSuccess || products.isFetching} onClick={() => setPickerOpen((previous) => !previous)}><FolderOpen size={18} /></button>
-            </div>
+                {imageIds.length < selectionLimit && <button className="image-upload-add" type="button" aria-label="继续添加图片" title="继续添加图片" disabled={busy || !products.isSuccess || products.isFetching} onClick={() => input.current?.click()}><Plus size={20} /></button>}
+            </div> : <div className="image-upload-area">
+                <button className="image-upload-zone" type="button" disabled={busy || !products.isSuccess || products.isFetching || imageIds.length >= selectionLimit} onClick={() => input.current?.click()}>
+                    <span className="image-upload-command"><Upload size={16} /><span>上传图片</span></span>
+                    <span className="image-upload-hint">最多 {selectionLimit} 张 · PNG / JPEG / WebP · 每张不超过 10 MB</span>
+                </button>
+            </div>}
             <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" multiple={kind === "reference"} hidden disabled={busy}
                 onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void uploadFiles(files); }} />
             <div hidden={!pickerOpen} className="asset-picker-panel">

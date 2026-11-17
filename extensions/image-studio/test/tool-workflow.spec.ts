@@ -354,14 +354,14 @@ describe("tool workflow contract", () => {
     ])("rejects design fields inapplicable to the tool %p", (overrides) => {
         expect(validateToolWorkflow(toolInput({ assetIds: [firstAsset, secondAsset], ...overrides } as never))).not.toBeNull();
     });
-    it.each(["creative", "replica", "fusion", "sku"] as const)("allows an omitted product name only for %s", (tool) => {
+    it.each(["detail", "creative", "replica", "fusion", "sku"] as const)("allows an omitted product name for %s", (tool) => {
         const request = toolInput({ tool, productName: undefined, assetIds: [firstAsset, secondAsset], variant: "Blue" });
         expect(validateToolWorkflow(request)).toBeNull();
         expect(validateToolWorkflow({ ...request, productName: "" })).toBeNull();
         expect(validateToolWorkflow({ ...request, productName: null } as never)).not.toBeNull();
         expect(validateToolWorkflow({ ...request, productName: "x".repeat(101) })).not.toBeNull();
     });
-    it.each(["detail", "retouch", "expand", "translate", "watermark"] as const)("keeps product name and reference requirements strict for %s", (tool) => {
+    it.each(["retouch", "expand", "translate", "watermark"] as const)("keeps legacy product name and reference requirements strict for %s", (tool) => {
         const request = toolInput({ tool, productName: undefined, expansion: "horizontal", targetLanguage: "English", authorized: true });
         expect(validateToolWorkflow(request)).not.toBeNull();
         expect(validateToolWorkflow({ ...request, productName: "Product", assetIds: [] })).not.toBeNull();

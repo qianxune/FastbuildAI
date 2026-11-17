@@ -5,7 +5,7 @@ import type { ProductImage } from "./types";
 
 const productsKey = ["image-studio", "product-images"] as const;
 const groupsKey = ["image-studio", "product-image-groups"] as const;
-export const MATERIAL_LIMIT = 40;
+export const MATERIAL_BATCH_LIMIT = 40;
 export const materialName = (image: ProductImage) => image.name || `素材-${image.id.slice(0, 8)}`;
 
 export interface MaterialFilters { search: string; group: string; date: string }
@@ -73,19 +73,17 @@ export function useMaterialGroupMutation() {
 }
 
 export async function uploadMaterials(
-    files: File[], currentCount: number, upload: (file: File) => Promise<ProductImage>,
+    files: File[], upload: (file: File) => Promise<ProductImage>,
     signal?: AbortSignal, progress?: (done: number, total: number) => void,
 ) {
     const uploaded: ProductImage[] = [];
     const errors: string[] = [];
-    const bounded = files.slice(0, MATERIAL_LIMIT);
-    if (files.length > MATERIAL_LIMIT) errors.push(`本次仅处理前 40 个文件，另 ${files.length - MATERIAL_LIMIT} 个未上传`);
+    const bounded = files.slice(0, MATERIAL_BATCH_LIMIT);
+    if (files.length > MATERIAL_BATCH_LIMIT) errors.push(`本次仅处理前 ${MATERIAL_BATCH_LIMIT} 个文件，另 ${files.length - MATERIAL_BATCH_LIMIT} 个未上传`);
     for (const [index, file] of bounded.entries()) {
         if (signal?.aborted) { errors.push("上传已停止；已上传的素材保留"); break; }
         if (!file.size || file.size > 10 * 1024 * 1024 || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
             errors.push(`${file.name.slice(0, 120)}：仅支持 10 MB 以内 PNG、JPEG、WebP`);
-        } else if (currentCount + uploaded.length >= MATERIAL_LIMIT) {
-            errors.push(`${file.name.slice(0, 120)}：素材已达 40 张上限`);
         } else {
             try {
                 const image = await upload(file);
@@ -101,7 +99,7 @@ export async function uploadMaterials(
 export async function deleteMaterials(images: ProductImage[], remove: (id: string) => Promise<unknown>, signal?: AbortSignal) {
     const removed: string[] = [];
     const errors: string[] = [];
-    for (const image of images.slice(0, MATERIAL_LIMIT)) {
+    for (const image of images) {
         if (signal?.aborted) break;
         try { await remove(image.id); removed.push(image.id); }
         catch (error) { errors.push(`${materialName(image)}：${materialError(error)}`); }
@@ -126,7 +124,7 @@ export async function fetchMaterialOriginal(id: string, signal?: AbortSignal): P
 }
 
 export async function materialsZip(images: ProductImage[], fetchOriginal = fetchMaterialOriginal, signal?: AbortSignal) {
-    if (!images.length || images.length > MATERIAL_LIMIT) throw new Error("请选择 1-40 张素材");
+    if (!images.length || images.length > MATERIAL_BATCH_LIMIT) throw new Error("请选择 1-40 张素材");
     const files: Record<string, Uint8Array> = {};
     let total = 0;
     for (const image of images) {

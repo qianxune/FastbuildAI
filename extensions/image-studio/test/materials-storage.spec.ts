@@ -106,15 +106,27 @@ it("rejects unknown groups, duplicate groups, unknown metadata properties and fo
     expect(await service.read(owner, image.id)).toEqual(buffer);
 });
 
-it("counts only image files toward the forty-image limit", async () => {
+it("allows uploads beyond forty images and preserves the full catalog after reloading", async () => {
     await service.createGroup(owner, "Empty");
     await writeFile(path.join(root, ".materials-old.tmp"), "unrelated temporary file");
     await writeFile(path.join(root, "readme.txt"), "not an image");
-    for (let count = 0; count < 39; count += 1) await writeFile(path.join(root, `${randomUUID()}.png`), buffer);
+    const images: Record<string, { name: string; group: string }> = {};
+    for (let count = 0; count < 40; count += 1) {
+        const id = randomUUID();
+        await writeFile(path.join(root, `${id}.png`), buffer);
+        images[id] = { name: `Original ${count}`, group: "Empty" };
+    }
+    await writeFile(path.join(root, ".materials.json"), JSON.stringify({ version: 1, groups: ["Empty"], images }));
     const image = await service.upload(owner, { buffer, mimetype: "image/png", originalname: "C:\\fakepath\\Front.png" });
     expect(image.name).toBe("Front");
-    expect(await service.list(owner)).toHaveLength(40);
-    await expect(service.upload(owner, { buffer, mimetype: "image/png" })).rejects.toThrow("上限");
+    const reloaded = instance();
+    const listed = await reloaded.list(owner);
+    expect(listed).toHaveLength(41);
+    expect(listed.every((entry) => entry.metadataStatus === "ready")).toBe(true);
+    expect(listed).toEqual(expect.arrayContaining(Object.entries(images).map(([id, metadata]) => expect.objectContaining({ id, ...metadata }))));
+    await reloaded.updateMetadata(owner, image.id, { name: "After forty", group: "Empty" });
+    expect(await instance().list(owner)).toContainEqual(expect.objectContaining({ id: image.id, name: "After forty", group: "Empty" }));
+    expect(await reloaded.read(owner, image.id)).toEqual(buffer);
     expect(await readFile(path.join(root, ".materials-old.tmp"), "utf8")).toBe("unrelated temporary file");
 });
 

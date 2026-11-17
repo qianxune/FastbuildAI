@@ -129,10 +129,13 @@ describe("workspace drawer positioning", () => {
     it("lets the landing comparison reveal either complete panel with accessible endpoint values", () => {
         const view = harness("landing");
         const render = () => nodes(view.render({}, view.exports.HeroComparison));
-        for (const position of [0, 100]) {
+        for (const position of [0, 25, 50, 75, 100]) {
             render().find((node) => node.props.type === "range")!.props.onChange({ target: { value: String(position) } });
             expect(render().find((node) => node.props.className === "lp-comparison")?.props.style["--compare-position"]).toBe(`${position}%`);
-            expect(render().find((node) => node.props.type === "range")?.props["aria-valuetext"]).toBe(`原图 ${position}%，AI 效果 ${100 - position}%`);
+            expect(render().find((node) => node.props.className === "lp-comparison-before")?.props.style.clipPath).toBe(`inset(0 ${100 - position}% 0 0)`);
+            expect(render().find((node) => node.props.type === "range")?.props["aria-valuetext"]).toBe(`日常场景 ${position}%，商业光影 ${100 - position}%`);
+            expect(render().find((node) => node.props.className === "lp-comparison-label before")?.props.hidden).toBe(position === 0);
+            expect(render().find((node) => node.props.className === "lp-comparison-label after")?.props.hidden).toBe(position === 100);
         }
     });
     it("shows an explicitly labeled interactive retouch example instead of pretending it is a generated result", () => {
@@ -287,6 +290,14 @@ function account() {
 }
 
 describe("main selling layout selection", () => {
+    it("submits uploaded product images without name or brand fields", async () => {
+        const view = form();
+        view.picker().props.onChange([image(1).id], [image(1)]);
+        expect(view.render().some((node) => ["test-name", "test-brand"].includes(node.props.id))).toBe(false);
+        expect(view.render().find((node) => node.props.type === "submit")!.props.disabled).toBe(false);
+        await view.render().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
+        expect(view.props.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ assetIds: [image(1).id], productName: "", brand: "" }));
+    });
     it("offers the sample compositions and never applies more than four layouts", async () => {
         const view = form();
         const all = () => view.render();
@@ -301,7 +312,6 @@ describe("main selling layout selection", () => {
         expect(all().some((node) => node.props.layout?.id === "color-swatches")).toBe(true);
         all().find((node) => node.type === "button" && text(node) === "应用 4 个版式")!.props.onClick();
         view.picker().props.onChange([image(1).id], [image(1)]);
-        all().find((node) => node.props.id === "test-name")!.props.onChange({ target: { value: "Product" } });
         await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
         expect(view.props.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ sellingLayouts: ["color-swatches", "sidebar-features", "block-collage", "arched-details"], counts: { white: 1, scene: 1, selling: 4, other: 0 } }));
         expect(view.billing).toHaveBeenLastCalledWith(modelId, 6, true, "main");
@@ -332,7 +342,6 @@ describe("main selling layout selection", () => {
         };
         all().find((node) => node.type === "dialog")!.props.ref.current = { showModal: jest.fn(), close: jest.fn() };
         view.picker().props.onChange([image(1).id], [image(1)]);
-        all().find((node) => node.props.id === "test-name")!.props.onChange({ target: { value: "Product" } });
         count("scene", 0);
         count("white", 9);
         expect(trigger().props.disabled).toBe(false);
@@ -354,7 +363,7 @@ describe("main selling layout selection", () => {
         expect(view.props.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ sellingLayouts: ["headline-detail", "split-detail", "feature-grid", "scene-caption"], counts: { white: 0, scene: 0, selling: 10, other: 0 } }));
         expect(view.billing).toHaveBeenLastCalledWith(modelId, 10, true, "main");
     });
-    it("uses a separate full-width upload area and transactional layout selection", async () => {
+    it("uses an empty full-width upload area and transactional layout selection", async () => {
         const view = form();
         const all = () => view.render();
         const trigger = () => all().find((node) => node.props.className === "selling-layout-trigger")!;
@@ -376,13 +385,33 @@ describe("main selling layout selection", () => {
         all().find((node) => node.type === "button" && text(node) === "应用 1 个版式")!.props.onClick();
         expect(text(trigger())).toBe("已选 1 个卖点图版式");
         view.picker().props.onChange([image(1).id], [image(1)]);
-        all().find((node) => node.props.id === "test-name")!.props.onChange({ target: { value: "Product" } });
         await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
         expect(view.props.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ sellingLayouts: ["split-detail"], counts: { white: 1, scene: 1, selling: 1, other: 0 } }));
         trigger().props.onClick();
         choose("移除材质特写").props.onClick();
         all().find((node) => node.type === "button" && text(node) === "应用 0 个版式")!.props.onClick();
         expect(text(trigger())).toBe("选择卖点图版式");
+    });
+    it("replaces the main dropzone with thumbnails and an add tile, restoring it after the last removal", () => {
+        const view = form();
+        const empty = () => view.render().find((node) => node.props.className === "image-upload-area");
+        const add = () => view.render().find((node) => node.props["aria-label"] === "继续添加图片");
+        expect(empty()).toBeDefined();
+        const initial = view.render();
+        const library = initial.find((node) => node.props.className === "image-upload-library")!;
+        expect(initial.find((node) => node.props.className === "image-upload-heading")!.props.children).toContain(library);
+        view.picker().props.onChange([image(1).id], [image(1)]);
+        expect(empty()).toBeUndefined();
+        expect(view.thumbnails()).toHaveLength(1);
+        const click = jest.fn();
+        view.render().find((node) => node.props.type === "file")!.props.ref.current = { click };
+        add()!.props.onClick();
+        expect(click).toHaveBeenCalledTimes(1);
+        view.picker().props.onChange([1, 2, 3, 4, 5].map((id) => image(id).id), [1, 2, 3, 4, 5].map(image));
+        expect(add()).toBeUndefined();
+        for (const thumbnail of view.thumbnails()) thumbnail.props.onDelete();
+        expect(empty()).toBeDefined();
+        expect(add()).toBeUndefined();
     });
     it("trims selections when the selling count falls to zero and ignores locked count changes", () => {
         const view = form();
@@ -419,7 +448,6 @@ describe("main selling layout selection", () => {
         expect(text(all())).toContain("应用后卖点图 2 张，套图共 4 张，按新张数计费");
         all().find((node) => node.type === "button" && text(node) === "取消")!.props.onClick();
         view.picker().props.onChange([image(1).id], [image(1)]);
-        all().find((node) => node.props.id === "test-name")!.props.onChange({ target: { value: "Product" } });
         await all().find((node) => node.type === "form")!.props.onSubmit({ preventDefault: jest.fn() });
         expect(view.props.onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({ sellingLayouts: [], counts: { white: 1, scene: 1, selling: 1, other: 0 } }));
         trigger().props.onClick();
@@ -572,10 +600,10 @@ describe("workspace selection", () => {
         const view = form();
         const images = Array.from({ length: 5 }, (_, index) => ({ ...image(index + 1), name: "Original", group: "Local" }));
         view.picker().props.onChange(images.map((entry) => entry.id), images);
-        expect(view.render().find((node) => node.props.onDrop)!.props.disabled).toBe(true);
+        expect(view.render().find((node) => node.props["aria-label"] === "继续添加图片")).toBeUndefined();
         view.thumbnails()[0].props.onToggle();
         expect(view.thumbnails()).toHaveLength(5);
-        expect(view.render().find((node) => node.props.onDrop)!.props.disabled).toBe(false);
+        expect(view.render().find((node) => node.props["aria-label"] === "继续添加图片")!.props.disabled).toBe(false);
         view.drop(2);
         expect(view.upload).not.toHaveBeenCalled();
         view.drop(1);
@@ -1299,7 +1327,8 @@ describe("workspace integration", () => {
         expect(supports({ ...record, count: 10, mainInput: { ...input(), counts: { white: 1, scene: 1, selling: 8, other: 0 } } })).toBe(true);
         expect(supports({ ...record, count: 11, mainInput: { ...input(), counts: { white: 1, scene: 1, selling: 9, other: 0 } } })).toBe(false);
         expect(supports({ ...record, count: Number.MAX_SAFE_INTEGER + 1, mainInput: { ...input(), counts: { white: Number.MAX_SAFE_INTEGER + 1, scene: 0, selling: 0, other: 0 } } })).toBe(false);
-        for (const change of [{ counts: undefined }, { counts: { white: -1, scene: 2, selling: 0, other: 0 } }, { counts: { white: 1.5, scene: 0, selling: 0, other: 0 } }, { assetIds: [] }, { assetIds: ["invalid"] }, { assetIds: [image(1).id, image(1).id] }, { modelId: "other" }, { productName: " " }, { resolution: "8K" }, { ratio: "bad" }]) expect(supports({ ...record, mainInput: { ...input(), ...change } })).toBe(false);
+        for (const productName of ["", " "]) expect(supports({ ...record, mainInput: { ...input(), productName } })).toBe(true);
+        for (const change of [{ counts: undefined }, { counts: { white: -1, scene: 2, selling: 0, other: 0 } }, { counts: { white: 1.5, scene: 0, selling: 0, other: 0 } }, { assetIds: [] }, { assetIds: ["invalid"] }, { assetIds: [image(1).id, image(1).id] }, { modelId: "other" }, { productName: null }, { productName: "x".repeat(101) }, { resolution: "8K" }, { ratio: "bad" }]) expect(supports({ ...record, mainInput: { ...input(), ...change } })).toBe(false);
         expect(supports({ ...record, count: 2 })).toBe(false);
         expect(supports({ ...record, size: "1024x1024" })).toBe(false);
         view.capability.tools[0].modelIdsByCapability["reference-image"] = [];

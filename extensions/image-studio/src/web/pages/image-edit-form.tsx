@@ -305,7 +305,7 @@ export default function ImageEditForm({ tool, capabilities, locked, onSubmit, an
             {!capable && <p className="specialized-message" role="status">{tool === "cutout" ? "腾讯云抠图未配置，请联系管理员启用 COS 存储及数据万象后刷新。" : "当前模型不可用于参考图编辑，请选择可用模型或联系管理员配置。"}</p>}
         <fieldset className="specialized-fields" disabled={busy}>
             <section className="specialized-band"><AssetRolePicker label={tool === "retouch" || tool === "expand" || canvasLayout || regionalLayout ? "上传图片" : "待编辑图片"} images={images} max={1} disabled={busy} original={!canvasLayout} dropzone={tool === "retouch" || tool === "expand" || regionalLayout} appearance={regionalLayout ? "links" : "default"} allowReplacement={regionalLayout} previewRegion={tool === "watermark" && !canvasLayout ? region : undefined}
-                onChange={(next) => replaceImages(next)} onFiles={uploadFiles} />
+                onChange={(next) => replaceImages(next)} onFiles={(files) => uploadFiles(files, regionalLayout)} />
                 {(canvasLayout || expansionLayout || regionalLayout) && images.length > 0 && <div className="watermark-source-actions">
                     {tool !== "recolor" && <button type="button" disabled={busy} onClick={() => onEditSource?.()}><Scan size={14} />重新编辑</button>}
                     <button type="button" disabled={busy} onClick={() => sourcePicker.current?.click()}><RefreshCw size={14} />重新上传</button>

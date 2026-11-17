@@ -188,8 +188,8 @@ export default function SkuToolForm({ tool = "sku", capabilities, locked, onSubm
         if (files.length !== 1 || !file || !validImageFile(file)) { setError("请选择一张不超过 10 MiB 的 PNG、JPEG 或 WebP 图片"); return; }
         if (!target && template && !replace) { setError("模板图最多一张，请使用重新上传"); return; }
         if (!model || !capable) { setError("请选择可用的参考图编辑模型"); return; }
-        if (apparel && (!products.isSuccess || products.isFetching || products.isError || (products.data?.length ?? 0) >= 40)) {
-            setError("请检查素材目录与 40 张素材配额"); return;
+        if (apparel && (!products.isSuccess || products.isFetching || products.isError)) {
+            setError("请等待素材目录加载完成后重试"); return;
         }
         operation.current = true; setPending(true); setError("");
         const modelId = model.id, imageId = template?.id;

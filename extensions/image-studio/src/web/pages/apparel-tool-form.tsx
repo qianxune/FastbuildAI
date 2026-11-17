@@ -5,7 +5,6 @@ import { APPAREL_WORKFLOWS, NAIL_HAND_STYLES, OUTFIT_STYLES, TRYON_SCENES, UGC_O
 import { TOOL_PLATFORMS, TOOL_RATIOS } from "../../api/shared/tool-workflow";
 import { useAssetsQuery } from "../services/assets";
 import { useGenerationBilling, useProductImagesQuery, useUploadProductImageMutation } from "../services/generation";
-import { MATERIAL_LIMIT } from "../services/materials";
 import type { ProductImage } from "../services/types";
 import { APPAREL_PREVIEW_IMAGES, apparelModels, apparelNeedsModel, buildApparelInput, createApparelDraft, readableApparelImage, restoreApparelDraft, savedModelCatalog, type ApparelDraft } from "./apparel-workflow";
 import { MaterialDialog } from "./material-picker";
@@ -126,8 +125,8 @@ export default function ApparelToolForm({ tool, capabilities, locked, defaultCou
         const live = current.current;
         const remaining = role === "style" ? 1 : APPAREL_WORKFLOWS[tool].maxSources - live.draft.sourceAssetIds.length;
         if (!submission.current.catalogReady || !live.capable || files.some((file) => !validImageFile(file)) || files.length > remaining
-            || products.data!.length + files.length > MATERIAL_LIMIT || selectedIds.length - (role === "style" && draft.styleAssetId ? 1 : 0) + files.length > live.limit) {
-            setError("请检查图片格式、角色上限、模型容量与 40 张素材配额"); return;
+            || selectedIds.length - (role === "style" && draft.styleAssetId ? 1 : 0) + files.length > live.limit) {
+            setError("请检查图片格式、素材目录、角色上限与模型容量"); return;
         }
         operation.current = true; setPending(true); setError("");
         const draftAtStart = live.draft, modelId = live.modelId;

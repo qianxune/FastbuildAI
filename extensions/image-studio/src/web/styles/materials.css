@@ -1,11 +1,11 @@
 .materials-view, .material-picker, .materials-dialog {
-    --mat-bg: #fff;
-    --mat-surface: #f7f8f6;
-    --mat-ink: #202820;
-    --mat-muted: #5c665d;
-    --mat-line: #dce1da;
-    --mat-accent: #356047;
-    --mat-danger: #a92e38;
+    --mat-bg: var(--card);
+    --mat-surface: var(--muted);
+    --mat-ink: var(--foreground);
+    --mat-muted: var(--muted-foreground);
+    --mat-line: var(--border);
+    --mat-accent: var(--primary);
+    --mat-danger: var(--destructive);
     color: var(--mat-ink);
     font: 14px/1.5 "Noto Sans SC", "Microsoft YaHei", sans-serif;
     letter-spacing: 0;
@@ -22,11 +22,54 @@
     border-radius: 6px; background: var(--mat-bg); color: var(--mat-ink); cursor: pointer; font: inherit;
     white-space: normal; overflow-wrap: anywhere;
 }
-.materials-view button:hover:not(:disabled), .material-picker button:hover:not(:disabled), .materials-dialog button:hover:not(:disabled) { background: #edf2eb; border-color: #9faf9e; }
+.materials-view button:hover:not(:disabled), .material-picker button:hover:not(:disabled), .materials-dialog button:hover:not(:disabled) { background: var(--accent); border-color: var(--input); }
 .materials-view button:disabled, .material-picker button:disabled, .materials-dialog button:disabled { opacity: .5; cursor: not-allowed; }
-.materials-view :focus-visible, .material-picker :focus-visible, .materials-dialog :focus-visible { outline: 2px solid #356047; outline-offset: 3px; }
-.materials-view .materials-primary, .materials-dialog .materials-primary { background: var(--mat-accent); border-color: var(--mat-accent); color: #fff; }
-.materials-view .materials-primary:hover:not(:disabled), .materials-dialog .materials-primary:hover:not(:disabled) { background: #284d37; color: #fff; }
+.materials-view :focus-visible, .material-picker :focus-visible, .materials-dialog :focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.studio-app .material-picker > button.materials-picker-trigger,
+.materials-dialog button.materials-picker-trigger {
+    display: inline-flex; align-items: center; justify-content: flex-start; gap: 6px;
+    width: auto; max-width: 100%; min-width: 0; min-height: 32px; padding: 4px 0;
+    border: 0; border-radius: 0; background: transparent; box-shadow: none;
+    color: var(--foreground); font: inherit; font-size: 12px; line-height: 1.5; text-decoration: none;
+}
+.materials-picker-trigger > svg { flex: 0 0 auto; }
+.materials-picker-trigger > span { text-decoration: underline; text-underline-offset: 3px; }
+.studio-app .material-picker > button.materials-picker-trigger:hover:not(:disabled),
+.materials-dialog button.materials-picker-trigger:hover:not(:disabled) { background: transparent; color: var(--primary); }
+.image-upload-area { position: relative; width: 100%; min-width: 0; border: 1px dashed var(--input); border-radius: 6px; background: var(--muted); }
+.image-upload-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 8px; min-width: 0; }
+.image-upload-title { display: flex; align-items: baseline; flex: 1 1 0; gap: 6px; min-width: 0; }
+.image-upload-heading .image-upload-title > h3, .image-upload-heading .f-label { margin: 0; }
+.image-upload-title > span:not(:first-child) { flex: none; font-size: 11px; font-weight: 400; color: var(--muted-foreground); }
+.image-upload-title > .opt { margin-left: 0; }
+.image-upload-library { position: static; flex: 0 0 auto; margin-left: auto; max-width: 100%; }
+.studio-app .image-upload-area > button.image-upload-zone,
+.materials-dialog .image-upload-area > button.image-upload-zone {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 164px; margin: 0; padding: 24px 12px;
+    border: 0; border-radius: inherit; background: transparent; box-shadow: none; font: inherit; cursor: pointer;
+}
+.studio-app .image-upload-area > button.image-upload-zone:hover:not(:disabled),
+.materials-dialog .image-upload-area > button.image-upload-zone:hover:not(:disabled) { background: var(--accent); }
+.image-upload-command { display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 7px; min-height: 36px; max-width: 100%; padding: 8px 14px; border-radius: 4px; background: var(--primary); color: var(--primary-foreground); font-size: 12px; font-weight: 600; line-height: 20px; }
+.image-upload-command > svg { flex: none; }
+.image-upload-hint { font-size: 11px; line-height: 1.6; color: var(--muted-foreground); text-align: center; overflow-wrap: anywhere; }
+.studio-app .image-upload-thumbnails, .materials-dialog .image-upload-thumbnails { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-start; gap: 12px; margin: 0; }
+.studio-app .image-upload-thumbnails > :is(.product-thumb, .specialized-thumbnail, .assets-selected),
+.materials-dialog .image-upload-thumbnails > .assets-selected { box-sizing: border-box; flex: 0 0 auto; width: 100px; height: 100px; min-width: 100px; max-width: 100px; min-height: 100px; max-height: 100px; padding: 0; border-radius: 8px; overflow: hidden; background: var(--muted); }
+.image-upload-thumbnails > .specialized-thumbnail { display: grid; place-items: center; }
+.image-upload-preview { position: relative; width: 100%; height: 100%; }
+.image-upload-preview > img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.studio-app .image-upload-thumbnails > button.image-upload-add,
+.materials-dialog .image-upload-thumbnails > button.image-upload-add { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; flex: 0 0 auto; width: 100px; height: 100px; min-width: 100px; min-height: 100px; padding: 0; border: 0; border-radius: 8px; background: var(--muted); color: var(--foreground); box-shadow: none; cursor: pointer; }
+.studio-app .image-upload-thumbnails > button.image-upload-add:hover:not(:disabled),
+.materials-dialog .image-upload-thumbnails > button.image-upload-add:hover:not(:disabled) { background: var(--accent); }
+.specialized-assets[data-dragging="true"] .image-upload-area,
+.image-upload-content.dragging .image-upload-area { border-color: var(--primary); background: var(--accent); }
+.image-upload-content.dragging .image-upload-thumbnails { outline: 2px dashed var(--ring); outline-offset: 4px; }
+.materials-upload-area { margin-top: 20px; }
+.materials-view .materials-primary, .materials-dialog .materials-primary { background: var(--mat-accent); border-color: var(--mat-accent); color: var(--primary-foreground); }
+.materials-view .materials-primary:hover:not(:disabled), .materials-dialog .materials-primary:hover:not(:disabled) { background: var(--studio-hover); color: var(--primary-foreground); }
 .materials-view .materials-danger, .materials-dialog .materials-danger { color: var(--mat-danger); }
 .materials-heading, .materials-count, .materials-dialog header, .materials-dialog footer, .material-actions, .materials-group-tools, .materials-batch {
     display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
@@ -52,7 +95,7 @@
 .material-item[data-selected="true"] { border-color: var(--mat-accent); box-shadow: 0 0 0 1px var(--mat-accent); }
 .material-thumbnail { aspect-ratio: 1 / 1; width: 100%; overflow: hidden; display: grid; place-items: center; background: var(--mat-surface); }
 .material-thumbnail img { width: 100%; height: 100%; object-fit: contain; }
-.material-thumbnail > span { color: #7d8b7b; display: grid; place-items: center; }
+.material-thumbnail > span { color: var(--muted-foreground); display: grid; place-items: center; }
 .material-caption { padding: 12px; min-width: 0; display: grid; gap: 5px; }
 .material-caption strong, .material-choice span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .material-caption time, .material-caption small { color: var(--mat-muted); font-size: 14px; }
@@ -60,12 +103,12 @@
 .material-choice { display: flex; align-items: center; gap: 8px; padding: 12px; cursor: pointer; min-width: 0; }
 .materials-view input[type="checkbox"], .materials-dialog input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--mat-accent); }
 .materials-empty { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; color: var(--mat-muted); }
-.materials-warning, .materials-report { background: #fff8e9; color: #684715; padding: 12px 14px; border-left: 3px solid #cc9c36; overflow-wrap: anywhere; }
+.materials-warning, .materials-report { background: var(--studio-warning-surface); color: var(--orange); padding: 12px 14px; border-left: 3px solid var(--orange); overflow-wrap: anywhere; }
 .materials-report { margin: 12px 0; max-height: 200px; overflow: auto; }
 .materials-report p { margin: 5px 0; }
 .materials-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 24px; }
-.materials-dialog { position: fixed; inset: 0; margin: auto; border: 1px solid var(--mat-line); border-radius: 8px; padding: 0; width: min(840px, calc(100vw - 32px)); height: fit-content; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); background: var(--mat-bg); box-shadow: 0 16px 70px #0003; }
-.materials-dialog::backdrop { background: #18251f70; }
+.materials-dialog { position: fixed; inset: 0; margin: auto; border: 1px solid var(--mat-line); border-radius: 8px; padding: 0; width: min(840px, calc(100vw - 32px)); height: fit-content; max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); background: var(--mat-bg); box-shadow: 0 16px 70px var(--studio-selection-soft); }
+.materials-dialog::backdrop { background: var(--studio-overlay); }
 .materials-dialog-body { padding: 22px; min-width: 0; }
 .materials-dialog header { padding-bottom: 14px; border-bottom: 1px solid var(--mat-line); }
 .materials-dialog footer { justify-content: flex-end; padding-top: 18px; margin-top: 16px; border-top: 1px solid var(--mat-line); }
@@ -77,6 +120,7 @@
 .materials-preview { width: 100%; max-height: 62dvh; object-fit: contain; margin-top: 16px; display: block; background: var(--mat-surface); }
 .materials-sr { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 @media (max-width: 640px) {
+    .studio-app .material-picker > button.materials-picker-trigger, .materials-dialog button.materials-picker-trigger { min-height: 44px; }
     .materials-view { padding: 18px 14px; }
     .materials-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .materials-view button, .material-picker button, .materials-dialog button { min-height: 44px; min-width: 44px; }

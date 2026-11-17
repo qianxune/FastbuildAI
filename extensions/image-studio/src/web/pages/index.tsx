@@ -84,7 +84,7 @@ export function supportsMainRetry(item: ImageGeneration, capabilities?: Generati
     const availability = capabilities?.tools.find((entry) => entry.key === "main");
     const model = capabilities?.models.find((entry) => entry.id === item.modelId);
     if (!input || !input.counts || !Array.isArray(input.assetIds) ||
-        typeof input.productName !== "string" || !input.productName.trim() ||
+        typeof input.productName !== "string" || input.productName.length > 100 ||
         !MAIN_RATIOS.includes(input.ratio) || !MAIN_RESOLUTIONS.includes(input.resolution) ||
         input.modelId !== item.modelId || availability?.status !== "available" ||
         !model?.capabilities.includes("reference-image") ||

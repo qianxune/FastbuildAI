@@ -509,7 +509,7 @@ export class GenerationService {
                     userId,
                     toolKey: "main",
                     mainInput: input,
-                    prompt: input.productName,
+                    prompt: input.productName || input.description || "商品主图",
                     modelId: model.id,
                     modelName: model.name,
                     size: mainImageSize(input),

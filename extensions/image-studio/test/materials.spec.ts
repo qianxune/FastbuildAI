@@ -57,24 +57,37 @@ describe("materials helpers", () => {
             return image();
         });
         const progress = jest.fn();
-        const result = await helpers.uploadMaterials(files, 0, upload, undefined, progress);
+        const result = await helpers.uploadMaterials(files, upload, undefined, progress);
         expect(upload.mock.calls.map(([file]) => file.name)).toEqual(["good", "bad", "later"]);
         expect(result.uploaded).toHaveLength(2);
         expect(result.errors).toEqual(["bad：offline", "invalid：仅支持 10 MB 以内 PNG、JPEG、WebP"]);
         expect(progress).toHaveBeenLastCalledWith(4, 4);
     });
-    it("enforces the cap and stops only subsequent uploads after cancellation", async () => {
+    it("enforces only the per-batch cap and stops subsequent uploads after cancellation", async () => {
         const file = { name: "image.png", size: 100, type: "image/png" };
         const upload = jest.fn(async () => image());
-        const result = await helpers.uploadMaterials([file, file], 39, upload);
-        expect(upload).toHaveBeenCalledTimes(1);
-        expect(result.errors[0]).toContain("40 张上限");
+        const result = await helpers.uploadMaterials(Array(41).fill(file), upload);
+        expect(upload).toHaveBeenCalledTimes(40);
+        expect(result.uploaded).toHaveLength(40);
+        expect(result.errors).toEqual(["本次仅处理前 40 个文件，另 1 个未上传"]);
+        const next = await helpers.uploadMaterials([file, file], upload);
+        expect(upload).toHaveBeenCalledTimes(42);
+        expect(next.uploaded).toHaveLength(2);
+        expect(next.errors).toEqual([]);
         const controller = new AbortController();
         upload.mockClear().mockImplementationOnce(async () => { controller.abort(); return image(); });
-        const stopped = await helpers.uploadMaterials([file, file], 0, upload, controller.signal);
+        const stopped = await helpers.uploadMaterials([file, file], upload, controller.signal);
         expect(upload).toHaveBeenCalledTimes(1);
         expect(stopped.uploaded).toHaveLength(1);
         expect(stopped.errors).toContain("上传已停止；已上传的素材保留");
+    });
+    it("deletes selections beyond forty images without silently truncating them", async () => {
+        const selected = Array.from({ length: 41 }, (_value, index) => image(index + 1));
+        const remove = jest.fn().mockResolvedValue(undefined);
+        const result = await helpers.deleteMaterials(selected, remove);
+        expect(remove.mock.calls.map(([id]) => id)).toEqual(selected.map((entry) => entry.id));
+        expect(result.removed).toHaveLength(41);
+        expect(result.errors).toEqual([]);
     });
     it("preserves server reference refusal and continues deleting independent assets", async () => {
         const remove = jest.fn(async (id: string) => { if (id === image(1).id) throw new Error("商品图已用于生成记录，请先删除相关记录"); });

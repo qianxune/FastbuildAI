@@ -240,13 +240,13 @@ export function HeroComparison() {
   const [position, setPosition] = useState(50);
   const style: CSSProperties & { "--compare-position": string } = { "--compare-position": `${position}%` };
   return <div className="lp-comparison-card">
-    <div className="lp-comparison-head"><span><i />实拍样品<ArrowRight size={14} />商业主图<small>85mm · 柔光晨曦</small></span><span className="lp-comparison-hint"><ArrowLeftRight size={14} />左右滑动对比</span></div>
+    <div className="lp-comparison-head"><span><i />日常场景<ArrowRight size={14} />商业光影<small>同款香水示意</small></span><span className="lp-comparison-hint"><ArrowLeftRight size={14} />左右滑动对比</span></div>
     <div className="lp-comparison" style={style}>
-      <div className="lp-comparison-before"><img className="lp-comparison-image" src={imageUrl("home-hero-before.jpg")} alt="原始日常随手拍示例" fetchPriority="high" /></div>
-      <div className="lp-comparison-after"><img className="lp-comparison-image" src={imageUrl("home-hero-after.jpg")} alt="AI 商业光影置景示例" fetchPriority="high" /></div>
+      <div className="lp-comparison-after"><img className="lp-comparison-image" src={imageUrl("home-hero-after.jpg")} alt="香水商业光影场景示意图" fetchPriority="high" /></div>
+      <div className="lp-comparison-before" style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}><img className="lp-comparison-image" src={imageUrl("home-hero-before.jpg")} alt="香水日常桌面场景示意图" fetchPriority="high" /></div>
       <span className="lp-comparison-line"><span><ArrowLeftRight size={19} /></span></span>
-      <span className="lp-comparison-label before">原始日常随手拍</span><span className="lp-comparison-label after">AI 商业光影置景</span>
-      <input className="lp-comparison-range" type="range" min={0} max={100} value={position} aria-label="原图显示比例" aria-valuetext={`原图 ${position}%，AI 效果 ${100 - position}%`} onChange={(event) => setPosition(Number(event.target.value))} />
+      <span className="lp-comparison-label before" hidden={position === 0}>干净日常场景</span><span className="lp-comparison-label after" hidden={position === 100}>商业光影示意</span>
+      <input className="lp-comparison-range" type="range" min={0} max={100} value={position} aria-label="日常场景显示比例" aria-valuetext={`日常场景 ${position}%，商业光影 ${100 - position}%`} onChange={(event) => setPosition(Number(event.target.value))} />
     </div>
     <div className="lp-comparison-foot"><div className="lp-lighting-styles"><span>光影风格：</span><span>奢感丝绸</span><span>暖阳微风</span><span>静谧大理石</span></div><a href={studioUrl} target="_top"><Sparkles size={13} />套用此光影</a></div>
   </div>;

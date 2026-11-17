@@ -32,6 +32,15 @@ const secondAsset = "33333333-3333-4333-8333-333333333333";
 const input = (overrides: Partial<ToolWorkflowInput> = {}): ToolWorkflowInput => ({ tool: "retouch", modelId, assetIds: [assetId], productName: "Product", instructions: "Lighting", count: 2, ratio: "1:1", ...overrides });
 
 describe("main selling image layouts", () => {
+    it.each([undefined, "", " "])("accepts main generation without a product name (%p) or brand", async (productName) => {
+        const request = plainToInstance(MainImageDto, { modelId, assetIds: [assetId], ...(productName === undefined ? {} : { productName }) });
+        expect(validateSync(request)).toHaveLength(0);
+        const view = fixture();
+        await view.service.submitMain("owner", request);
+        expect(view.createTask.mock.calls[0][1].mainInput.productName).toBe("");
+        expect(view.createTask.mock.calls[0][1].prompt).toBe("商品主图");
+        expect(mainImagePrompt(request, "scene")).toContain("商品名称：以参考图为准");
+    });
     it("accepts ten main outputs but rejects eleven and caps layouts independently before billing", async () => {
         const mainInput = plainToInstance(MainImageDto, { modelId, assetIds: [assetId], productName: "Product",
             counts: { white: 0, scene: 2, selling: 8, other: 0 },
@@ -163,6 +172,7 @@ const designRequests: ToolWorkflowInput[] = [
     input({ tool: "redraw", productName: undefined, count: 1, instructions: "Change the bag to black", design: { redrawRegions: [{ x: .1, y: .2, width: .3, height: .4 }] } }),
     ...["#ffffff", "#287be5", "#ABC123"].map((productColor) => input({ tool: "recolor", productName: undefined, count: 1, instructions: "", design: { productColor } })),
     ...apparelRequests,
+    input({ tool: "detail", productName: undefined, count: 1, design: { description: "Confirmed visible product details", detailModules: ["hero"], outputModules: ["hero"] } }),
 ];
 
 function fixture(withAssetService = false) {

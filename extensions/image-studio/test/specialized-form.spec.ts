@@ -27,6 +27,14 @@ function draft(tool: SpecializedDraft["tool"]): SpecializedDraft {
 }
 
 describe("specialized workflow payloads", () => {
+    it("plans and validates detail images without product name or brand", () => {
+        const value = { ...draft("detail"), productName: "", brand: "" };
+        value.plan = createDetailPlan(draftPlanSource(value));
+        const input = buildSpecializedInput(value, 5);
+        expect(input.productName).toBeUndefined();
+        expect(input.design?.brand).toBeUndefined();
+        expect(validateToolWorkflow(input)).toBeNull();
+    });
     it.each(["detail", "replica", "creative", "fusion", "sku"] as const)("builds strict %s input", (tool) => {
         const value = draft(tool);
         if (tool === "detail") value.plan = createDetailPlan(draftPlanSource(value));
@@ -249,7 +257,6 @@ function renderHarness(file: string, exportName: string, props: Record<string, a
         if (name === "../../api/shared/apparel-workflow") return apparelContract;
         if (name === "./workspace-navigation") return { TOOL_LABELS: Object.fromEntries(apparelContract.APPAREL_KEYS.map((key) => [key, key])) };
         if (name === "../services/assets") return services;
-        if (name === "../services/materials") return { MATERIAL_LIMIT: 40 };
         if (name === "./asset-draft") return assetDraft;
         if (name === "./specialized-components") return componentTokens;
         if (name === "./material-picker") return { default: "MaterialPicker", MaterialDialog: "MaterialDialog" };
@@ -394,13 +401,20 @@ describe("apparel component behavior", () => {
         const first = submit({ preventDefault: jest.fn() }); await submit({ preventDefault: jest.fn() });
         expect(view.onSubmit).toHaveBeenCalledTimes(1); finish(); await first;
     });
-    it.each(["type", "size", "quota", "capacity"])("rejects %s upload before storage mutation", async (reason) => {
+    it.each(["type", "size", "capacity"])("rejects %s upload before storage mutation", async (reason) => {
         const view = apparelHarness("outfit"); const file = { type: "image/png", size: 100 };
         if (reason === "type") file.type = "image/svg+xml";
         if (reason === "size") file.size = 10 * 1024 * 1024 + 1;
-        if (reason === "quota") view.products.data = Array(40).fill(images[0]);
         if (reason === "capacity") view.capabilities.models[0].maxReferenceImages = 0;
         await view.source().onFiles([file]); expect(view.upload).not.toHaveBeenCalled();
+    });
+    it("allows apparel uploads with more than forty historical materials", async () => {
+        const view = apparelHarness("outfit");
+        view.products.data = Array(41).fill(images[0]);
+        view.upload.mockResolvedValue(images[1]);
+        await view.source().onFiles([{ type: "image/png", size: 100 }]);
+        expect(view.upload).toHaveBeenCalledTimes(1);
+        expect(view.source().images).toEqual([expect.objectContaining({ id: images[1].id })]);
     });
     it("serializes valid uploads and ignores results after unmount", async () => {
         const view = apparelHarness("outfit"); let finish!: (image: typeof images[number]) => void;
@@ -644,6 +658,14 @@ function skuHarness(tool: "sku" | "apparel_sku" = "sku") {
 }
 
 describe("apparel SKU component", () => {
+    it("allows template uploads with more than forty historical materials", async () => {
+        const view = skuHarness("apparel_sku");
+        view.products.data = Array(41).fill(images[0]);
+        view.upload.mockResolvedValue(images[1]);
+        await view.role("SKU 模板图").onFiles([{ type: "image/png", size: 100 }]);
+        expect(view.upload).toHaveBeenCalledTimes(1);
+        expect(view.role("SKU 模板图").images).toEqual([images[1]]);
+    });
     it.each([1, 10])("submits %i explicit variants with apparel billing and template-first deduplicated references", async (count) => {
         const view = skuHarness("apparel_sku"); view.filled();
         for (let index = 2; index <= count; index++) {
@@ -753,7 +775,7 @@ describe("multi-region SKU editor", () => {
         const onFiles = jest.fn();
         const view = renderHarness("specialized-components", "AssetRolePicker", { label: "SKU reference", images: [images[1]], max: 1, disabled: false, onChange: jest.fn(), onFiles, allowReplacement: true });
         const input = () => view.render().find((node) => node.props.type === "file")!;
-        const upload = () => view.render().find((node) => node.type === "button" && elementText(node).includes("重新上传"))!;
+        const upload = () => view.render().find((node) => node.type === "button" && node.props["aria-label"] === "重新上传")!;
         expect(upload().props.disabled).toBe(false); expect(input().props.disabled).toBe(false);
         const files = [{ type: "image/png", size: 100 }];
         input().props.onChange({ target: { files, value: "file" } }); expect(onFiles).toHaveBeenCalledWith(files);
@@ -920,7 +942,7 @@ function formHarness(tool: SpecializedDraft["tool"], options: { ready?: boolean;
         if (tool === "creative") { set("instructions", "User prompt"); return; }
         role(tool === "sku" ? "SKU 模板图" : tool === "replica" ? "商品图" : tool === "fusion" ? "主体图" : "商品图片").onChange([images[0]]);
         if (tool === "replica" || tool === "fusion") role(tool === "replica" ? "风格参考图" : "配件图").onChange([images[1]]);
-        if (tool === "detail") { set("product", "Confirmed product"); set("已确认的商品描述", "Confirmed description"); button("生成本地规划").props.onClick(); }
+        if (tool === "detail") { set("已确认的商品描述", "Confirmed description"); button("生成本地规划").props.onClick(); }
         if (tool === "sku") {
             button("选择区域").props.onClick();
             const editor = view.render().find((node) => node.type === "SkuRegionEditor")!;
@@ -1010,6 +1032,19 @@ function imageEditHarness(tool: "watermark" | "translate" | "retouch" | "recolor
 }
 
 describe("dedicated image editing", () => {
+    it.each(["redraw", "cutout", "recolor"] as const)("replaces the %s source through the large upload area without removing it first", async (tool) => {
+        const view = imageEditHarness(tool);
+        view.fill();
+        const file = { type: "image/png", size: 100 };
+        view.upload.mockRejectedValueOnce(new Error("Replacement failed"));
+        await view.picker().onFiles([file]);
+        expect(view.upload).toHaveBeenCalledWith(file);
+        expect(view.picker().images[0].id).toBe(images[0]!.id);
+        view.upload.mockResolvedValueOnce(images[1]);
+        await view.picker().onFiles([file]);
+        expect(view.picker().images[0].id).toBe(images[1]!.id);
+        expect(view.upload).toHaveBeenCalledTimes(2);
+    });
     it("submits preset and custom product colors only after the original is ready", async () => {
         const view = imageEditHarness("recolor"); view.props.annotationTarget = {}; view.props.onEditSource = jest.fn(); view.fill();
         const preview = () => view.render().find((node) => node.type === view.exports.RecolorPreview)!.props;
@@ -1460,13 +1495,15 @@ describe("specialized form interactions", () => {
     });
     it.each(["detail", "replica", "creative", "fusion", "sku"] as const)("submits real %s form state through the existing contract", async (tool) => {
         const view = formHarness(tool); view.filled();
+        expect(view.render().some((node) => ["test-product", "test-brand"].includes(node.props.id))).toBe(false);
         expect(view.submitButton().props.disabled).toBe(false); await view.submit();
         const input = view.onSubmit.mock.calls[0][0];
         expect(input.tool).toBe(tool); expect(validateToolWorkflow(input)).toBeNull();
         expect(input.count).toBe(tool === "detail" ? 4 : 1);
         expect(view.billing).toHaveBeenLastCalledWith(modelId, input.count, true);
         expect(view.analyze).not.toHaveBeenCalled();
-        if (tool === "creative") expect(input.productName).toBeUndefined();
+        expect(input.productName).toBeUndefined();
+        expect(input.design?.brand).toBeUndefined();
     });
     it("edits planned pages, batches at four, and invalidates review on changed confirmed facts", async () => {
         const view = formHarness("detail"); view.filled();
@@ -1508,7 +1545,7 @@ describe("specialized form interactions", () => {
     it("still creates default detail plans when an existing supplement consumes the total budget", () => {
         const view = formHarness("detail");
         view.role("商品图片").onChange([images[0]]);
-        view.set("product", "Confirmed product"); view.set("已确认的商品描述", "Confirmed description");
+        view.set("已确认的商品描述", "Confirmed description");
         view.set("instructions", "x".repeat(1500));
         expect(view.button("生成本地规划").props.disabled).toBe(false);
         view.button("生成本地规划").props.onClick();
@@ -1610,6 +1647,69 @@ describe("specialized form interactions", () => {
 });
 
 describe("specialized assets and region controls", () => {
+    it.each(["default", "links", "compact"])("keeps file upload and library selection independent in the %s upload area", (appearance) => {
+        const onFiles = jest.fn(), onChange = jest.fn(), click = jest.fn();
+        const view = renderHarness("specialized-components", "AssetRolePicker", { label: "Reference", appearance, images: [], max: 2, disabled: false, onFiles, onChange });
+        const rendered = view.render();
+        const area = rendered.find((node) => node.props.className === "image-upload-area")!;
+        const upload = area.props.children;
+        const library = rendered.find((node) => node.props.className === "image-upload-library")!;
+        const picker = library.props.children;
+        expect(rendered.find((node) => node.props.className?.includes("image-upload-heading"))!.props.children).toContain(library);
+        expect(picker.type).toBe("MaterialPicker");
+        expect(upload.type).toBe("button");
+        expect(elementText(upload)).toContain("上传图片");
+        const input = rendered.find((node) => node.props.type === "file")!;
+        input.props.ref.current = { click };
+        upload.props.onClick();
+        expect(click).toHaveBeenCalledTimes(1);
+        expect(onChange).not.toHaveBeenCalled();
+        const target = { files: [{ type: "image/png", size: 100 }], value: "file" };
+        input.props.onChange({ target });
+        expect(onFiles).toHaveBeenCalledWith(target.files);
+        expect(target.value).toBe("");
+        picker.props.onChange([images[0]!.id], [images[0]]);
+        expect(onChange).toHaveBeenCalledWith([images[0]]);
+        expect(click).toHaveBeenCalledTimes(1);
+    });
+    it("allows changing library selection at the upload limit but locks both during an operation", () => {
+        const onChange = jest.fn();
+        const view = renderHarness("specialized-components", "AssetRolePicker", { label: "Reference", images: [images[0]], max: 1, disabled: false, onFiles: jest.fn(), onChange });
+        const controls = () => {
+            const nodes = view.render();
+            return { upload: nodes.find((node) => node.props.type === "file")!,
+                picker: nodes.find((node) => node.type === "MaterialPicker")! };
+        };
+        expect(controls().upload.props.disabled).toBe(true);
+        expect(controls().picker.props.disabled).toBe(false);
+        view.props.disabled = true;
+        expect(controls().upload.props.disabled).toBe(true);
+        expect(controls().picker.props.disabled).toBe(true);
+        controls().picker.props.onChange([], []);
+        expect(onChange).not.toHaveBeenCalled();
+    });
+    it.each(["default", "links", "compact"])("switches the %s picker between empty and thumbnail states and hides adding at capacity", (appearance) => {
+        const onChange = jest.fn(), click = jest.fn();
+        const view = renderHarness("specialized-components", "AssetRolePicker", { label: "Reference", appearance, images: [], max: 2, disabled: false, onFiles: jest.fn(), onChange });
+        const empty = () => view.render().find((node) => node.props.className === "image-upload-area");
+        const add = () => view.render().find((node) => node.props.className === "image-upload-add");
+        expect(empty()).toBeDefined();
+        view.props.images = [images[0]];
+        expect(empty()).toBeUndefined();
+        expect(view.render().filter((node) => node.props.className === "specialized-thumbnail")).toHaveLength(1);
+        const input = view.render().find((node) => node.props.type === "file")!;
+        input.props.ref.current = { click };
+        add()!.props.onClick();
+        expect(click).toHaveBeenCalledTimes(1);
+        view.props.images = images.slice(0, 2);
+        expect(add()).toBeUndefined();
+        view.render().find((node) => node.props["aria-label"] === "移除Reference 1")!.props.onClick();
+        expect(onChange).toHaveBeenLastCalledWith([images[1]]);
+        view.props.images = [];
+        expect(empty()).toBeDefined();
+        expect(add()).toBeUndefined();
+        expect(view.render().find((node) => node.type === "MaterialPicker")).toBeDefined();
+    });
     (process.env.IMAGE_STUDIO_VERIFY_PRESETS === "1" ? it : it.skip)("decodes all public preset photographs without blank image placeholders", async () => {
         const view = renderHarness("specialized-components", "FusionPresetGallery", { onSelect: jest.fn() });
         const sharp: typeof import("sharp") = require("sharp");
@@ -1665,7 +1765,7 @@ describe("specialized assets and region controls", () => {
         const region = { x: .1, y: .2, width: .3, height: .4 };
         const picker = renderHarness("specialized-components", "AssetRolePicker", { label: "待编辑图片", images: [images[0]], max: 1, disabled: false, original: true, previewRegion: region, onChange: jest.fn(), onFiles: jest.fn() });
         expect(picker.render().find((node) => typeof node.type === "function" && node.props.image)!.props.original).toBe(true);
-        expect(picker.render().find((node) => node.props.className === "specialized-thumbnail")!.props.style.aspectRatio).toBe("400 / 300");
+        expect(picker.render().find((node) => node.props.className === "image-upload-preview")!.props.style.aspectRatio).toBe("400 / 300");
         expect(picker.render().find((node) => node.props.className === "specialized-region-rect")!.props.style).toEqual({ left: "10%", top: "20%", width: "30%", height: "40%" });
         const editor = renderHarness("specialized-components", "SkuRegionEditor", { image: images[0], title: "框选水印区域", disabled: false, onChange: jest.fn(), onClose: jest.fn() });
         expect(editor.render().find((node) => node.type === "MaterialDialog")!.props.title).toBe("框选水印区域");

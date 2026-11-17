@@ -2,7 +2,7 @@ import { Download, Eye, FolderOpen, FolderPlus, Pencil, Plus, RefreshCw, Square,
 import { useEffect, useRef, useState } from "react";
 import { loadProductImage, useDeleteProductImageMutation, useProductImagesQuery, useUploadProductImageMutation } from "../services/generation";
 import {
-    deleteMaterials, downloadMaterialBlob, fetchMaterialOriginal, filterMaterials, materialError, materialName,
+    deleteMaterials, downloadMaterialBlob, fetchMaterialOriginal, filterMaterials, MATERIAL_BATCH_LIMIT, materialError, materialName,
     materialsZip, reconcileMaterialIds, uploadMaterials, useMaterialGroupMutation, useMaterialGroupsQuery,
     useMaterialMetadataMutation, validMaterialLabel, type MaterialFilters,
 } from "../services/materials";
@@ -130,18 +130,24 @@ export default function MaterialsView({ onUse }: { onUse?: (image: ProductImage)
         return ["文件已准备并提交浏览器下载"];
     });
     return <section className="materials-view" aria-label="素材库">
-        <header className="materials-heading"><div><FolderOpen size={24} /><h1>素材库</h1><span>{images.length} / 40</span></div>
+        <header className="materials-heading"><div><FolderOpen size={24} /><h1>素材库</h1><span>{images.length} 张</span></div>
             <div><button type="button" title="刷新素材库" aria-label="刷新素材库" disabled={locked || query.isFetching || groups.isFetching}
                 onClick={() => { void query.refetch(); void groups.refetch(); }}><RefreshCw size={17} /></button>
-                <button type="button" className="materials-primary" disabled={locked || !query.isSuccess || query.isFetching || images.length >= 40}
-                    onClick={() => input.current?.click()}><Upload size={17} />上传素材</button></div>
+            </div>
         </header>
+        <div className="image-upload-area materials-upload-area">
+            <button type="button" className="image-upload-zone" disabled={locked || !query.isSuccess || query.isFetching}
+                onClick={() => input.current?.click()}>
+                <span className="image-upload-command"><Upload size={16} /><span>上传素材</span></span>
+                <span className="image-upload-hint">每批最多 {MATERIAL_BATCH_LIMIT} 张 · PNG / JPEG / WebP · 每张不超过 10 MB</span>
+            </button>
+        </div>
         <input ref={input} type="file" className="materials-sr" tabIndex={-1} aria-label="上传素材文件" multiple accept="image/png,image/jpeg,image/webp"
             onChange={(event) => {
                 const files = Array.from(event.target.files ?? []); event.target.value = "";
                 if (!files.length) return;
                 void run("上传素材", async (signal) => {
-                    const result = await uploadMaterials(files, images.length, (file) => upload.mutateAsync(file), signal,
+                    const result = await uploadMaterials(files, (file) => upload.mutateAsync(file), signal,
                         (done, total) => { if (mounted.current) setProgress(`${done} / ${total}`); });
                     return [`已上传 ${result.uploaded.length} 张素材`, ...result.errors];
                 });
@@ -174,7 +180,7 @@ export default function MaterialsView({ onUse }: { onUse?: (image: ProductImage)
             <div className="materials-empty" role="alert"><FolderOpen size={36} /><p>素材加载失败，已有选择保持不变</p><button type="button"
                 onClick={() => void query.refetch()}><RefreshCw size={16} />重新加载</button></div> : !filtered.length ?
                 <div className="materials-empty"><FolderOpen size={36} /><p>{images.length ? "没有符合条件的素材" : "素材库暂无图片"}</p>
-                    {!images.length && <button type="button" disabled={locked} onClick={() => input.current?.click()}><Plus size={16} />上传素材</button>}</div> :
+                </div> :
                 <div className="materials-grid">{visible.map((image) => <article className="material-item" key={image.id} data-selected={selectedIds.includes(image.id)}>
                     <MaterialThumbnail image={image} />
                     <label className="material-choice"><input type="checkbox" checked={selectedIds.includes(image.id)} aria-label={`选择 ${materialName(image)}`}

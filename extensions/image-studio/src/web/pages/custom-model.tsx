@@ -7,7 +7,7 @@ import {
     useGenerationBilling, useGenerationQuery, useImageModelsQuery, useProductImagesQuery,
     useUploadProductImageMutation,
 } from "../services/generation";
-import { MATERIAL_LIMIT, materialError, validMaterialLabel } from "../services/materials";
+import { materialError, validMaterialLabel } from "../services/materials";
 import type { ImageGeneration, ProductImage } from "../services/types";
 
 export const MODEL_ATTRIBUTES = [
@@ -74,9 +74,8 @@ export default function CustomModel({ active, locked, limitReached, onBusyChange
     const billing = useGenerationBilling(model?.id ?? "", 1, active && !locked && !busy);
     const validName = validMaterialLabel(name.trim());
     const productsReady = products.isSuccess && !products.isFetching;
-    const room = productsReady && (products.data?.length ?? 0) < MATERIAL_LIMIT;
-    const canGenerate = active && !locked && !busy && !uncertain && !limitReached && room && validName && billing.ready && models.isSuccess && !models.isFetching;
-    const canSave = active && !pending && !limitReached && validName && productsReady && task?.status === "completed" && task.images.length === 1 && (Boolean(material) || room);
+    const canGenerate = active && !locked && !busy && !uncertain && !limitReached && productsReady && validName && billing.ready && models.isSuccess && !models.isFetching;
+    const canSave = active && !pending && !limitReached && validName && productsReady && task?.status === "completed" && task.images.length === 1;
     useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
     useEffect(() => { onBusyChange(busy && !uncertain); }, [busy, uncertain, onBusyChange]);
     const dirty = Boolean(name || submitted || MODEL_ATTRIBUTES.some((field) => attributes[field.key] !== DEFAULT_ATTRIBUTES[field.key]));
@@ -138,7 +137,6 @@ export default function CustomModel({ active, locked, limitReached, onBusyChange
         {name && !validName && <p role="alert">请输入有效的模特名称，不能包含路径或特殊字符</p>}
         {limitReached && <p role="alert">资产已达 40 条上限，请先删除不用的资料</p>}
         {products.isError && <p role="alert">图片素材加载失败 <button type="button" onClick={() => void products.refetch()}><RefreshCw size={16} />重试素材</button></p>}
-        {productsReady && !room && !material && <p role="alert">素材已达 40 张上限，请先释放素材空间</p>}
         <footer><span role="status" className="custom-model-cost">{busy ? "正在处理..." : billing.costText}</span>
             {task?.status === "completed" && <button type="button" className="custom-model-save" disabled={!canSave} onClick={() => void persist()}><Check size={16} />保存模特</button>}
             <button type="submit" disabled={!canGenerate}><Sparkles size={16} />{task ? "重新生成" : "生成"}</button>

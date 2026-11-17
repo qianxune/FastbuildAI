@@ -59,8 +59,6 @@ export default function MainImageForm({
     const [uploading, setUploading] = useState(false);
     const [dragging, setDragging] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [productName, setProductName] = useState("");
-    const [brand, setBrand] = useState("");
     const [modelId, setModelId] = useState("");
     const [visionModelId, setVisionModelId] = useState("");
     const [platform, setPlatform] = useState<MainImageInput["platform"]>(MAIN_PLATFORMS[0]);
@@ -170,7 +168,7 @@ export default function MainImageForm({
         if (description.trim() && !window.confirm("分析结果将替换现有商品描述，是否继续？")) return;
         setError(null);
         try {
-            const result = await analysis.mutateAsync({ modelId: selectedVisionModelId, assetIds, productName: productName.trim(), language });
+            const result = await analysis.mutateAsync({ modelId: selectedVisionModelId, assetIds, productName: "", language });
             setDescription(result.description);
         } catch (failure) {
             setError(failure instanceof Error ? failure.message : "图片分析失败，请重试");
@@ -188,7 +186,6 @@ export default function MainImageForm({
                     !available ||
                     !selectedModelId ||
                     !assetIds.length ||
-                    !productName.trim() ||
                     total < 1 ||
                     total > MAIN_IMAGE_LIMIT ||
                     !Number.isSafeInteger(total)
@@ -198,8 +195,8 @@ export default function MainImageForm({
                 void onSubmit({
                     modelId: selectedModelId,
                     assetIds,
-                    productName: productName.trim(),
-                    brand: brand.trim(),
+                    productName: "",
+                    brand: "",
                     platform,
                     language,
                     ratio,
@@ -222,8 +219,18 @@ export default function MainImageForm({
             )}
             <fieldset className="main-fields" disabled={disabled}>
                 <div className="field">
-                    <div className="f-label">
-                        上传商品图 <span className="opt">已选 {assetIds.length}/5</span>
+                    <div className="image-upload-heading">
+                        <div className="f-label image-upload-title">
+                            上传商品图 <span className="opt">已选 {assetIds.length}/5</span>
+                        </div>
+                        <div className="image-upload-library">
+                            <MaterialPicker selectedIds={assetIds} max={5} disabled={disabled}
+                                onChange={(ids, images) => {
+                                    if (disabled) return;
+                                    setAssetIds([...new Set(ids)].slice(0, 5));
+                                    setProducts((current) => [...new Map([...images, ...current].map((image) => [image.id, image])).values()]);
+                                }} />
+                        </div>
                     </div>
                     <input
                         ref={fileInput}
@@ -236,7 +243,18 @@ export default function MainImageForm({
                             event.target.value = "";
                         }}
                     />
-                    <div className="product-upload-row">
+                    <div className={`image-upload-content main-upload-zone${dragging ? " dragging" : ""}`}
+                        onDragOver={(event) => {
+                            event.preventDefault();
+                            if (!disabled && assetIds.length < 5) setDragging(true);
+                        }}
+                        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as globalThis.Node | null)) setDragging(false); }}
+                        onDrop={(event) => {
+                            event.preventDefault();
+                            setDragging(false);
+                            void uploadFiles(Array.from(event.dataTransfer.files));
+                        }}>
+                    {products.length > 0 ? <div className="product-upload-row image-upload-thumbnails">
                         {products.map((image, index) => (
                             <ProductThumbnail key={image.id} image={image} index={index}
                                 selected={assetIds.includes(image.id)} disabled={disabled}
@@ -246,64 +264,27 @@ export default function MainImageForm({
                                     : current.length < 5 ? [...current, image.id] : current)}
                                 onDelete={() => removeImage(image)} />
                         ))}
-                    </div>
+                        {assetIds.length < 5 && <button type="button" className="image-upload-add" aria-label="继续添加图片" title="继续添加图片" disabled={disabled} onClick={() => fileInput.current?.click()}>
+                            {uploading ? <LoaderCircle size={20} className="main-upload-spinner" /> : <Plus size={20} />}
+                        </button>}
+                    </div> : <div className="image-upload-area">
                     <button
                         type="button"
-                        className={`dz main-upload main-upload-zone${dragging ? " dragging" : ""}`}
+                        className="dz main-upload image-upload-zone"
                         disabled={disabled || assetIds.length >= 5}
                         onClick={() => fileInput.current?.click()}
-                        onDragOver={(event) => {
-                            event.preventDefault();
-                            if (!disabled) setDragging(true);
-                        }}
-                        onDragLeave={() => setDragging(false)}
-                        onDrop={(event) => {
-                            event.preventDefault();
-                            setDragging(false);
-                            void uploadFiles(Array.from(event.dataTransfer.files));
-                        }}
                     >
-                        <span className="main-upload-command">
+                        <span className="image-upload-command">
                             {uploading ? <LoaderCircle size={16} className="main-upload-spinner" /> : <Upload size={16} />}
-                            <span>{uploading ? "上传中..." : products.length ? "继续添加图片" : "上传图片"}</span>
+                            <span>{uploading ? "上传中..." : "上传图片"}</span>
                         </span>
-                        <span className="main-upload-hint">同一商品，最多 5 张</span>
+                        <span className="image-upload-hint">同一商品，最多 5 张</span>
                     </button>
+                    </div>}
+                    </div>
                     <p className="upload-formats">PNG / JPEG / WebP · 每张不超过 10 MB</p>
-                    <MaterialPicker selectedIds={assetIds} max={5} disabled={disabled}
-                        onChange={(ids, images) => {
-                            if (disabled) return;
-                            setAssetIds([...new Set(ids)].slice(0, 5));
-                            setProducts((current) => [...new Map([...images, ...current].map((image) => [image.id, image])).values()]);
-                        }} />
                 </div>
                 <div className="main-settings-grid">
-                <div className="field">
-                    <label className="f-label" htmlFor={`${id}-name`}>
-                        商品名称
-                    </label>
-                    <input
-                        id={`${id}-name`}
-                        className="text-in"
-                        required
-                        maxLength={100}
-                        value={productName}
-                        onChange={(event) => setProductName(event.target.value)}
-                        placeholder="例如：轻量透气跑步鞋"
-                    />
-                </div>
-                <div className="field">
-                    <label className="f-label" htmlFor={`${id}-brand`}>
-                        品牌 <span className="opt">选填</span>
-                    </label>
-                    <input
-                        id={`${id}-brand`}
-                        className="text-in"
-                        maxLength={100}
-                        value={brand}
-                        onChange={(event) => setBrand(event.target.value)}
-                    />
-                </div>
                 <div className="field">
                     <label className="f-label" htmlFor={`${id}-model`}>
                         生图模型
@@ -365,7 +346,7 @@ export default function MainImageForm({
                     </select>}
                     <textarea id={`${id}-description`} className="ta product-description" maxLength={3000}
                         value={description} onChange={(event) => setDescription(event.target.value)}
-                        placeholder={"商品名称：\n核心卖点：\n适用人群：\n生成要求与使用场景："} />
+                        placeholder={"核心卖点：\n适用人群：\n生成要求与使用场景："} />
                     <span className="description-count">{description.length}/3000</span>
                 </div>
                 <div className="field">
@@ -529,7 +510,6 @@ export default function MainImageForm({
                         !billing.ready ||
                         !available ||
                         !assetIds.length ||
-                        !productName.trim() ||
                         total < 1 ||
                         total > MAIN_IMAGE_LIMIT ||
                         !Number.isSafeInteger(total)

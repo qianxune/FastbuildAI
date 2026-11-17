@@ -155,7 +155,7 @@ function PickerContent({ selectedIds, onChange, max, disabled, onClose }: Materi
 export default function MaterialPicker(props: MaterialPickerProps) {
     const [open, setOpen] = useState(false);
     return <div className="material-picker">
-        <button type="button" className="materials-picker-trigger" disabled={props.disabled} onClick={() => setOpen(true)}><FolderOpen size={16} />{props.label ?? "从素材库选择"}</button>
+        <button type="button" className="materials-picker-trigger" disabled={props.disabled} onClick={() => setOpen(true)}><FolderOpen size={16} /><span>{props.label ?? "从素材库选择"}</span></button>
         {open && <PickerContent {...props} onClose={() => setOpen(false)} />}
     </div>;
 }

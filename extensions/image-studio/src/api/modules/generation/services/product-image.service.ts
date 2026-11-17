@@ -77,7 +77,7 @@ export class ProductImageService {
             if (!value || value.version !== 1 || !Array.isArray(value.groups) || value.groups.length > 40 ||
                 !value.groups.every((group) => validLabel(group, 60)) || new Set(value.groups).size !== value.groups.length ||
                 !value.images || typeof value.images !== "object" || Array.isArray(value.images) ||
-                Object.keys(value.images).length > 40 || !Object.entries(value.images).every(([id, image]) =>
+                !Object.entries(value.images).every(([id, image]) =>
                     UUID.test(id) && image && validLabel(image.name, 120) &&
                     (image.group === "" || value.groups.includes(image.group)))) throw new Error();
             return value;
@@ -190,7 +190,7 @@ export class ProductImageService {
         return { filename, stat };
     }
 
-    /** 校验静态图片并旋转缩放为 PNG，限制用户存储数量后排他写入私有目录。 */
+    /** 校验静态图片并旋转缩放为 PNG，排他写入用户私有目录。 */
     async upload(userId: string, file?: ProductImageUpload) {
         if (
             !file?.buffer?.length ||
@@ -241,8 +241,6 @@ export class ProductImageService {
         const directory = await this.safeDirectory(userId, true);
         const catalog = await this.catalog(userId);
         const files = await readdir(directory);
-        if (files.filter((name) => name.endsWith(".png") && UUID.test(name.slice(0, -4))).length >= 40)
-            throw HttpErrorFactory.badRequest("商品图上传数量已达上限，请先删除不再使用的图片");
         const id = randomUUID();
         const filename = path.join(directory, `${id}.png`);
         try {

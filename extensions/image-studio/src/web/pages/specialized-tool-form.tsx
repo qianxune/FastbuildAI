@@ -23,8 +23,6 @@ export default function SpecializedToolForm({ tool, capabilities, locked, defaul
     const [primary, setPrimary] = useState<ProductImage[]>([]);
     const [references, setReferences] = useState<ProductImage[]>([]);
     const [modelChoice, setModelChoice] = useState("");
-    const [productName, setProductName] = useState("");
-    const [brand, setBrand] = useState("");
     const [description, setDescription] = useState("");
     const [instructions, setInstructions] = useState("");
     const [platform, setPlatform] = useState<typeof TOOL_PLATFORMS[number]>("淘宝");
@@ -90,7 +88,7 @@ export default function SpecializedToolForm({ tool, capabilities, locked, defaul
         try {
             const snapshot = assetDraftSnapshot(requestedAsset.asset, products.data ?? [], capabilities, modelChoice);
             const dirty = Boolean(primary.length || references.length || instructions || modelChoice || countOverride !== null || ratio !== "1:1"
-                || productName || brand || description || platform !== "淘宝" || language !== "简体中文");
+                || description || platform !== "淘宝" || language !== "简体中文");
             if (!confirmAssetReplacement(dirty, () => window.confirm("当前创作草稿已有内容，确定替换参考图片和创作要求？"))) {
                 finish(false); return;
             }
@@ -102,9 +100,9 @@ export default function SpecializedToolForm({ tool, capabilities, locked, defaul
             setError(message); finish(false, message);
         }
     }, [requestedAsset, tool, busy, products.data, products.isSuccess, products.isPending, products.isFetching, products.isError,
-        capabilities, modelChoice, primary, references, instructions, countOverride, ratio, productName, brand, description, platform, language, onAssetConsumed]);
+        capabilities, modelChoice, primary, references, instructions, countOverride, ratio, description, platform, language, onAssetConsumed]);
     const draft: SpecializedDraft = { tool, modelId: model?.id ?? "", primary: primary.map((image) => image.id), references: references.map((image) => image.id),
-        productName, brand, description, platform, language, instructions, count, ratio, modules, outputModules, plan, replicaMode,
+        productName: "", brand: "", description, platform, language, instructions, count, ratio, modules, outputModules, plan, replicaMode,
         fusionPreset: preset, skuVariants: variants.map(({ name, instruction }) => ({ name, instruction })), skuRegion: region };
     const instructionBudget = specializedInstructionBudget(draft);
     const source = draftPlanSource(draft);
@@ -121,7 +119,7 @@ export default function SpecializedToolForm({ tool, capabilities, locked, defaul
         && visionAvailability.modelIdsByCapability.vision?.includes(item.id));
     const visionModel = visionChoice ? visionModels.find((item) => item.id === visionChoice) : visionModels[0];
     const visionIds = [...draft.primary, ...draft.references];
-    const visionKey = JSON.stringify([visionIds, productName, language, visionModel?.id]);
+    const visionKey = JSON.stringify([visionIds, language, visionModel?.id]);
     const visibleSuggestions = suggestions?.key === visionKey ? suggestions.text : "";
     const roleMax = (role: "primary" | "references") => Math.max(0, Math.min(role === "primary" ? (tool === "replica" ? 4 : tool === "detail" ? 5 : 1) : tool === "replica" ? 1 : 4,
         limit - (role === "primary" ? references.length : primary.length)));
@@ -180,7 +178,7 @@ export default function SpecializedToolForm({ tool, capabilities, locked, defaul
         if (busy || operation.current || current.current.locked || !visionModel || !visionIds.length || visionIds.length > 5) return;
         operation.current = true; setPending(true); setError(""); setSuggestions(undefined);
         try {
-            const result = await analysis.mutateAsync({ modelId: visionModel.id, assetIds: visionIds, productName: productName.trim() || "参考图片", language });
+            const result = await analysis.mutateAsync({ modelId: visionModel.id, assetIds: visionIds, productName: "参考图片", language });
             if (mounted.current) setSuggestions({ key: visionKey, text: result.suggestions });
         } catch (failure) { if (mounted.current) setError(failure instanceof Error ? failure.message : "分析失败，请稍后重试"); }
         finally { operation.current = false; if (mounted.current) setPending(false); }
@@ -192,9 +190,6 @@ export default function SpecializedToolForm({ tool, capabilities, locked, defaul
         catch (failure) { setError(failure instanceof Error ? failure.message : "规划失败"); }
     }
 
-    const field = (label: string, suffix: string, value: string, change: (value: string) => void, maxLength: number, required = false) =>
-        <label className="specialized-field" htmlFor={`${id}-${suffix}`}>{label}{required && <span className="specialized-required"> *</span>}
-            <input id={`${id}-${suffix}`} value={value} maxLength={maxLength} required={required} onChange={(event) => change(event.target.value)} /></label>;
     const picker = (role: "primary" | "references", label: string) => <AssetRolePicker label={label} images={role === "primary" ? primary : references}
         max={roleMax(role)} disabled={busy} onChange={(images) => replaceImages(role, images)} onFiles={(files) => uploadFiles(role, files)} />;
     const metadata = <div className="specialized-grid">
@@ -221,8 +216,7 @@ export default function SpecializedToolForm({ tool, capabilities, locked, defaul
                         <p className="specialized-note">{tool === "creative" && !assetCount ? "当前为文生图" : `当前模型参考图总上限：${limit} 张`}</p>
                     </section>
                     {tool !== "creative" && <section className="specialized-band">
-                        <div className="specialized-grid">{field(`商品名称${tool === "detail" ? "" : "（可选）"}`, "product", productName, setProductName, 100, tool === "detail")}
-                            {field("品牌（可选）", "brand", brand, setBrand, 100)}</div>{metadata}
+                        {metadata}
                         {tool === "detail" && <label className="specialized-field">已确认的商品描述 *<textarea aria-label="已确认的商品描述" rows={5} value={description} maxLength={1500} required
                             onChange={(event) => setDescription(event.target.value)} /></label>}
                     </section>}
@@ -287,7 +281,7 @@ export default function SpecializedToolForm({ tool, capabilities, locked, defaul
             </fieldset>
             {validation && <p className="specialized-validation" role="status">{validation}</p>}
             <div className="specialized-submit-row"><span className="specialized-cost" role="status">{tool === "detail" && !reviewing ? "本地规划不计费" : billing.costText}</span>
-                {tool === "detail" && !reviewing ? <button type="button" className="specialized-primary" disabled={busy || !primary.length || !productName.trim() || !description.trim() || !modules.length} onClick={makePlan}><ListChecks size={17} />生成本地规划<ArrowRight size={16} /></button> :
+                {tool === "detail" && !reviewing ? <button type="button" className="specialized-primary" disabled={busy || !primary.length || !description.trim() || !modules.length} onClick={makePlan}><ListChecks size={17} />生成本地规划<ArrowRight size={16} /></button> :
                     <button type="submit" className="specialized-primary" disabled={!canSubmit}>{pending ? <LoaderCircle size={17} /> : <Sparkles size={17} />}生成 {outputCount || ""} 张</button>}
             </div>
         </footer>}

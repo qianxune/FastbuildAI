@@ -98,7 +98,7 @@ export function mainImagePrompt(input: MainImageInput, type: MainImageType, sell
     return [
         "基于参考商品图片制作一张可用于电商商品展示的主图。参考图是同一商品的不同视角，不是多个独立商品。",
         "严格保留商品外观、形状、配色、结构、材质、品牌标识和包装细节；不要替换商品、改变规格或添加不存在的配件。",
-        `商品名称：${input.productName}。品牌：${input.brand || "以参考图为准"}。目标平台：${input.platform}。文字语言：${input.language}。`,
+        `商品名称：${input.productName || "以参考图为准"}。品牌：${input.brand || "以参考图为准"}。目标平台：${input.platform}。文字语言：${input.language}。`,
         input.description
             ? `商品描述（以参考图为准，不添加未经证实的功效或认证）：${input.description}`
             : "",

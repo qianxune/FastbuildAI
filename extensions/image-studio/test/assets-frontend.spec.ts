@@ -170,7 +170,7 @@ describe("custom model generation and persistence", () => {
         view.taskQuery.data = { ...view.generated, status: "completed", images: [{ url: "protected", mediaType: "image/png" }] };
         view.render();
     };
-    it("requires a safe name, available model, quote, material space and asset quota", () => {
+    it("requires a safe name, available model, quote, loaded materials and asset quota", () => {
         const view = assetUiHarness("custom");
         expect(view.button("生成").props.disabled).toBe(true);
         view.set("定制模特名称", "My Model"); expect(view.button("生成").props.disabled).toBe(false);
@@ -179,10 +179,21 @@ describe("custom model generation and persistence", () => {
         view.set("定制模特名称", "My Model");
         view.billing.ready = false; submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled(); view.billing.ready = true;
         view.props.locked = true; submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled(); view.props.locked = false;
-        view.products.data = Array(40).fill(images[0]); submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled(); view.products.data = images;
+        view.products.isFetching = true; submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled(); view.products.isFetching = false;
         view.props.limitReached = true; submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled(); view.props.limitReached = false;
         view.models.isFetching = true; submit(view); expect(view.generation.mutateAsync).not.toHaveBeenCalled();
         view.props.active = false; expect(view.render().find((node) => node.type === "form")!.props.hidden).toBe(true);
+    });
+    it("generates and saves a model with more than forty historical materials", async () => {
+        const view = assetUiHarness("custom");
+        view.products.data = Array(41).fill(images[0]);
+        await complete(view);
+        expect(view.generation.mutateAsync).toHaveBeenCalledTimes(1);
+        view.upload.mutateAsync.mockResolvedValue(images[0]);
+        expect(view.button("保存模特").props.disabled).toBe(false);
+        view.button("保存模特").props.onClick(); await settleAssetUi();
+        expect(view.upload.mutateAsync).toHaveBeenCalledTimes(1);
+        expect(view.save.mutateAsync).toHaveBeenCalledTimes(1);
     });
     it("sends one attribute-based fictional clothed upper-body model and blocks duplicate/active submissions", async () => {
         const view = assetUiHarness("custom"); view.set("定制模特名称", "My Model"); view.set("性别", "男"); view.set("体型", "健壮");
@@ -355,14 +366,17 @@ describe("asset editor interactions", () => {
         expect(view.upload.mutateAsync).toHaveBeenCalledTimes(3);
         expect(view.render().map(assetText).join("")).toContain("最多可上传并选择 3 张");
     });
-    it("rejects invalid files and file quota without invoking uploads", async () => {
+    it("rejects invalid files but allows uploads beyond forty historical materials", async () => {
         const view = assetUiHarness();
         const file = view.render().find((node) => node.type === "input" && node.props.type === "file")!;
         file.props.onChange({ target: { files: [{ name: "bad.svg", type: "image/svg+xml", size: 10 }], value: "file" } }); await settleAssetUi();
         expect(view.upload.mutateAsync).not.toHaveBeenCalled();
-        view.products.data = Array(40).fill(images[0]);
+        view.products.data = Array(41).fill(images[0]);
+        view.upload.mutateAsync.mockResolvedValue(images[1]);
+        expect(view.render().find((node) => node.props.className === "image-upload-zone")!.props.disabled).toBe(false);
         view.render().find((node) => node.type === "input" && node.props.type === "file")!.props.onChange({ target: { files: [{ name: "good.png", type: "image/png", size: 10 }], value: "file" } }); await settleAssetUi();
-        expect(view.upload.mutateAsync).not.toHaveBeenCalled(); expect(view.render().map(assetText).join("")).toContain("40 张上限");
+        expect(view.upload.mutateAsync).toHaveBeenCalledTimes(1);
+        expect(view.render().map(assetText).join("")).not.toContain("40 张上限");
     });
 });
 

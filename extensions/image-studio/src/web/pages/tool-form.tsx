@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, LoaderCircle, RefreshCw, Sparkles, Upload } from "lucide-react";
+import { LoaderCircle, Plus, Sparkles, Upload, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { TOOL_REGISTRY, type GenerationCapabilities, type ToolKey } from "../../api/shared/tools";
 import {
@@ -17,6 +17,7 @@ import { isApparelToolKey } from "../../api/shared/apparel-workflow";
 import { isSpecializedTool } from "./specialized-workflow";
 import type { ImageGeneration } from "../services/types";
 import type { AssetApplication } from "../../api/shared/assets";
+import MaterialPicker from "./material-picker";
 
 export interface ToolFormProps {
     tool: ToolKey;
@@ -75,8 +76,8 @@ function ProductThumbnail({ id }: { id: string }) {
             release = undefined;
         };
     }, [id]);
-    return <span ref={element} style={{ display: "grid", placeItems: "center", width: 72, height: 72 }}>
-        {url ? <img src={url} alt="" width={72} height={72} style={{ objectFit: "contain" }} /> :
+    return <span ref={element} style={{ display: "grid", placeItems: "center", width: "100%", height: "100%" }}>
+        {url ? <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> :
             failed ? "加载失败" : <LoaderCircle size={18} aria-label="加载图片" />}
     </span>;
 }
@@ -116,7 +117,6 @@ export function ToolWorkspace({ tool, capabilities, locked, onSubmit }: ToolForm
     const [productName, setProductName] = useState("");
     const [instructions, setInstructions] = useState("");
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
-    const [assetPage, setAssetPage] = useState(0);
     const [count, setCount] = useState(1);
     const [ratio, setRatio] = useState<ToolWorkflowInput["ratio"]>("1:1");
     const [language, setLanguage] = useState<typeof TOOL_LANGUAGES[number]>("简体中文");
@@ -131,9 +131,6 @@ export function ToolWorkspace({ tool, capabilities, locked, onSubmit }: ToolForm
     const fileInput = useRef<HTMLInputElement>(null);
     const id = useId();
     const products = useProductImagesQuery();
-    const pageCount = Math.max(1, Math.ceil((products.data?.length ?? 0) / 8));
-    const currentPage = Math.min(assetPage, pageCount - 1);
-    const visibleProducts = (products.data ?? []).slice(currentPage * 8, (currentPage + 1) * 8);
     const upload = useUploadProductImageMutation();
     const analysis = useToolSuggestionsMutation();
     const billing = useGenerationBilling(model?.id ?? "", count, !suggestion && !locked);
@@ -194,7 +191,6 @@ export function ToolWorkspace({ tool, capabilities, locked, onSubmit }: ToolForm
             const image = await upload.mutateAsync(file);
             if (mounted.current) {
                 setSelectedIds((current) => current.length < limit ? [...current, image.id] : current);
-                setAssetPage(0);
             }
         } catch {
             if (mounted.current) setError("上传失败，请稍后重试");
@@ -220,35 +216,29 @@ export function ToolWorkspace({ tool, capabilities, locked, onSubmit }: ToolForm
                 </select>
             </div>
             <div className="field">
-                <span className="f-label">{tool === "replica" ? "商品图与构图参考" : "参考图片"} ({assetIds.length}/{limit})</span>
-                <div className="product-upload-row" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {visibleProducts.map((image) => {
-                        const order = assetIds.indexOf(image.id);
-                        return <button key={image.id} type="button" title={`选择参考图片 ${image.id}`} aria-label={`参考图片 ${image.id}`} aria-pressed={order >= 0}
-                            disabled={order < 0 && assetIds.length >= limit}
-                            style={{ width: 88, minHeight: 100, padding: 6, borderRadius: 6, border: order >= 0 ? "2px solid currentColor" : "1px solid #6b7280", background: "transparent", color: "inherit" }}
-                            onClick={() => setSelectedIds((current) => {
-                                const live = current.filter((value) => products.data?.some((item) => item.id === value));
-                                return live.includes(image.id) ? live.filter((value) => value !== image.id) : [...live, image.id];
-                            })}>
-                            <ProductThumbnail id={image.id} /><span>{order >= 0 ? (tool === "replica" ? (order === 0 ? "商品图" : `构图参考 ${order}`) : `已选 ${order + 1}`) : `${image.width} × ${image.height}`}</span>
-                        </button>;
-                    })}
-                    <button type="button" className="opt" title="上传商品图" aria-label="上传商品图" onClick={() => fileInput.current?.click()}><Upload size={18} /></button>
-                    <button type="button" className="opt" title="刷新商品图" aria-label="刷新商品图" disabled={products.isFetching} onClick={() => void products.refetch()}><RefreshCw size={18} /></button>
-                    <input ref={fileInput} type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        event.target.value = "";
-                        void uploadFile(file);
-                    }} />
+                <div className="image-upload-heading">
+                    <span className="f-label image-upload-title">{tool === "replica" ? "商品图与构图参考" : "参考图片"} ({assetIds.length}/{limit})</span>
+                    <div className="image-upload-library"><MaterialPicker selectedIds={assetIds} max={limit} disabled={busy}
+                        onChange={(ids) => { if (!busy) setSelectedIds(ids); }} /></div>
                 </div>
-                {pageCount > 1 && <div role="group" aria-label="参考图片分页" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <button type="button" className="opt" title="上一页" aria-label="上一页" disabled={currentPage === 0}
-                        onClick={() => setAssetPage(currentPage - 1)}><ChevronLeft size={18} /></button>
-                    <span role="status">{currentPage + 1} / {pageCount}</span>
-                    <button type="button" className="opt" title="下一页" aria-label="下一页" disabled={currentPage === pageCount - 1}
-                        onClick={() => setAssetPage(currentPage + 1)}><ChevronRight size={18} /></button>
+                {assetIds.length > 0 ? <div className="image-upload-thumbnails">
+                    {assetIds.map((assetId, index) => <div key={assetId} className="specialized-thumbnail">
+                        <ProductThumbnail id={assetId} />
+                        <button type="button" className="specialized-remove" aria-label={`移除参考图片 ${index + 1}`} title="移除选择" disabled={busy}
+                            onClick={() => setSelectedIds((current) => current.filter((value) => value !== assetId))}><X size={15} /></button>
+                    </div>)}
+                    {assetIds.length < limit && <button type="button" className="image-upload-add" title="继续添加图片" aria-label="继续添加图片" disabled={busy} onClick={() => fileInput.current?.click()}><Plus size={20} /></button>}
+                </div> : <div className="image-upload-area">
+                    <button type="button" className="image-upload-zone" title="上传商品图" aria-label="上传商品图" disabled={busy || assetIds.length >= limit} onClick={() => fileInput.current?.click()}>
+                        <span className="image-upload-command"><Upload size={16} /><span>上传图片</span></span>
+                        <span className="image-upload-hint">最多 {limit} 张 · PNG / JPEG / WebP · 每张不超过 10 MB</span>
+                    </button>
                 </div>}
+                <input ref={fileInput} type="file" hidden accept="image/png,image/jpeg,image/webp" onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    void uploadFile(file);
+                }} />
                 {products.isPending && <div role="status">加载商品图...</div>}
                 {products.isError && <div className="workflow-message error" role="alert">商品图加载失败</div>}
                 {!products.isPending && !products.isError && !products.data?.length && <div role="status">暂无商品图</div>}

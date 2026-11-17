@@ -304,7 +304,7 @@ export function validateToolWorkflow(input: ToolWorkflowInput): string | null {
     if (typeof input.modelId !== "string" || !UUID.test(input.modelId)) return "请选择有效模型";
     if ((input.tool === "cutout") !== (input.modelId === LOCAL_CUTOUT_MODEL_ID)) return "抠图仅支持专用分割服务，该服务不支持普通图片生成";
     if (!Array.isArray(input.assetIds) || input.assetIds.length < TOOL_WORKFLOWS[input.tool].minAssets || input.assetIds.length > 5 || new Set(input.assetIds).size !== input.assetIds.length || Array.from(input.assetIds).some((id) => typeof id !== "string" || !UUID.test(id))) return "请选择有效且不重复的商品参考图（最多 5 张）";
-    const optionalName = isApparelToolKey(input.tool) || ["creative", "replica", "fusion", "sku"].includes(input.tool)
+    const optionalName = isApparelToolKey(input.tool) || ["detail", "creative", "replica", "fusion", "sku"].includes(input.tool)
         || (["watermark", "translate", "retouch", "recolor", "expand", "redraw", "cutout"].includes(input.tool) && input.design !== undefined);
     if ((input.productName !== undefined && (typeof input.productName !== "string" || input.productName.length > 100)) || (!optionalName && !input.productName?.trim())) return "商品名称须为 1–100 字";
     if (!(isApparelToolKey(input.tool) && input.instructions === undefined)

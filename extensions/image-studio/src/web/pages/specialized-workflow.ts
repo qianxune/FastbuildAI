@@ -59,7 +59,7 @@ export function planSourceKey(source: PlanSource): string {
 }
 
 export function createDetailPlan(source: PlanSource): DetailPlan {
-    if (!source.assetIds.length || !source.productName.trim() || !source.description.trim()) throw new Error("请填写商品图片、名称和已确认的描述");
+    if (!source.assetIds.length || !source.description.trim()) throw new Error("请填写商品图片和已确认的描述");
     if (!source.modules.length || source.modules.length > 10 || new Set(source.modules).size !== source.modules.length) throw new Error("请选择 1 至 10 个详情模块");
     return {
         sourceKey: planSourceKey(source),

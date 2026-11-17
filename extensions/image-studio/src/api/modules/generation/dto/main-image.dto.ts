@@ -61,8 +61,8 @@ export class MainImageDto implements MainImageInput {
 
     @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
     @IsString()
-    @Length(1, 100)
-    productName: string;
+    @Length(0, 100)
+    productName: string = "";
 
     @IsString()
     @Length(0, 100)
