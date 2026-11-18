@@ -63,7 +63,7 @@
 .image-edit-retouch .specialized-submit-row small { font-size: 12px; font-weight: 400; }
 @media (pointer: coarse) { .retouch-mode > span { min-height: 44px; } }
 
-.retouch-preview.cstate.show { display: grid; place-items: center; min-height: 0; height: 100%; padding: 28px; background: var(--muted); }
+.retouch-preview.cstate.show { display: grid; place-items: center; min-height: 0; height: 100%; padding: 28px; background: var(--background); }
 .retouch-preview-content { width: min(100%, 450px, 58dvh); text-align: center; }
 .retouch-preview h3 { margin-top: 24px; color: var(--secondary-foreground); font-size: 20px; font-weight: 600; }
 .retouch-example-stage { position: relative; width: 100%; aspect-ratio: 1; margin: 0; overflow: hidden; border-radius: 6px; }

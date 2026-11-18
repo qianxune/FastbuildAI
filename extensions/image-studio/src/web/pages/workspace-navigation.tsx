@@ -18,7 +18,7 @@ export const TOOL_ICONS: Record<ToolKey, LucideIcon> = {
     tryon: Shirt, model_swap: UsersRound, outfit: UserRound, fabric: SwatchBook,
     apparel_sku: Layers3, ugc_outfit: Sparkles, nail_tryon: Hand, dewrinkle: Wand2,
 };
-const GROUPS: { name: string; tools: ToolKey[] }[] = [
+export const TOOL_GROUPS: { name: string; tools: ToolKey[] }[] = [
     { name: "电商生图", tools: ["main", "detail", "replica", "creative", "fusion", "sku"] },
     { name: "AI 修图", tools: ["retouch", "redraw", "cutout", "recolor", "watermark", "expand", "translate"] },
     { name: "服饰穿戴", tools: ["tryon", "model_swap", "outfit", "fabric", "apparel_sku", "ugc_outfit", "nail_tryon", "dewrinkle"] },
@@ -46,7 +46,7 @@ function NavigationContent({ view, tool, onNavigate, onPreferences, onHelp, onMo
                 className="workspace-nav-item" aria-current={view === key ? "page" : undefined}
                 onClick={() => navigate(key)}><Icon size={18} /><span>{label}</span></button>)}
         </div>
-        {GROUPS.map((group) => <details className="workspace-nav-group" key={group.name} open>
+        {TOOL_GROUPS.map((group) => <details className="workspace-nav-group" key={group.name} open>
             <summary>{group.name}<ChevronDown size={15} /></summary>
             {group.tools.map((key) => {
                 const Icon = TOOL_ICONS[key];

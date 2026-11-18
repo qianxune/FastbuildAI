@@ -5,13 +5,14 @@ import { validMaterialLabel } from "./materials";
 
 export const assetsKey = ["image-studio", "assets"] as const;
 export type AssetList = { items: CreativeAsset[]; limit: number };
-export type AssetSave = { input: CreativeAssetInput; original?: CreativeAsset };
+export type AssetSave = { input: CreativeAssetInput; original?: CreativeAsset; faceConsent?: boolean; generatedFrom?: string };
 
-export async function saveCreativeAsset({ input, original }: AssetSave): Promise<CreativeAsset> {
+export async function saveCreativeAsset({ input, original, faceConsent, generatedFrom }: AssetSave): Promise<CreativeAsset> {
     const error = validateCreativeAsset(input);
     if (error) throw new Error(error);
     if (!validMaterialLabel(input.name)) throw new Error("名称不能包含路径、控制字符或特殊文件名字符");
-    const snapshot = { ...input, imageIds: [...input.imageIds] };
+    const snapshot = { ...input, imageIds: [...input.imageIds],
+        ...(faceConsent === undefined ? {} : { faceConsent }), ...(generatedFrom === undefined ? {} : { generatedFrom }) };
     return original
         ? apiHttpClient.patch<CreativeAsset>(`/assets/${original.id}`, { ...snapshot, expectedVersion: original.version })
         : apiHttpClient.post<CreativeAsset>("/assets", snapshot);

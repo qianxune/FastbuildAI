@@ -18,6 +18,7 @@ import { GenerationService } from "./services/generation.service";
 import { ProductImageService } from "./services/product-image.service";
 import { GenerationBillingService } from "./services/generation-billing.service";
 import { CutoutService } from "./services/cutout.service";
+import { ModelFaceService } from "./services/model-face.service";
 
 @Module({
     imports: [
@@ -38,6 +39,7 @@ import { CutoutService } from "./services/cutout.service";
         ProductImageService,
         GenerationBillingService,
         CutoutService,
+        ModelFaceService,
     ],
 })
 export class GenerationModule {}

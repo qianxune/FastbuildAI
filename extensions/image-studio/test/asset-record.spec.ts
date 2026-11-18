@@ -1,4 +1,5 @@
 import { validateCreativeAsset } from "../src/api/shared/assets";
+import { customModelPrompt, isCustomModelPrompt } from "../src/api/shared/custom-model";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -10,10 +11,12 @@ function loadService() {
     class ConflictException extends Error {}
     const requireMock = (name: string) => {
         if (name.endsWith("/shared/assets")) return { validateCreativeAsset };
+        if (name.endsWith("/shared/custom-model")) return { isCustomModelPrompt };
+        if (name === "node:crypto") return require("node:crypto");
         if (name === "@nestjs/common") return { Injectable: () => () => undefined, ConflictException };
         if (name === "@buildingai/db/@nestjs/typeorm") return { InjectRepository: () => () => undefined };
         if (name === "@buildingai/errors") return { HttpErrorFactory: { badRequest: (message: string) => new Error(message), notFound: (message: string) => new Error(message) } };
-        return { User: class {}, AssetRecord: class {}, ProductImageService: class {} };
+        return { User: class {}, AssetRecord: class {}, ProductImageService: class {}, ImageGeneration: class ImageGeneration {}, ImageGenerationStatus: { COMPLETED: "completed" } };
     };
     vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText,
         { exports, require: requireMock });
@@ -34,8 +37,9 @@ function fixture() {
     };
     const query: any = { where: jest.fn(() => query), andWhere: jest.fn(() => query), getCount: jest.fn(async () => { expect(locked).toBe(true); return 0; }) };
     repository.createQueryBuilder = jest.fn(() => query);
+    const generations = { findOne: jest.fn(async (): Promise<any> => null) };
     const manager = {
-        getRepository: jest.fn(() => repository),
+        getRepository: jest.fn((entity?: { name?: string }) => entity?.name === "ImageGeneration" ? generations : repository),
         query: jest.fn(async () => []),
         findOneOrFail: jest.fn(async (_entity, options) => { expect(options.lock.mode).toBe("pessimistic_write"); locked = true; }),
         transaction: (work: (transaction: any) => Promise<any>) => {
@@ -45,8 +49,11 @@ function fixture() {
         },
     };
     repository.manager = manager;
-    const images = { list: jest.fn(async () => { expect(locked).toBe(true); return [{ id: imageId, metadataStatus: "ready" }]; }), read: jest.fn(async () => { expect(locked).toBe(true); return Buffer.from("image"); }), remove: jest.fn() };
-    return { service: new (loadService())(repository, images), repository, images, manager, query, isLocked: () => locked };
+    const images = { list: jest.fn(async () => { expect(locked).toBe(true); return [{ id: imageId, metadataStatus: "ready" }]; }), read: jest.fn(async () => { expect(locked).toBe(true); return Buffer.from("image"); }), remove: jest.fn(),
+        normalize: jest.fn(async () => ({ buffer: Buffer.from("image"), width: 100, height: 100 })) };
+    const faces = { validate: jest.fn(async () => undefined) };
+    const generatedImages = { read: jest.fn(async () => ({ buffer: Buffer.from("original"), mediaType: "image/png" })) };
+    return { service: new (loadService())(repository, images, faces, generatedImages), repository, images, faces, generations, generatedImages, manager, query, isLocked: () => locked };
 }
 
 const imageId = "11111111-1111-4111-8111-111111111111";
@@ -77,7 +84,7 @@ describe("creative asset input", () => {
 describe("creative asset records", () => {
     it("checks apparel model snapshots on the caller transaction and tolerates rename only", async () => {
         const { service, manager, repository, images } = fixture();
-        const model = await service.create("owner", { ...input, kind: "model" });
+        const model = await service.create("owner", { ...input, kind: "model", faceConsent: true });
         const check = (owner: string, id = model.id, snapshot = imageId) => service.withUserLock(owner,
             (transaction: unknown) => service.assertOwnedModel(transaction, owner, id, snapshot));
         await expect(check("owner")).resolves.toBeUndefined();
@@ -111,7 +118,7 @@ describe("creative asset records", () => {
 
     it("defaults omitted prompt but rejects supplied userId, foreign files, unsafe reads and damaged metadata", async () => {
         const { service, images, repository } = fixture();
-        expect((await service.create("owner", { kind: "model", name: "Model", imageIds: [imageId] })).prompt).toBe("");
+        expect((await service.create("owner", { kind: "model", name: "Model", imageIds: [imageId], faceConsent: true })).prompt).toBe("");
         await expect(service.create("owner", { ...input, userId: "other" })).rejects.toThrow();
         images.list.mockResolvedValueOnce([]);
         await expect(service.create("owner", input)).rejects.toThrow("不属于");
@@ -161,6 +168,70 @@ describe("creative asset records", () => {
         await expect(service.create("owner", { ...input, imageIds: [letterId, letterId.toUpperCase()] })).rejects.toThrow("重复");
         for (const expectedVersion of [undefined, null, "1", 0, -1, 1.5, 2147483647])
             await expect(service.update("owner", "asset", { ...input, expectedVersion })).rejects.toThrow("版本");
+    });
+
+    it("requires explicit consent and a successful server-side face check before saving uploaded models", async () => {
+        const { service, faces, repository } = fixture();
+        const model = { ...input, kind: "model" };
+        await expect(service.create("owner", model)).rejects.toThrow("同意");
+        await expect(service.create("owner", { ...model, faceConsent: false })).rejects.toThrow("同意");
+        expect(faces.validate).not.toHaveBeenCalled();
+        faces.validate.mockRejectedValueOnce(new Error("未成年风险"));
+        await expect(service.create("owner", { ...model, faceConsent: true })).rejects.toThrow("未成年风险");
+        expect(repository.save).not.toHaveBeenCalled();
+        const record = await service.create("owner", { ...model, faceConsent: true });
+        expect(record.faceConsent).toBeUndefined();
+        expect(faces.validate).toHaveBeenLastCalledWith(Buffer.from("image"));
+    });
+
+    it("checks reference-to-model conversions and photo changes but not model renames or stale writes", async () => {
+        const { service, faces, images } = fixture();
+        const record = await service.create("owner", input);
+        await expect(service.update("owner", record.id, { ...input, kind: "model", expectedVersion: 1 })).rejects.toThrow("同意");
+        await service.update("owner", record.id, { ...input, kind: "model", expectedVersion: 1, faceConsent: true });
+        await service.update("owner", record.id, { ...input, kind: "model", name: "Rename", expectedVersion: 2 });
+        expect(faces.validate).toHaveBeenCalledTimes(1);
+        const changedId = "22222222-2222-4222-8222-222222222222";
+        images.list.mockResolvedValue([{ id: changedId, metadataStatus: "ready" }]);
+        faces.validate.mockRejectedValueOnce(new Error("无清晰正脸"));
+        await expect(service.update("owner", record.id, { ...input, kind: "model", imageIds: [changedId], expectedVersion: 3, faceConsent: true })).rejects.toThrow("无清晰正脸");
+        expect((await service.list("owner")).items[0]).toMatchObject({ version: 3, imageIds: [imageId] });
+        await expect(service.update("owner", record.id, { ...input, kind: "model", expectedVersion: 1, faceConsent: true })).rejects.toThrow("已更新");
+        expect(faces.validate).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not detect reference photos or send foreign and unreadable photos to Tencent", async () => {
+        const { service, faces, images } = fixture();
+        await service.create("owner", input);
+        images.list.mockResolvedValueOnce([]);
+        await expect(service.create("owner", { ...input, kind: "model", faceConsent: true })).rejects.toThrow("不属于");
+        images.read.mockRejectedValueOnce(new Error("Unsafe file"));
+        await expect(service.create("owner", { ...input, kind: "model", faceConsent: true })).rejects.toThrow("Unsafe file");
+        expect(faces.validate).not.toHaveBeenCalled();
+    });
+
+    it("exempts only an owned, completed, text-only custom result matching the actual stored bytes", async () => {
+        const { service, faces, generations, generatedImages, images } = fixture();
+        const prompt = customModelPrompt({ gender: "女", appearance: "东亚", age: "青年", persona: "上班族", body: "匀称" });
+        const generatedFrom = "33333333-3333-4333-8333-333333333333";
+        const generation = { id: generatedFrom, prompt, toolKey: "creative", status: "completed", count: 1, images: [{ mediaType: "image/png" }] };
+        const value = { ...input, kind: "model", prompt, generatedFrom };
+        await expect(service.create("owner", value)).rejects.toThrow("生成来源");
+        generations.findOne.mockResolvedValue(generation);
+        const record = await service.create("owner", value);
+        expect(generations.findOne).toHaveBeenLastCalledWith({ where: { id: generatedFrom, userId: "owner" } });
+        expect(generatedImages.read).toHaveBeenCalledWith(generatedFrom, 0, generation.images[0]);
+        expect(record.generatedFrom).toBeUndefined();
+        expect(faces.validate).not.toHaveBeenCalled();
+        for (const invalid of [{ status: "processing" }, { toolKey: "main" }, { count: 2 },
+            { toolInput: { assetIds: [imageId] } }, { mainInput: {} }, { prompt: `${prompt} injected` }]) {
+            generations.findOne.mockResolvedValueOnce({ ...generation, ...invalid });
+            await expect(service.create("owner", value)).rejects.toThrow("生成来源");
+        }
+        images.normalize.mockResolvedValueOnce({ buffer: Buffer.from("different"), width: 100, height: 100 });
+        await expect(service.create("owner", value)).rejects.toThrow("不一致");
+        await expect(service.update("owner", record.id, { ...value, expectedVersion: 1 })).rejects.toThrow("不支持修改生成来源");
+        expect(faces.validate).not.toHaveBeenCalled();
     });
 });
 

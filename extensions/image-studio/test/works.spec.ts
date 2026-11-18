@@ -37,24 +37,39 @@ describe("My Works collection", () => {
         })).rejects.toThrow("offline");
     });
     it("flattens every image and excludes tasks without output", () => {
-        expect(filterWorks([record("first", 4), record("empty", 0)], { tool: "all", date: "", task: "all" })
+        expect(filterWorks([record("first", 4), record("empty", 0)], { tools: [], date: "", task: "all" })
             .map((item) => item.key)).toEqual(["first:0", "first:1", "first:2", "first:3"]);
     });
     it("applies type, local date and task filters across all pages", () => {
         const records = [record("creative"), record("main", 3, "main")];
-        expect(filterWorks(records, { tool: "main", date: "2026-10-31", task: "main" })).toHaveLength(3);
-        expect(filterWorks(records, { tool: "main", date: "2026-10-30", task: "all" })).toHaveLength(0);
-        expect(filterWorks(records, { tool: "creative", date: "", task: "main" })).toHaveLength(0);
+        expect(filterWorks(records, { tools: ["main"], date: "2026-10-31", task: "main" })).toHaveLength(3);
+        expect(filterWorks(records, { tools: ["main"], date: "2026-10-30", task: "all" })).toHaveLength(0);
+        expect(filterWorks(records, { tools: ["creative"], date: "", task: "main" })).toHaveLength(0);
     });
     it("includes legacy creative images and sorts newest first", () => {
         const older = { ...record("older"), toolKey: undefined, createdAt: "2026-10-30T12:00:00" };
-        expect(filterWorks([older, record("newer")], { tool: "creative", date: "", task: "all" })
+        expect(filterWorks([older, record("newer")], { tools: ["creative"], date: "", task: "all" })
             .map((item) => item.key)).toEqual(["newer:0", "newer:1", "older:0", "older:1"]);
+    });
+    it("matches any selected business type while retaining date and task constraints", () => {
+        const records = [record("main", 1, "main"), record("edit", 1, "retouch"), record("creative", 1)];
+        expect(filterWorks(records, { tools: ["main", "retouch"], date: "", task: "all" }).map((work) => work.key))
+            .toEqual(["main:0", "edit:0"]);
+        expect(filterWorks(records, { tools: ["main", "retouch"], date: "2026-10-31", task: "edit" }).map((work) => work.key))
+            .toEqual(["edit:0"]);
+        expect(filterWorks(records, { tools: ["main", "retouch"], date: "2026-10-30", task: "all" })).toEqual([]);
     });
 });
 
 describe("My Works view", () => {
     interface Node { type: unknown; props: Record<string, any> }
+    const textOf = (value: unknown): string => Array.isArray(value) ? value.map(textOf).join("")
+        : value && typeof value === "object" && "props" in value ? textOf((value as Node).props.children)
+        : typeof value === "string" || typeof value === "number" ? String(value) : "";
+    const navigation = { TOOL_LABELS: {} as Record<ToolKey, string>, TOOL_GROUPS: [] as { name: string; tools: ToolKey[] }[] };
+    runInNewContext(ts.transpileModule(readFileSync(path.join(__dirname, "../src/web/pages/workspace-navigation.tsx"), "utf8"), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText, { exports: navigation, require: () => new Proxy({}, { get: () => "mock-component" }) });
     const source = readFileSync(path.join(__dirname, "../src/web/pages/works.tsx"), "utf8");
     const { outputText } = ts.transpileModule(source.replaceAll("import.meta.env", "({})"), {
         compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
@@ -77,13 +92,22 @@ describe("My Works view", () => {
             window: { setTimeout: (callback: () => void) => callback() },
             require: (name: string) => {
                 if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
-                if (name === "react") return { useState: (initial: unknown) => [state[stateIndex++] ?? initial, () => undefined] };
+                if (name === "react") return {
+                    useRef: () => ({ current: null }),
+                    useState: (initial: unknown) => {
+                        const index = stateIndex++;
+                        return [state[index] ?? initial, (value: unknown) => {
+                            state[index] = typeof value === "function" ? value(state[index] ?? initial) : value;
+                        }];
+                    },
+                };
+                if (name === "@buildingai/ui/components/ui/popover") return { Popover: "Popover", PopoverTrigger: "PopoverTrigger", PopoverContent: "PopoverContent" };
                 if (name === "../services/generation") return {
                     useWorksQuery: () => ({ data: records, ...query }), fetchGenerationImage: fetchImage,
                 };
                 if (name === "../services/works") return { filterWorks };
                 if (name === "../../api/shared/tools") return { TOOL_KEYS };
-                if (name === "./workspace-navigation") return { TOOL_LABELS: { main: "商品主图", creative: "创意生图", retouch: "产品精修" } };
+                if (name === "./workspace-navigation") return navigation;
                 if (name === "fflate") return require("fflate");
                 return new Proxy({}, { get: () => "mock-icon" });
             },
@@ -98,7 +122,7 @@ describe("My Works view", () => {
         }
         visit(exports.default!({ renderImage: (work: { key: string }) => { renderedImages.push(work.key); return null; } }));
         const text = nodes.flatMap((node) => [node.props.children].flat(Infinity)).filter((value) => typeof value === "string").join(" ");
-        return { nodes, text, renderedImages, anchor, fetchImage, archive: () => archive };
+        return { nodes, text, renderedImages, anchor, fetchImage, archive: () => archive, rerender: () => render(records, state, query) };
     }
     it("renders an actionable gallery and paginates individual images", () => {
         const records = Array.from({ length: 14 }, (_,index) => record(String(index)));
@@ -109,10 +133,11 @@ describe("My Works view", () => {
         expect(second.renderedImages).toEqual(["12:0", "12:1", "13:0", "13:1"]);
     });
     it("labels and filters instruction-edit images by their real tool", () => {
-        const result = render([record("edit", 1, "retouch"), record("creative")], { 0: "retouch" });
+        const result = render([record("edit", 1, "retouch"), record("creative")], { 0: ["retouch"] });
         expect(result.text).toContain("产品精修");
         expect(result.renderedImages).toEqual(["edit:0"]);
-        expect(result.nodes.filter((node) => node.type === "option").map((node) => node.props.value)).toEqual(expect.arrayContaining(TOOL_KEYS.filter((key) => key !== "cutout" && key !== "suggest")));
+        expect(result.nodes.filter((node) => node.props.role === "checkbox").map((node) => node.props["aria-label"]))
+            .toEqual(expect.arrayContaining(TOOL_KEYS.filter((key) => key !== "suggest").map((key) => navigation.TOOL_LABELS[key])));
     });
     it("renders the empty state only when loading succeeds without images", () => {
         expect(render([]).text).toContain("还没有作品");
@@ -121,7 +146,58 @@ describe("My Works view", () => {
         expect(render([], {}, { isError: true }).text).toContain("作品加载失败");
     });
     it("distinguishes no matching images from an empty collection", () => {
-        expect(render([record("creative")], { 0: "main" }).text).toContain("没有符合条件的作品");
+        expect(render([record("creative")], { 0: ["main"] }).text).toContain("没有符合条件的作品");
+    });
+    it("toggles grouped types immediately, keeps the popover open and restores all types", () => {
+        let view = render([record("main", 1, "main"), record("edit", 1, "retouch"), record("creative", 1)], { 9: "tool" });
+        const toggle = (label: string) => {
+            view.nodes.find((node) => node.props.role === "checkbox" && node.props["aria-label"] === label)!.props.onClick();
+            view = view.rerender();
+        };
+        expect(view.nodes.filter((node) => node.type === "legend").map(textOf)).toEqual(["电商生图", "AI 修图", "服饰穿戴"]);
+        toggle("商品主图"); toggle("产品精修");
+        expect(view.renderedImages).toEqual(["main:0", "edit:0"]);
+        expect(view.nodes.find((node) => node.type === "Popover")!.props.open).toBe(true);
+        toggle("商品主图"); expect(view.renderedImages).toEqual(["edit:0"]);
+        toggle("产品精修"); expect(view.renderedImages).toEqual(["main:0", "edit:0", "creative:0"]);
+        toggle("商品主图"); toggle("全部业务类型");
+        expect(view.renderedImages).toEqual(["main:0", "edit:0", "creative:0"]);
+    });
+    it("resets pagination and download selection when business types change", () => {
+        let view = render([record("main", 26, "main"), record("edit", 1, "retouch")], { 4: 2, 5: true, 6: new Set(["main:25"]) });
+        view.nodes.find((node) => node.props.role === "checkbox" && node.props["aria-label"] === "商品主图")!.props.onClick();
+        view = view.rerender();
+        expect(view.renderedImages[0]).toBe("main:0");
+        expect(view.renderedImages).toHaveLength(24);
+        expect(view.nodes.filter((node) => node.type === "input" && node.props.type === "checkbox").every((node) => !node.props.checked)).toBe(true);
+    });
+    it("searches tasks by full ID or name, keeps all tasks available and selects one", () => {
+        let view = render([{ ...record("task-ABC", 1, "main"), prompt: "夏日香水" }, { ...record("task-DEF", 1, "retouch"), prompt: "白色背景" }], { 9: "task" });
+        const search = (value: string) => {
+            view.nodes.find((node) => node.props["aria-label"] === "搜索任务 ID 或任务名称")!.props.onChange({ target: { value } });
+            view = view.rerender();
+        };
+        const options = () => view.nodes.filter((node) => node.props.className === "works-task-option");
+        search("  TASK-abc "); expect(options().map(textOf)).toEqual([expect.stringContaining("task-ABC")]);
+        expect(view.renderedImages).toHaveLength(2);
+        search("白色"); expect(options().map(textOf)).toEqual([expect.stringContaining("task-DEF")]);
+        options()[0].props.onClick(); view = view.rerender();
+        expect(view.renderedImages).toEqual(["task-DEF:0"]);
+        expect(view.nodes.filter((node) => node.type === "Popover")[1].props.open).toBe(false);
+        search("missing"); expect(view.text).toContain("未找到匹配任务");
+        view.nodes.find((node) => node.props.className === "works-task-option works-task-all")!.props.onClick();
+        view = view.rerender(); expect(view.renderedImages).toHaveLength(2);
+    });
+    it("clears every filter without retaining a hidden download selection", () => {
+        let view = render([record("main", 1, "main"), record("creative", 1)], {
+            0: ["main"], 1: "2026-10-31", 2: "main", 3: "completed", 5: true, 6: new Set(["main:0"]), 10: "search",
+        });
+        view.nodes.find((node) => node.props["aria-label"] === "清空筛选")!.props.onClick();
+        view = view.rerender();
+        expect(view.renderedImages).toEqual(["main:0", "creative:0"]);
+        expect(view.nodes.some((node) => node.props["aria-label"] === "清空筛选")).toBe(false);
+        expect(view.nodes.find((node) => node.props["aria-label"] === "搜索任务 ID 或任务名称")!.props.value).toBe("");
+        expect(view.nodes.filter((node) => node.type === "input" && node.props.type === "checkbox").every((node) => !node.props.checked)).toBe(true);
     });
     it("renders one accessible selection checkbox per visible image", () => {
         const result = render([record("selected")], { 5: true, 6: new Set(["selected:1"]) });

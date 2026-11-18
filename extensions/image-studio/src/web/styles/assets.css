@@ -81,6 +81,12 @@
 .asset-editor progress { max-width: 65%; }
 .assets-validation, .assets-message { font-size: 13px; color: var(--secondary-foreground); overflow-wrap: anywhere; }
 .asset-editor [role="alert"] { overflow-wrap: anywhere; }
+.asset-face-notice { display: grid; gap: 10px; padding: 12px; border-radius: 6px; background: var(--muted); color: var(--muted-foreground); font-size: 12px; overflow-wrap: anywhere; }
+.asset-face-notice p { margin: 0; }
+.asset-dialog .asset-face-notice label { display: flex; align-items: flex-start; gap: 8px; color: var(--foreground); }
+.asset-face-notice input { flex: none; margin-top: 3px; accent-color: var(--primary); }
+.asset-face-progress { display: flex; align-items: center; gap: 8px; }
+.asset-face-progress svg { flex: none; animation: custom-model-spin 1.4s linear infinite; }
 .asset-dialog-custom { width: min(802px, calc(100vw - 32px)); }
 .asset-dialog-custom .materials-dialog-body { min-height: min(620px, calc(100dvh - 32px)); }
 .asset-dialog-custom header { min-height: 54px; padding: 14px 24px; }
@@ -111,7 +117,7 @@
 @keyframes custom-model-flow { from { transform: translateX(-110%); } to { transform: translateX(365%); } }
 @keyframes custom-model-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-    .custom-model-progress-heading svg, .custom-model-progress-track > span { animation: none; }
+    .custom-model-progress-heading svg, .custom-model-progress-track > span, .asset-face-progress svg { animation: none; }
     .custom-model-progress-track > span { margin: 0 auto; }
 }
 .asset-dialog .custom-model-editor footer { position: static; flex: none; justify-content: flex-end; margin: auto -24px 0; padding: 12px 24px; border-top: 1px solid var(--border); }

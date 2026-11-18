@@ -38,6 +38,8 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
     const [pending, setPending] = useState(false);
     const [saved, setSaved] = useState<CreativeAsset | undefined>(original);
     const [message, setMessage] = useState("");
+    const [consentedImage, setConsentedImage] = useState("");
+    const [checkingFace, setCheckingFace] = useState(false);
     const operation = useRef(false);
     const mounted = useRef(true);
     const abort = useRef<AbortController | undefined>(undefined);
@@ -54,7 +56,9 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
     const currentPage = Math.min(page, pages);
     const invalid = validateCreativeAsset({ kind, ...current, name: name.trim() });
     const missing = imageIds.some((id) => !images.some((image) => image.id === id));
-    const canSave = !busy && !invalid && validMaterialLabel(name.trim()) && !missing && products.isSuccess && !products.isFetching && (Boolean(saved) || !limitReached);
+    const needsFaceCheck = kind === "model" && imageIds.length === 1 && (!saved || saved.kind !== "model" || saved.imageIds[0]?.toLowerCase() !== imageIds[0]?.toLowerCase());
+    const faceConsent = needsFaceCheck && consentedImage === imageIds[0];
+    const canSave = !busy && !invalid && validMaterialLabel(name.trim()) && !missing && (!needsFaceCheck || faceConsent) && products.isSuccess && !products.isFetching && (Boolean(saved) || !limitReached);
     const showForm = kind === "reference" || modelTab === "upload";
 
     function close() {
@@ -87,9 +91,12 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
     async function persist(use: boolean) {
         if (!canSave || operation.current || (use && locked)) return;
         operation.current = true; setPending(true); setErrors([]); setMessage("");
+        setCheckingFace(needsFaceCheck);
         try {
             const nextInput = { kind, name: name.trim(), prompt, imageIds: [...imageIds] };
-            const record = saved && !assetFormDirty(nextInput, saved) ? saved : await save.mutateAsync({ input: nextInput, original: saved });
+            const record = saved && !assetFormDirty(nextInput, saved) ? saved : await save.mutateAsync({
+                input: nextInput, original: saved, ...(needsFaceCheck ? { faceConsent: true } : {}),
+            });
             if (!mounted.current) return;
             setSaved(record); setName(record.name);
             initial.current = { name: record.name, prompt: record.prompt, imageIds: [...record.imageIds] };
@@ -102,7 +109,7 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
                 } catch (reason) { if (mounted.current) setErrors([`已保存，未能使用：${materialError(reason)}`]); }
             } else { setMessage("已保存"); onClose(); }
         } catch (reason) { if (mounted.current) setErrors([`保存失败：${materialError(reason)}。输入已保留；版本冲突时请关闭后重新编辑。`]); }
-        finally { operation.current = false; if (mounted.current) setPending(false); }
+        finally { operation.current = false; if (mounted.current) { setPending(false); setCheckingFace(false); } }
     }
 
     return <MaterialDialog className={`asset-dialog asset-dialog-${kind}${kind === "model" && modelTab === "custom" ? " asset-dialog-custom" : ""}`} title={original ? kind === "model" ? "编辑模特" : "编辑创作参考" : kind === "model" ? "创建专属模特" : "新建创作参考"} onClose={close} busy={busy}>
@@ -141,6 +148,11 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
             </div>}
             <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" multiple={kind === "reference"} hidden disabled={busy}
                 onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void uploadFiles(files); }} />
+            {kind === "model" && (!saved || needsFaceCheck) && <section className="asset-face-notice" aria-label="模特照片检测说明" aria-busy={checkingFace}>
+                <label><input type="checkbox" aria-label="同意照片检测" checked={faceConsent} disabled={busy || imageIds.length !== 1}
+                    onChange={(event) => setConsentedImage(event.target.checked ? imageIds[0]! : "")} /><span>我确认照片中的人物已成年且拥有使用授权，并同意将照片发送腾讯云进行人脸检测。</span></label>
+                {checkingFace && <p className="asset-face-progress" role="status"><RefreshCw size={14} aria-hidden="true" /><span>正在检测并保存，请稍候...</span></p>}
+            </section>}
             <div hidden={!pickerOpen} className="asset-picker-panel">
             <label className="assets-search"><Search size={16} /><input aria-label="搜索已有图片" type="search" value={search} disabled={busy} onChange={(event) => { setSearch(event.target.value); setPage(1); }} /></label>
             {products.isPending ? <p role="status">正在加载图片素材...</p> : products.isError ? <p role="alert">图片素材加载失败 <button type="button" disabled={products.isFetching} onClick={() => void products.refetch()}><RefreshCw size={16} />重试</button></p> : <>
@@ -159,7 +171,7 @@ export function AssetEditor({ kind, original, limitReached, locked, onClose, onS
             {!saved && limitReached && <p role="alert">资产已达 40 条上限，请先删除不用的资料</p>}
             {missing && <p role="alert">部分图片已不存在，请移除并重新选择</p>}
             <footer><button type="button" title="取消" aria-label="取消" disabled={busy} onClick={close}><X size={16} /></button>
-                <button type="submit" aria-label="保存" disabled={!canSave}>{pending ? "保存中..." : kind === "model" ? "保存模特" : "保存参考"}</button>
+                <button type="submit" aria-label="保存" disabled={!canSave}>{checkingFace ? "检测并保存中..." : pending ? "保存中..." : kind === "model" ? "保存模特" : "保存参考"}</button>
                 <button type="button" aria-label="保存并使用" disabled={!canSave || locked} title={locked ? "当前任务结束后可使用" : "保存并使用"} onClick={() => void persist(true)}><Sparkles size={16} /></button></footer>
         </form>}
     </MaterialDialog>;

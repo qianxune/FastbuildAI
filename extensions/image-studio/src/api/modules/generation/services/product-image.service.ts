@@ -190,8 +190,7 @@ export class ProductImageService {
         return { filename, stat };
     }
 
-    /** 校验静态图片并旋转缩放为 PNG，排他写入用户私有目录。 */
-    async upload(userId: string, file?: ProductImageUpload) {
+    async normalize(file?: ProductImageUpload) {
         if (
             !file?.buffer?.length ||
             file.buffer.length > MAX_BYTES ||
@@ -238,6 +237,12 @@ export class ProductImageService {
                 "图片无法解码，请使用 64 像素以上、4000 万像素以内的静态商品图片",
             );
         }
+        return { buffer, width, height };
+    }
+
+    /** 校验静态图片并旋转缩放为 PNG，排他写入用户私有目录。 */
+    async upload(userId: string, file?: ProductImageUpload) {
+        const { buffer, width, height } = await this.normalize(file);
         const directory = await this.safeDirectory(userId, true);
         const catalog = await this.catalog(userId);
         const files = await readdir(directory);
@@ -250,7 +255,7 @@ export class ProductImageService {
                 await rm(filename, { force: true }).catch(() => undefined);
             throw HttpErrorFactory.badRequest("商品图保存失败");
         }
-        const label = file.originalname?.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "").trim();
+        const label = file?.originalname?.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "").trim();
         const name = validLabel(label, 120) ? label : `素材-${id.slice(0, 8)}`;
         const existingIds = new Set(files.filter((value) => value.endsWith(".png")).map((value) => value.slice(0, -4)));
         catalog.images = Object.fromEntries(Object.entries(catalog.images).filter(([key]) => existingIds.has(key)));

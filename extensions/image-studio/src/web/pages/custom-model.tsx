@@ -1,6 +1,7 @@
 import { Check, LoaderCircle, RefreshCw, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { CreativeAsset } from "../../api/shared/assets";
+import { customModelPrompt, MODEL_ATTRIBUTES, type ModelAttributes } from "../../api/shared/custom-model";
 import { useSaveAssetMutation } from "../services/assets";
 import {
     fetchGenerationImage, isGenerationActive, loadGenerationImage, useGenerateImageMutation,
@@ -10,24 +11,9 @@ import {
 import { materialError, validMaterialLabel } from "../services/materials";
 import type { ImageGeneration, ProductImage } from "../services/types";
 
-export const MODEL_ATTRIBUTES = [
-    { key: "gender", label: "性别", options: ["女", "男"] },
-    { key: "appearance", label: "外观特征", options: ["欧美白人", "东亚", "南亚", "非洲裔", "拉丁裔", "中东"] },
-    { key: "age", label: "年龄段", options: ["青少年", "青年", "中年", "老年"] },
-    { key: "persona", label: "人设", options: ["上班族", "学生", "运动达人", "时尚达人", "休闲日常"] },
-    { key: "body", label: "体型", options: ["纤细", "匀称", "健壮", "丰满"] },
-] as const;
-type ModelAttributes = Record<typeof MODEL_ATTRIBUTES[number]["key"], string>;
+export { customModelPrompt, MODEL_ATTRIBUTES } from "../../api/shared/custom-model";
 const DEFAULT_ATTRIBUTES: ModelAttributes = { gender: "女", appearance: "欧美白人", age: "青少年", persona: "上班族", body: "纤细" };
 const API_PREFIX = import.meta.env.VITE_APP_WEB_API_PREFIX || "api";
-
-export function customModelPrompt(attributes: ModelAttributes) {
-    if (!MODEL_ATTRIBUTES.every((field) => (field.options as readonly string[]).includes(attributes[field.key])))
-        throw new Error("请选择有效的模特属性");
-    return `生成一张写实电商虚拟模特摄影。${MODEL_ATTRIBUTES.map((field) => `${field.label}：${attributes[field.key]}`).join("；")}。` +
-        "仅一位虚构人物，不模仿任何真实人物或名人。上半身正面肖像，取景范围为腰部以上，头部和双肩完整入镜，不展示腿部或双脚，姿态自然。" +
-        "穿着完整、得体、不透明的日常服装，年龄适宜，无裸露、无性感姿势。纯浅灰背景，柔和均匀棚拍光线，真实自然的人体比例，无文字、水印、标识或其他人物。";
-}
 
 function ModelPreview({ task }: { task: ImageGeneration }) {
     const [url, setUrl] = useState("");
@@ -108,7 +94,7 @@ export default function CustomModel({ active, locked, limitReached, onBusyChange
                 if (!mounted.current) return;
                 setMaterial(image);
             }
-            const record = await save.mutateAsync({ input: { kind: "model", name: name.trim(), prompt: generatedPrompt, imageIds: [image.id] } });
+            const record = await save.mutateAsync({ input: { kind: "model", name: name.trim(), prompt: generatedPrompt, imageIds: [image.id] }, generatedFrom: task.id });
             if (mounted.current) { onSaved(record); onClose(); }
         } catch (reason) { if (mounted.current) setError(`保存失败：${materialError(reason)}。生成结果已保留，请重试保存。`); }
         finally { operation.current = false; if (mounted.current) setPending(false); }

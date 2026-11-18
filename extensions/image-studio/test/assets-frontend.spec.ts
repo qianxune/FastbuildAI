@@ -1,4 +1,5 @@
 import { validateCreativeAsset, type CreativeAsset } from "../src/api/shared/assets";
+import { customModelPrompt, MODEL_ATTRIBUTES } from "../src/api/shared/custom-model";
 import { assetDraftSnapshot, assetFormDirty, confirmAssetReplacement } from "../src/web/pages/asset-draft";
 import type { GenerationCapabilities } from "../src/api/shared/tools";
 import type { ProductImage } from "../src/web/services/types";
@@ -84,6 +85,16 @@ describe("asset metadata service", () => {
         exports.useSaveAssetMutation().onSuccess({ ...asset, version: 2 });
         expect(setQueryData.mock.calls[1][1]({ items: [asset], limit: 40 }).items).toEqual([{ ...asset, version: 2 }]);
     });
+    it("sends explicit photo consent or generated provenance separately from asset metadata", async () => {
+        const input = { kind: "model" as const, name: "Model", prompt: "", imageIds: [ids[0]] };
+        post.mockResolvedValue({ ...asset, ...input });
+        await exports.saveCreativeAsset({ input, faceConsent: true });
+        expect(post).toHaveBeenLastCalledWith("/assets", { ...input, faceConsent: true });
+        await exports.saveCreativeAsset({ input, generatedFrom: ids[3] });
+        expect(post).toHaveBeenLastCalledWith("/assets", { ...input, generatedFrom: ids[3] });
+        expect(input).not.toHaveProperty("faceConsent");
+        expect(input).not.toHaveProperty("generatedFrom");
+    });
 });
 
 type AssetNode = { type: any; props: Record<string, any> };
@@ -133,6 +144,7 @@ function assetUiHarness(editor: boolean | "custom" = true, overrides: Record<str
                 },
             };
             if (name === "../../api/shared/assets") return { validateCreativeAsset };
+            if (name === "../../api/shared/custom-model") return { customModelPrompt, MODEL_ATTRIBUTES };
             if (name === "../services/materials") return materialExports;
             if (name === "./asset-draft") return { assetFormDirty };
             if (name === "../services/assets") return { useAssetsQuery: () => catalog, useOfficialModelsQuery: () => official, useSaveAssetMutation: () => save, useDeleteAssetMutation: () => remove };
@@ -243,7 +255,7 @@ describe("custom model generation and persistence", () => {
         view.button("保存模特").props.onClick(); await settleAssetUi();
         expect(view.upload.mutateAsync).toHaveBeenCalledTimes(1); expect(view.fetchImage).toHaveBeenCalledTimes(1);
         expect(view.generation.mutateAsync).toHaveBeenCalledTimes(1);
-        expect(view.save.mutateAsync).toHaveBeenLastCalledWith({ input: { kind: "model", name: "My Model", prompt: expect.stringContaining("虚构人物"), imageIds: [ids[0]] } });
+        expect(view.save.mutateAsync).toHaveBeenLastCalledWith({ input: { kind: "model", name: "My Model", prompt: expect.stringContaining("虚构人物"), imageIds: [ids[0]] }, generatedFrom: view.generated.id });
         expect(view.save.mutateAsync.mock.calls[1][0].input.prompt).toBe(view.generation.mutateAsync.mock.calls[0][0].prompt);
         expect(view.save.mutateAsync.mock.calls[1][0].input.prompt).toContain("腰部以上");
         expect(view.props.onSaved).toHaveBeenCalledTimes(1); expect(view.props.onClose).toHaveBeenCalledTimes(1);
@@ -313,7 +325,55 @@ describe("asset editor interactions", () => {
         view.render().find((node) => node.props.role === "tab" && assetText(node) === "上传模特")!.props.onClick();
         view.set("资产名称", "Model"); view.field(`选择 ${ids[0]}`).props.onChange();
         expect(view.field(`选择 ${ids[1]}`).props.disabled).toBe(true);
+        expect(view.button("保存").props.disabled).toBe(true);
+        view.field("同意照片检测").props.onChange({ target: { checked: true } });
         expect(view.button("保存").props.disabled).toBe(false);
+    });
+    it("binds consent to the selected photo and blocks unchecked submissions even through the form handler", async () => {
+        const view = assetUiHarness(true, { kind: "model" });
+        view.button("上传模特").props.onClick();
+        view.set("资产名称", "Model"); view.field(`选择 ${ids[0]}`).props.onChange();
+        view.render().find((node) => node.type === "form")!.props.onSubmit({ preventDefault() {} });
+        await settleAssetUi();
+        expect(view.save.mutateAsync).not.toHaveBeenCalled();
+        view.field("同意照片检测").props.onChange({ target: { checked: true } });
+        expect(view.button("保存").props.disabled).toBe(false);
+        view.button("移除图片 1").props.onClick();
+        view.field(`选择 ${ids[1]}`).props.onChange();
+        expect(view.field("同意照片检测").props.checked).toBe(false);
+        expect(view.button("保存").props.disabled).toBe(true);
+        expect(view.render().map(assetText).join("")).not.toContain("保存时将照片发送腾讯云");
+        expect(assetText(view.field("模特照片检测说明"))).toContain("同意将照片发送腾讯云进行人脸检测");
+    });
+    it("shows detection in flight, prevents duplicate saves and preserves a rejected photo and form", async () => {
+        const view = assetUiHarness(true, { kind: "model" });
+        view.button("上传模特").props.onClick();
+        view.set("资产名称", "Model"); view.field(`选择 ${ids[0]}`).props.onChange();
+        view.field("同意照片检测").props.onChange({ target: { checked: true } });
+        let reject!: (reason: Error) => void;
+        view.save.mutateAsync.mockImplementation(() => new Promise((_resolve, rejectSave) => { reject = rejectSave; }));
+        const form = view.render().find((node) => node.type === "form")!;
+        form.props.onSubmit({ preventDefault() {} }); form.props.onSubmit({ preventDefault() {} });
+        expect(view.save.mutateAsync).toHaveBeenCalledTimes(1);
+        expect(view.save.mutateAsync).toHaveBeenCalledWith({ input: { kind: "model", name: "Model", prompt: "", imageIds: [ids[0]] }, original: undefined, faceConsent: true });
+        expect(view.render().some((node) => node.props.role === "status" && assetText(node).includes("正在检测并保存"))).toBe(true);
+        expect(view.field("同意照片检测").props.disabled).toBe(true);
+        expect(view.button("保存").props.disabled).toBe(true);
+        reject(new Error("未成年风险")); await settleAssetUi();
+        expect(view.field("资产名称").props.value).toBe("Model");
+        expect(view.field(`选择 ${ids[0]}`).props.checked).toBe(true);
+        expect(view.render().map(assetText).join("")).toContain("未成年风险");
+        expect(view.props.onClose).not.toHaveBeenCalled();
+        expect(view.props.onSaved).not.toHaveBeenCalled();
+    });
+    it("renames an existing model without consent or a repeated cloud check", async () => {
+        const original = { ...asset, kind: "model" as const, imageIds: [ids[0]] };
+        const view = assetUiHarness(true, { kind: "model", original });
+        view.set("资产名称", "Renamed");
+        expect(view.field("同意照片检测")).toBeUndefined();
+        view.render().find((node) => node.type === "form")!.props.onSubmit({ preventDefault() {} });
+        await settleAssetUi();
+        expect(view.save.mutateAsync).toHaveBeenCalledWith({ input: { kind: "model", name: "Renamed", prompt: "", imageIds: [ids[0]] }, original });
     });
     it("enforces required safe name, optional prompt, five references and metadata quota", () => {
         const view = assetUiHarness(); expect(view.button("保存").props.disabled).toBe(true);

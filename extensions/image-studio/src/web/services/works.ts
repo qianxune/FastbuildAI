@@ -1,4 +1,5 @@
 import type { GenerationList, ImageGeneration } from "./types";
+import type { ToolKey } from "../../api/shared/tools";
 
 export interface WorkImage {
     generation: ImageGeneration;
@@ -23,11 +24,11 @@ export async function collectGenerations(
 
 export function filterWorks(
     records: ImageGeneration[],
-    filters: { tool: string; date: string; task: string },
+    filters: { tools: readonly ToolKey[]; date: string; task: string },
 ) {
     return records
         .filter((record) =>
-            (filters.tool === "all" || (record.toolKey ?? "creative") === filters.tool) &&
+            (!filters.tools.length || filters.tools.includes(record.toolKey ?? "creative")) &&
             (!filters.date || new Date(record.createdAt).toLocaleDateString("sv-SE") === filters.date) &&
             (filters.task === "all" || record.id === filters.task),
         )
