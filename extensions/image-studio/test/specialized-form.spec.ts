@@ -448,7 +448,8 @@ describe("saved model picker component", () => {
     }
     it("offers saved single-image models only, searches, selects and returns focus", () => {
         const view = picker(); view.assets.data.items.push({ ...view.assets.data.items[0], id: assetIds[2], kind: "reference", name: "Not a model" });
-        view.open(); expect(view.render().filter((node) => String(node.props["aria-label"]).startsWith("选择模特 "))).toHaveLength(1);
+        view.open(); expect(view.render().find((node) => node.type === "MaterialDialog")!.props.className).toBe("apparel-model-dialog");
+        expect(view.render().filter((node) => String(node.props["aria-label"]).startsWith("选择模特 "))).toHaveLength(1);
         expect(view.render().some((node) => node.type === "input" && node.props.type === "file")).toBe(false);
         const search = view.render().find((node) => node.props["aria-label"] === "搜索我的模特")!;
         search.props.onChange({ target: { value: "no-match" } }); expect(elementText(view.render())).toContain("没有匹配的模特");
@@ -464,7 +465,7 @@ describe("saved model picker component", () => {
         if (state === "error") view.assets.isError = true;
         view.open(); expect(elementText(view.render())).toContain(state === "empty" ? "暂无可用的我的模特" : state === "loading" ? "正在加载我的模特" : "模特目录加载失败");
         if (state === "error") { view.button("重试").props.onClick(); expect(view.assets.refetch).toHaveBeenCalledTimes(1); expect(view.products.refetch).toHaveBeenCalledTimes(1); }
-        view.button("资产库").props.onClick(); expect(view.onOpenAssets).toHaveBeenCalledTimes(1); expect(view.focus).toHaveBeenCalled(); expect(view.onChange).not.toHaveBeenCalled();
+        view.button("前往资产库管理").props.onClick(); expect(view.onOpenAssets).toHaveBeenCalledTimes(1); expect(view.focus).toHaveBeenCalled(); expect(view.onChange).not.toHaveBeenCalled();
     });
     it.each(["changed", "fetching", "disabled", "unmounted"])("rejects retained model-row selection after %s", (state) => {
         const view = picker(); view.open(); const select = view.button("选择模特 Saved model").props.onClick;

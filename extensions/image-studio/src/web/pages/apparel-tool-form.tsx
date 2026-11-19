@@ -40,7 +40,7 @@ export function ModelAssetPicker({ value, disabled, onChange, onOpenAssets }: {
             {value && <button type="button" title="移除目标模特" aria-label="移除目标模特" disabled={disabled}
                 onClick={() => { if (editable()) live.current.onChange(undefined); }}><X size={16} /></button>}
         </div>
-        {open && <MaterialDialog title="我的模特" busy={disabled} onClose={close}>
+        {open && <MaterialDialog title="我的模特" className="apparel-model-dialog" busy={disabled} onClose={close}>
             <label className="apparel-model-search"><Search size={16} /><input type="search" aria-label="搜索我的模特" placeholder="搜索模特名称" maxLength={120} value={search} disabled={disabled}
                 onChange={(event) => { if (editable()) setSearch(event.target.value); }} /></label>
             {failed ? <p role="alert">模特目录加载失败<button type="button" disabled={disabled || assets.isFetching || products.isFetching}
@@ -55,7 +55,7 @@ export function ModelAssetPicker({ value, disabled, onChange, onOpenAssets }: {
                     </button>)}</div>}
             {settled && !rows.length && <p role="status">暂无可用的我的模特</p>}
             {settled && rows.length > 0 && !filtered.length && <p role="status">没有匹配的模特</p>}
-            <button type="button" disabled={disabled || !onOpenAssets} onClick={() => { if (editable() && live.current.onOpenAssets) { close(); live.current.onOpenAssets(); } }}><FolderOpen size={16} />资产库</button>
+            <div className="apparel-model-dialog-footer"><button type="button" disabled={disabled || !onOpenAssets} onClick={() => { if (editable() && live.current.onOpenAssets) { close(); live.current.onOpenAssets(); } }}><FolderOpen size={16} />前往资产库管理</button></div>
         </MaterialDialog>}
     </section>;
 }

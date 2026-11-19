@@ -1051,7 +1051,8 @@ details.adv summary:hover{color:var(--text1)}
 .workspace-nav-primary{padding-bottom:12px;margin-bottom:8px;border-bottom:1px solid var(--line)}
 .workspace-nav-item{display:flex;align-items:center;gap:10px;width:100%;min-height:36px;padding:7px 12px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--text2);font:inherit;font-size:13px;text-align:left;cursor:pointer}
 .workspace-nav-item svg{flex-shrink:0}
-.workspace-nav-item:hover{background:var(--surface2);color:var(--text1)}
+.workspace-nav-item:hover{background:var(--accent);border-color:var(--input);color:var(--primary)}
+.workspace-nav-item:focus-visible{outline:2px solid var(--ring);outline-offset:2px;background:var(--accent);border-color:var(--input);color:var(--primary)}
 .workspace-nav-item[aria-current]{background:var(--accent);border-color:var(--input);color:var(--primary);font-weight:600}
 .workspace-nav-group{margin-bottom:6px}
 .workspace-nav-group summary{display:flex;align-items:center;justify-content:space-between;min-height:36px;padding:6px 12px;list-style:none;color:var(--text1);font-size:12px;font-weight:650;cursor:pointer}
