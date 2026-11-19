@@ -785,6 +785,17 @@ details.adv summary:hover{color:var(--text1)}
 .generation-image-progress{width:calc(100% - 48px); max-width:180px; margin:4px 0 0; flex-shrink:0}
 .generation-placeholder{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:130px; color:var(--text3); font-size:12px; border-radius:6px}
 .generation-placeholder .spin{width:18px; height:18px}
+.generation-pending-grid{grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px}
+.generation-pending-tile,.generation-source-tile{aspect-ratio:1; min-height:0}
+.generation-pending-tile{color:var(--muted-foreground); background:color-mix(in srgb,var(--muted) 45%,var(--card)); cursor:default}
+.generation-dots{display:flex; gap:8px; align-items:center}
+.generation-dots i{width:11px; height:11px; border-radius:50%; background:var(--text3); opacity:.32; animation:generation-dot 1.2s ease-in-out infinite}
+.generation-dots i:nth-child(2){animation-delay:.15s}.generation-dots i:nth-child(3){animation-delay:.3s}
+.generation-pending-label{font-size:15px; font-weight:500; color:var(--text3)}
+.generation-source-badge{position:absolute; top:10px; left:10px; z-index:2; padding:5px 9px; border-radius:6px; background:rgba(24,24,27,.72); color:#fff; font-size:12px; font-weight:600}
+.generation-pending-grid .generation-image-progress{position:absolute}
+.generation-visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+@keyframes generation-dot{0%,70%,100%{transform:translateY(0);opacity:.28}35%{transform:translateY(-4px);opacity:.7}}
 .generation-summary{display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px}
 .generation-summary .res-actions{flex-wrap:wrap}
 .result-preview{display:block; width:100%; height:100%; padding:0; border:0; background:none; cursor:zoom-in}
@@ -806,9 +817,8 @@ details.adv summary:hover{color:var(--text1)}
 .history-actions{display:flex; justify-content:flex-end; align-items:center; gap:10px}
 .history-pagination{display:flex; justify-content:center; align-items:center; gap:16px; padding:20px 0; font-size:12px; color:var(--text2)}
 .history-entry .res-grid{padding-bottom:12px}
-.result-prompt{white-space:pre-wrap; overflow-wrap:anywhere; margin-bottom:18px; color:var(--text2); font-size:13px}
 .studio-app .res-bar{flex-wrap:wrap; gap:10px}
-.studio-app .rtile img{object-fit:contain}
+.studio-app .rtile img{object-fit:cover}
 .studio-app .rtile:focus-within .ovl{opacity:1; pointer-events:auto}
 @media (hover:none){.studio-app .rtile .ovl{opacity:1; pointer-events:auto}}
 .canvas{
@@ -1167,9 +1177,13 @@ details.adv summary:hover{color:var(--text1)}
 .studio-app .shim{border-radius:8px;background:linear-gradient(100deg,var(--muted) 40%,var(--input) 50%,var(--muted) 60%);background-size:220% 100%}
 .studio-app .cstate{padding:28px 24px}
 .studio-app .res-grid{grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),1fr))}
+.studio-app .generation-pending-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
 .studio-app .result-image-stage{display:flex;justify-content:center;align-items:center;min-height:min(70vh,740px);padding:20px 0 32px}
 .studio-app .result-image-stage .result-preview-tile{flex:none;max-width:100%;border:0;border-radius:8px;background:repeating-conic-gradient(var(--card) 0% 25%,var(--studio-checker) 0% 50%) 0 0 / 20px 20px}
+.studio-app .result-image-stage .rtile img{object-fit:contain}
 .studio-app .result-preview-state .canvas-inner{max-width:1100px}
+@media (max-width:900px){.studio-app .generation-pending-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:420px){.studio-app .generation-pending-grid{gap:10px}.generation-pending-label{font-size:13px}}
 .studio-app .result-image-stage .result-preview{height:100%;width:100%}
 .studio-app .rfail{background:var(--studio-danger-surface);backdrop-filter:none}
 .studio-app .toast{max-width:calc(100% - 24px);box-shadow:0 6px 20px var(--studio-selection-soft);border-radius:6px}

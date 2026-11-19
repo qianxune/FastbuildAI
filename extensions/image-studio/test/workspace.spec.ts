@@ -1069,7 +1069,8 @@ describe("workspace integration", () => {
         view.query.mockReturnValue({ data: generation });
         view.render(); view.commit();
         expect(view.query).toHaveBeenLastCalledWith(id);
-        expect(text(view.render().find((node) => node.props.className === "result-prompt"))).toBe("Saved task");
+        expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(false);
+        expect(text(view.render())).not.toContain("Saved task");
         expect(view.render().find((node) => node.type === "Navigation")!.props.tool).toBe("cutout");
         expect(view.render().find((node) => node.type === "./tool-form" && node.props.tool === "cutout")!.props.taskSnapshot).toBe(generation);
         const stage = view.render().find((node) => node.props.className === "res-grid result-image-stage")!;
@@ -1252,7 +1253,8 @@ describe("workspace integration", () => {
         view.render().find((node) => node.props.className === "history-open")!.props.onClick();
         let rendered = view.render();
         expect(rendered.find((node) => node.type === "Navigation")!.props.tool).toBe("detail");
-        expect(rendered.find((node) => node.props.className === "result-prompt")!.props.children).toBe("Detail result only");
+        expect(rendered.some((node) => node.props.className === "result-prompt")).toBe(false);
+        expect(text(rendered)).not.toContain("Detail result only");
         rendered.find((node) => node.type === "Navigation")!.props.onNavigate("create", "main");
         rendered = view.render();
         expect(rendered.some((node) => node.props.className === "result-prompt")).toBe(false);
@@ -1264,7 +1266,8 @@ describe("workspace integration", () => {
         view.render().find((node) => node.type === "Navigation")!.props.onNavigate("history");
         view.render().find((node) => node.props.className === "history-open")!.props.onClick();
         expect(view.render().find((node) => node.type === "Navigation")!.props.tool).toBe("creative");
-        expect(view.render().find((node) => node.props.className === "result-prompt")!.props.children).toBe("Legacy creative");
+        expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(false);
+        expect(text(view.render())).not.toContain("Legacy creative");
     });
     it("keeps a late main submission result out of the newly selected column", async () => {
         const view = workspace();
@@ -1403,7 +1406,7 @@ describe("owning-page apparel integration", () => {
         expect(view.render().some((node) => String(node.props.className).includes("generation-placeholder"))).toBe(false);
         expect(view.form().props.annotationTarget).toBeNull(); expect(view.render().some((node) => node.props.className === "workspace-active-task")).toBe(true);
         view.active.status = "completed"; view.active.images = [{}]; view.navigate("create", tool);
-        expect(view.form().props.taskSnapshot).toBe(view.active); expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(true);
+        expect(view.form().props.taskSnapshot).toBe(view.active); expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(false);
         view.form().props.onEditSource(); expect(view.render().some((node) => node.props.className === view.host)).toBe(true);
         expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(false);
         view.form().props.onOpenAssets(); expect(view.render().find((node) => node.type === "Navigation")!.props.view).toBe("materials");
@@ -1419,7 +1422,7 @@ describe("owning-page apparel integration", () => {
         expect(view.retryMutation.mutateAsync).toHaveBeenCalledWith(record.id);
         view.active.status = "failed"; view.navigate("history", tool);
         view.render().find((node) => node.props.className === "history-open")!.props.onClick();
-        expect(view.form().props.taskSnapshot).toBe(record); expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(true);
+        expect(view.form().props.taskSnapshot).toBe(record); expect(view.render().some((node) => node.props.className === "result-prompt")).toBe(false);
         expect(view.render().filter((node) => node.type === "./tool-form" && node.props.tool !== tool && node.props.taskSnapshot)).toHaveLength(0);
         view.navigate("create", "main"); expect(view.form().props.taskSnapshot).toBeNull();
     });

@@ -48,6 +48,7 @@ import {
     loadGenerationImage,
         loadGenerationThumbnail,
         loadWhenVisible,
+        loadProductThumbnail,
         clearGenerationThumbnails,
         setGenerationThumbnailAccount,
     fetchGenerationImage,
@@ -208,6 +209,8 @@ export default function ImageStudioPage() {
                 : generateTool.isPending
           ? null
           : currentResult?.mainInput;
+    const pendingSourceId = pendingMainInput?.assetIds?.[0]
+        ?? (generateTool.isPending ? generateTool.variables?.assetIds?.[0] : currentResult?.toolInput?.assetIds?.[0]);
         const pendingStatus = submitting
                 ? "提交中"
                 : currentTask?.status === "queued"
@@ -806,23 +809,26 @@ export default function ImageStudioPage() {
                                               : "图片生成中"
                                     }
                                 />
-                                <div className="res-grid" aria-label="待生成图片">
+                                <div className="res-grid generation-pending-grid" aria-label="待生成图片">
+                                    {pendingSourceId && <PendingSourceTile assetId={pendingSourceId} />}
                                     {Array.from({ length: pendingCount }, (_, index) => (
                                         <div
-                                            className="rtile generation-placeholder shim"
+                                            className="rtile generation-placeholder generation-pending-tile"
                                             key={index}
                                         >
-                                            <span className="spin" aria-hidden="true" />
-                                            <span>
+                                            <span className="generation-dots" aria-hidden="true">
+                                                <i /><i /><i />
+                                            </span>
+                                            <span className="generation-pending-label">AI生成中...</span>
+                                            <span className="generation-visually-hidden">
+                                                {pendingStatus}：
                                                 {pendingMainInput
-                                                    ? mainImageVariants(pendingMainInput).map(
-                                                          (variant) => MAIN_IMAGE_TYPES[variant],
-                                                      )[index] ?? `图片 ${index + 1}`
+                                                    ? mainImageVariants(pendingMainInput).map((variant) => MAIN_IMAGE_TYPES[variant])[index]
+                                                        ?? `图片 ${index + 1}`
                                                     : `图片 ${index + 1}`}
                                             </span>
-                                            <span>{pendingStatus}</span>
                                             <progress
-                                                className="generation-progress generation-image-progress"
+                                                className="generation-image-progress generation-visually-hidden"
                                                 aria-label={`图片 ${index + 1}生成进度`}
                                                 aria-valuetext={pendingStatus}
                                             />
@@ -878,16 +884,6 @@ export default function ImageStudioPage() {
                                         aria-label="图片生成完成"
                                     />
                                 )}
-                                <p className="workflow-message">
-                                    {TOOL_LABELS[currentResult.toolKey ?? "creative"]} · {currentResult.modelName} · {currentResult.size} ·{" "}
-                                    {currentResult.images.length} 张
-                                </p>
-                                {billingCaption(currentResult) && (
-                                    <p className="workflow-message">
-                                        {billingCaption(currentResult)}
-                                    </p>
-                                )}
-                                <p className="result-prompt">{currentResult.prompt}</p>
                                 {currentResult.status === "failed" && (
                                     <div className="workflow-message error" role="alert">
                                         <TriangleAlert size={18} />
@@ -964,6 +960,23 @@ export default function ImageStudioPage() {
             )}
         </div>
     );
+}
+
+function PendingSourceTile({ assetId }: { assetId: string }) {
+    const [url, setUrl] = useState<string | null>(null);
+    const [failed, setFailed] = useState(false);
+    useEffect(() => {
+        setUrl(null);
+        setFailed(false);
+        return loadProductThumbnail(assetId, setUrl, () => setFailed(true));
+    }, [assetId]);
+    return <div className="rtile generation-source-tile">
+        {url ? <img src={url} alt="生成参考原图" draggable={false} /> :
+            <div className="generation-placeholder" role={failed ? "alert" : "status"}>
+                <span>{failed ? "原图加载失败" : "原图加载中..."}</span>
+            </div>}
+        <span className="generation-source-badge">原图</span>
+    </div>;
 }
 
 function ResultTile({

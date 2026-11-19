@@ -27,7 +27,7 @@ describe("per-image generation progress", () => {
             useGenerationHistoryQuery: () => ({ data: { items: [], total: 0 } }),
             useGenerationCapabilitiesQuery: () => ({ data: { tools: [], models: [] } }),
             useCreditBalanceQuery: () => ({ data: { balance: 100 } }),
-            useGenerateMainImageMutation: () => ({ isPending: submitting === "main", variables: {} }),
+            useGenerateMainImageMutation: () => ({ isPending: submitting === "main", variables: { assetIds: ["11111111-1111-4111-8111-111111111111"] } }),
             useRetryGenerationMutation: () => mutation,
             useCancelGenerationMutation: () => mutation,
             useDeleteGenerationMutation: () => mutation,
@@ -47,7 +47,7 @@ describe("per-image generation progress", () => {
                     useEffect: () => undefined,
                 };
                 if (name === "../services/generation") return services;
-                if (name === "../services/tool-generation") return { useGenerateToolMutation: () => ({ isPending: submitting === "tool" || submitting === "creative", variables: { tool: submitting === "creative" ? "creative" : "retouch", count } }) };
+                if (name === "../services/tool-generation") return { useGenerateToolMutation: () => ({ isPending: submitting === "tool" || submitting === "creative", variables: { tool: submitting === "creative" ? "creative" : "retouch", count, assetIds: ["11111111-1111-4111-8111-111111111111"] } }) };
                 if (name === "./specialized-workflow") return specializedWorkflow;
                 if (name === "./workspace-preferences") return { useWorkspacePreferences: () => ({ value: { count: 1, quality: "standard" } }) };
                 if (name === "./workspace-navigation") return { TOOL_LABELS: { creative: "创意生图", main: "商品主图" } };
@@ -89,13 +89,15 @@ describe("per-image generation progress", () => {
         expect(nodes.some((node) => node.props.generationId === "task-id" && node.props.imageIndex === 0)).toBe(true);
     });
 
-    it.each([1, 2, 3, 4])("renders %i independent indeterminate progress bars", (count) => {
+    it.each([1, 2, 3, 4])("renders %i independent indeterminate progress cards", (count) => {
         for (const [status, caption] of [["queued", "等待生成"], ["processing", "生成中"]]) {
             const nodes = render(status, count);
             const tiles = nodes.filter((node) => String(node.props.className).includes("rtile generation-placeholder"));
             const bars = nodes.filter((node) => node.type === "progress" &&
                 String(node.props.className).includes("generation-image-progress"));
             expect(tiles).toHaveLength(count);
+            expect(tiles.every((tile) => String(tile.props.className).includes("generation-pending-tile"))).toBe(true);
+            expect(nodes.some((node) => node.props.className === "generation-pending-label" && node.props.children === "AI生成中...")).toBe(true);
             expect(bars).toHaveLength(count);
             bars.forEach((bar, index) => {
                 expect(bar.props["aria-label"]).toBe(`图片 ${index + 1}生成进度`);
@@ -108,10 +110,19 @@ describe("per-image generation progress", () => {
     });
 
     it.each(["creative", "main", "tool"] as const)("shows submit status for every pending %s image", (kind) => {
-        const bars = render("completed", 3, kind).filter((node) => node.type === "progress" &&
+        const nodes = render("completed", 3, kind);
+        expect(nodes.find((node) => String(node.props.className).includes("generation-pending-grid"))).toBeDefined();
+        expect(nodes.find((node) => node.props.assetId === "11111111-1111-4111-8111-111111111111")).toBeDefined();
+        const bars = nodes.filter((node) => node.type === "progress" &&
             String(node.props.className).includes("generation-image-progress"));
         expect(bars).toHaveLength(3);
         bars.forEach((bar) => expect(bar.props["aria-valuetext"]).toBe("提交中"));
+    });
+
+    it("does not expose internal metadata or prompts beside completed results", () => {
+        const nodes = render("completed", 1, undefined, 1);
+        expect(nodes.some((node) => node.props.className === "result-prompt")).toBe(false);
+        expect(nodes.some((node) => node.props.children === "Product")).toBe(false);
     });
 
     it.each(["completed", "failed", "cancelled"])("removes pending image progress when task is %s", (status) => {
