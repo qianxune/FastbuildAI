@@ -1,3 +1,6 @@
+import { plainToInstance } from "class-transformer";
+import { validate } from "class-validator";
+import { QueryAnalyticsDto } from "../src/api/modules/generation/dto/query-analytics.dto";
 import type {
     AnalyticsGranularity,
     GenerationAnalytics,
@@ -75,6 +78,57 @@ describe("generation analytics contract", () => {
             completedTasks: 3,
             failedTasks: 1,
             cancelledTasks: 0,
+        });
+    });
+
+    describe("generation analytics query validation", () => {
+        const validateQuery = (input: Record<string, unknown>) =>
+            validate(plainToInstance(QueryAnalyticsDto, input));
+
+        it("accepts an omitted range and applies the default granularity", async () => {
+            const query = plainToInstance(QueryAnalyticsDto, {});
+
+            expect(query.startDate).toBeUndefined();
+            expect(query.endDate).toBeUndefined();
+            expect(query.granularity).toBe("day");
+            expect(query.toolKey).toBeUndefined();
+            await expect(validate(query)).resolves.toHaveLength(0);
+        });
+
+        it.each(["day", "month"])("accepts %s granularity", async (granularity) => {
+            await expect(validateQuery({ granularity })).resolves.toHaveLength(0);
+        });
+
+        it("accepts an exact date range and supported tool", async () => {
+            await expect(
+                validateQuery({
+                    startDate: "2026-11-01",
+                    endDate: "2026-11-30",
+                    toolKey: "main",
+                }),
+            ).resolves.toHaveLength(0);
+        });
+
+        it("does not reject a one-sided date range", async () => {
+            await expect(validateQuery({ startDate: "2026-11-01" })).resolves.toHaveLength(0);
+            await expect(validateQuery({ endDate: "2026-11-30" })).resolves.toHaveLength(0);
+        });
+
+        it.each(["2026/11/01", "2026-1-01", "01-11-2026"])(
+            "rejects invalid date syntax %s",
+            async (date) => {
+                await expect(validateQuery({ startDate: date })).resolves.not.toHaveLength(0);
+                await expect(validateQuery({ endDate: date })).resolves.not.toHaveLength(0);
+            },
+        );
+
+        it("rejects invalid granularity", async () => {
+            await expect(validateQuery({ granularity: "week" })).resolves.not.toHaveLength(0);
+        });
+
+        it("rejects an unsupported or non-string tool", async () => {
+            await expect(validateQuery({ toolKey: "unknown" })).resolves.not.toHaveLength(0);
+            await expect(validateQuery({ toolKey: 42 })).resolves.not.toHaveLength(0);
         });
     });
 });
