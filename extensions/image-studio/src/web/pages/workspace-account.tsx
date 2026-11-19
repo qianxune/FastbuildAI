@@ -1,10 +1,10 @@
-import { useUserInfoQuery } from "@buildingai/services/shared";
+import { getFirstConsoleMenuPath, hasConsoleAccess, useUserInfoQuery } from "@buildingai/services/shared";
 import { useRechargeCenterQuery } from "@buildingai/services/web";
 import { useAuthStore, useConfigStore } from "@buildingai/stores";
 import { Avatar, AvatarFallback, AvatarImage } from "@buildingai/ui/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@buildingai/ui/components/ui/dropdown-menu";
 import { useAlertDialog } from "@buildingai/ui/hooks/use-alert-dialog";
-import { CreditCard, FolderOpen, Images, LogOut, RefreshCw, User, UserPen, Wallet, Zap } from "lucide-react";
+import { CreditCard, FolderOpen, Images, LayoutDashboard, LogOut, RefreshCw, User, UserPen, Wallet, Zap } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useCreditBalanceQuery } from "../services/generation";
 import type { WorkspaceView } from "./workspace-navigation";
@@ -16,6 +16,10 @@ export function maskAccount(phone?: string, username?: string) {
 
 export function redirectToStudioLogin() {
     (window.top ?? window).location.assign("/login?redirect=%2Fstudio");
+}
+
+export function redirectToAdminWorkbench(menus: Parameters<typeof getFirstConsoleMenuPath>[0]) {
+    (window.top ?? window).location.assign(getFirstConsoleMenuPath(menus));
 }
 
 export function requestAccountAction(action: string) {
@@ -46,6 +50,8 @@ export default function WorkspaceAccount({ onNavigate, locked }: { onNavigate: (
         return () => window.removeEventListener("message", refresh);
     }, [refreshProfile]);
     const info = profile ?? userInfo;
+    const adminWorkbenchPath = info?.menus;
+    const canAccessAdminWorkbench = hasConsoleAccess(info);
     const phone = (info as { phone?: string } | undefined)?.phone;
     const nickname = info?.nickname || info?.username || "我的账户";
     const credits = balance.isSuccess ? `${balance.data.balance.toLocaleString()} 积分` : balance.isError ? "余额查询失败" : "余额加载中...";
@@ -79,6 +85,7 @@ export default function WorkspaceAccount({ onNavigate, locked }: { onNavigate: (
                 <DropdownMenuItem onSelect={() => requestAccountAction("wallet")}><Wallet size={17} />积分钱包</DropdownMenuItem>
                 {recharge?.rechargeStatus && <DropdownMenuItem onSelect={() => requestAccountAction("wallet")}><Zap size={17} />积分充值</DropdownMenuItem>}
                 {membership && <DropdownMenuItem onSelect={() => requestAccountAction("subscribe")}><User size={17} />会员订阅</DropdownMenuItem>}
+                {canAccessAdminWorkbench && <DropdownMenuItem onSelect={() => redirectToAdminWorkbench(adminWorkbenchPath)}><LayoutDashboard size={17} />管理员工作台</DropdownMenuItem>}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem disabled={locked || loggingOut} onSelect={() => void signOut()}><LogOut size={17} />{loggingOut ? "退出中..." : "退出登录"}</DropdownMenuItem>
             </DropdownMenuContent>

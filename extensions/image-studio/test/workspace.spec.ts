@@ -269,7 +269,10 @@ function account() {
     const logout = jest.fn().mockResolvedValue(undefined), confirm = jest.fn().mockResolvedValue(undefined);
     const onNavigate = jest.fn();
     const config = { membership: false, recharge: false };
-    const profile = { nickname: "Test User", username: "account", avatar: "/avatar.png", phone: "13812345678" };
+    const profile = {
+        nickname: "Test User", username: "account", avatar: "/avatar.png", phone: "13812345678",
+        isRoot: 0, permissions: 0, menus: [] as any[],
+    };
     const window: any = { parent: { postMessage }, top: { location: { assign } }, location: { origin: "https://studio.test", assign },
         addEventListener: (name: string, callback: (event: any) => void) => listeners.set(name, callback),
         removeEventListener: (name: string) => listeners.delete(name),
@@ -279,7 +282,11 @@ function account() {
             useAuthStore: (selector: any) => selector({ auth: { userInfo: { nickname: "Cached" } }, authActions: { logout } }),
             useConfigStore: (selector: any) => selector({ config: { websiteConfig: { features: { membership: config.membership } } } }),
         },
-        "@buildingai/services/shared": { useUserInfoQuery: () => ({ data: profile, refetch: refresh }) },
+        "@buildingai/services/shared": {
+            useUserInfoQuery: () => ({ data: profile, refetch: refresh }),
+            hasConsoleAccess: (info: any) => info?.isRoot === 1 || info?.permissions === 1,
+            getFirstConsoleMenuPath: (menus: any[]) => menus.length ? `/console/${menus[0].path}` : "/console/dashboard",
+        },
         "@buildingai/services/web": { useRechargeCenterQuery: () => ({ data: { rechargeStatus: config.recharge } }) },
         "@buildingai/ui/hooks/use-alert-dialog": { useAlertDialog: () => ({ confirm }) },
         "../services/generation": { useCreditBalanceQuery: () => ({ isSuccess: true, data: { balance: 1234 } }) },
@@ -524,6 +531,23 @@ describe("workspace account", () => {
         for (const node of rendered.filter((entry) => !text(entry).includes("退出登录"))) node.props.onSelect();
         expect(view.onNavigate.mock.calls).toEqual([["works"], ["materials"]]);
         expect(view.postMessage.mock.calls.map(([message]) => message.action)).toEqual(["profile", "credits", "wallet", "wallet", "subscribe"]);
+    });
+    it("shows the administrator workbench only for console users and leaves the iframe", () => {
+        const view = account();
+        const adminItem = () => view.render().find((node) =>
+            node.type === "DropdownMenuItem" && text(node).includes("管理员工作台"));
+        expect(adminItem()).toBeUndefined();
+        view.profile.permissions = 1;
+        view.profile.menus = [{ path: "system/user" }];
+        adminItem()!.props.onSelect();
+        expect(view.assign).toHaveBeenCalledWith("/console/system/user");
+        view.profile.permissions = 0;
+        view.profile.isRoot = 1;
+        view.profile.menus = [];
+        adminItem()!.props.onSelect();
+        expect(view.assign).toHaveBeenLastCalledWith("/console/dashboard");
+        view.profile.isRoot = 0;
+        expect(adminItem()).toBeUndefined();
     });
     it("requires logout confirmation, respects locks and redirects the top window only after logout", async () => {
         const view = account();
