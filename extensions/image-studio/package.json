@@ -63,6 +63,7 @@
         "react": "catalog:web",
         "react-dom": "catalog:web",
         "react-router-dom": "catalog:web",
+        "recharts": "catalog:web",
         "sharp": "^0.34.5",
         "vite-tsconfig-paths": "catalog:web"
     },

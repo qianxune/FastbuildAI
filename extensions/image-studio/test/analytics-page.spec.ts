@@ -306,6 +306,26 @@ describe("generation analytics query hook", () => {
             expect(textContent(empty.tree)).not.toContain("环比");
         });
 
+        it("shows pending status, skeletons and a disabled refresh while loading", () => {
+            const loading = loadAnalyticsPage({ isLoading: true, refetch: jest.fn() });
+            const status = findNode(
+                loading.tree,
+                (node) => node.props.role === "status" && node.props["aria-label"] === "加载统计",
+            );
+            const refresh = findNode(
+                loading.tree,
+                (node) => node.type === "button" && textContent(node).includes("刷新"),
+            );
+            const skeletons = childNodes(loading.tree).filter(
+                (node) => node.props.className === "studio-analytics__skeleton",
+            );
+
+            expect(status).toBeDefined();
+            expect(textContent(status)).toContain("正在加载使用统计");
+            expect(refresh?.props.disabled).toBe(true);
+            expect(skeletons).toHaveLength(6);
+        });
+
         it("sorts module rows immutably and exposes aria-sort", () => {
             const harness = loadAnalyticsPage({ data: analyticsData });
             const sortAnalyticsModules = harness.exports.sortAnalyticsModules as (
