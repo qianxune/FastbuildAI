@@ -1,6 +1,7 @@
 import { plainToInstance } from "class-transformer";
 import { validate } from "class-validator";
 import { QueryAnalyticsDto } from "../src/api/modules/generation/dto/query-analytics.dto";
+import { GenerationAnalyticsService } from "../src/api/modules/generation/services/generation-analytics.service";
 import {
     failureRate,
     fillAnalyticsPeriods,
@@ -13,6 +14,15 @@ import type {
     GenerationAnalytics,
 } from "../src/api/shared/analytics";
 import "../src/api/shared/analytics";
+
+jest.mock("@buildingai/errors", () => ({
+    HttpErrorFactory: {
+        badRequest: (message: string) => new Error(message),
+    },
+}));
+jest.mock("../src/api/db/entities/image-generation.entity", () => ({
+    ImageGeneration: class ImageGeneration {},
+}));
 
 describe("generation analytics contract", () => {
     it("defines the full console analytics contract", () => {
@@ -85,6 +95,294 @@ describe("generation analytics contract", () => {
             completedTasks: 3,
             failedTasks: 1,
             cancelledTasks: 0,
+        });
+    });
+
+    describe("generation analytics service", () => {
+        type FakeBuilderOptions = {
+            one?: Record<string, unknown> | null;
+            many?: Record<string, unknown>[];
+        };
+
+        class FakeQueryBuilder {
+            readonly sql: string[] = [];
+            readonly parameters: Record<string, unknown>[] = [];
+
+            constructor(private readonly options: FakeBuilderOptions = {}) {}
+
+            select(expression: string) {
+                this.sql.push(`SELECT ${expression}`);
+                return this;
+            }
+
+            addSelect(expression: string) {
+                this.sql.push(`ADD SELECT ${expression}`);
+                return this;
+            }
+
+            where(expression: string, parameters?: Record<string, unknown>) {
+                this.sql.push(`WHERE ${expression}`);
+                if (parameters) this.parameters.push(parameters);
+                return this;
+            }
+
+            andWhere(expression: string, parameters?: Record<string, unknown>) {
+                this.sql.push(`AND WHERE ${expression}`);
+                if (parameters) this.parameters.push(parameters);
+                return this;
+            }
+
+            groupBy(expression: string) {
+                this.sql.push(`GROUP BY ${expression}`);
+                return this;
+            }
+
+            addGroupBy(expression: string) {
+                this.sql.push(`ADD GROUP BY ${expression}`);
+                return this;
+            }
+
+            orderBy(expression: string) {
+                this.sql.push(`ORDER BY ${expression}`);
+                return this;
+            }
+
+            async getRawOne() {
+                return this.options.one ?? null;
+            }
+
+            async getRawMany() {
+                return this.options.many ?? [];
+            }
+        }
+
+        function serviceWith(...builders: FakeQueryBuilder[]) {
+            const createQueryBuilder = jest.fn(() => builders.shift());
+            const repository = { createQueryBuilder };
+            const service = new GenerationAnalyticsService(
+                repository as never,
+            );
+            return { service, createQueryBuilder };
+        }
+
+        function populatedBuilders() {
+            return [
+                new FakeQueryBuilder({
+                    one: {
+                        tasks: "12",
+                        activeUsers: "3",
+                        requestedImages: "18",
+                        generatedImages: "15",
+                        completedTasks: "8",
+                        failedTasks: "2",
+                        cancelledTasks: "2",
+                        consumedCredits: "120.5",
+                        refundedCredits: "30",
+                    },
+                }),
+                new FakeQueryBuilder({
+                    many: [
+                        {
+                            period: "2026-11-01",
+                            tasks: "12",
+                            generatedImages: "15",
+                            failedTasks: "2",
+                            consumedCredits: "120.5",
+                        },
+                    ],
+                }),
+                new FakeQueryBuilder({
+                    many: [
+                        {
+                            toolKey: "main",
+                            activeUsers: "2",
+                            tasks: "12",
+                            generatedImages: "15",
+                            completedTasks: "8",
+                            failedTasks: "2",
+                            cancelledTasks: "2",
+                            consumedCredits: "120.5",
+                            refundedCredits: "30",
+                        },
+                    ],
+                }),
+                new FakeQueryBuilder({
+                    one: {
+                        activeUsers: "1",
+                        tasks: "3",
+                        generatedImages: "2",
+                        completedTasks: "1",
+                        failedTasks: "0",
+                        cancelledTasks: "2",
+                        consumedCredits: "10",
+                        refundedCredits: "20",
+                    },
+                }),
+            ];
+        }
+
+        it.each([
+            [{ startDate: "2026-11-01" }, "one-sided start"],
+            [{ endDate: "2026-11-30" }, "one-sided end"],
+            [{ startDate: "2026-11-30", endDate: "2026-11-01" }, "reversed"],
+            [{ startDate: "2025-01-01", endDate: "2026-01-02" }, "367 days"],
+            [{ startDate: "2024-01-01", endDate: "2026-01-31", granularity: "month" }, "25 months"],
+        ])("rejects an invalid range: %s (%s)", async (query) => {
+            const { service, createQueryBuilder } = serviceWith();
+            await expect(service.getDashboard(query as QueryAnalyticsDto)).rejects.toThrow();
+            expect(createQueryBuilder).not.toHaveBeenCalled();
+        });
+
+        it("defaults to the last 30 inclusive Shanghai calendar days", async () => {
+            jest.useFakeTimers().setSystemTime(new Date("2026-11-20T15:00:00.000Z"));
+            const builders = populatedBuilders();
+            const { service } = serviceWith(...builders);
+
+            const result = await service.getDashboard({});
+
+            expect(result.range).toEqual({
+                startDate: "2026-10-22",
+                endDate: "2026-11-20",
+                granularity: "day",
+                timezone: "Asia/Shanghai",
+                toolKey: null,
+            });
+            const dateParameters = builders.flatMap((builder) => builder.parameters);
+            expect(dateParameters).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    startInclusive: "2026-10-21T16:00:00.000Z",
+                }),
+                expect.objectContaining({
+                    endExclusive: "2026-11-20T16:00:00.000Z",
+                }),
+            ]));
+            jest.useRealTimers();
+        });
+
+        it("normalizes aggregates and fills missing trend periods", async () => {
+            const { service } = serviceWith(...populatedBuilders());
+
+            const result = await service.getDashboard({
+                startDate: "2026-11-01",
+                endDate: "2026-11-03",
+            });
+
+            expect(result.summary).toEqual({
+                tasks: 12,
+                activeUsers: 3,
+                requestedImages: 18,
+                generatedImages: 15,
+                completedTasks: 8,
+                failedTasks: 2,
+                cancelledTasks: 2,
+                failureRate: 20,
+                consumedCredits: 120.5,
+                refundedCredits: 30,
+            });
+            expect(result.trend).toEqual([
+                {
+                    period: "2026-11-01",
+                    tasks: 12,
+                    generatedImages: 15,
+                    failedTasks: 2,
+                    consumedCredits: 120.5,
+                },
+                {
+                    period: "2026-11-02",
+                    tasks: 0,
+                    generatedImages: 0,
+                    failedTasks: 0,
+                    consumedCredits: 0,
+                },
+                {
+                    period: "2026-11-03",
+                    tasks: 0,
+                    generatedImages: 0,
+                    failedTasks: 0,
+                    consumedCredits: 0,
+                },
+            ]);
+        });
+
+        it("returns only the selected module and avoids an unknown query", async () => {
+            const builders = populatedBuilders();
+            const { service, createQueryBuilder } = serviceWith(...builders.slice(0, 3));
+
+            const result = await service.getDashboard({
+                startDate: "2026-11-01",
+                endDate: "2026-11-03",
+                toolKey: "main",
+            });
+
+            expect(createQueryBuilder).toHaveBeenCalledTimes(3);
+            expect(result.modules.map((module) => module.toolKey)).toEqual(["main"]);
+            expect(result.range.toolKey).toBe("main");
+            expect(builders[0].sql.join("\n")).not.toContain("prompt");
+        });
+
+        it("uses one separately aggregated unknown row without summing overlaps", async () => {
+            const { service } = serviceWith(...populatedBuilders());
+
+            const result = await service.getDashboard({
+                startDate: "2026-11-01",
+                endDate: "2026-11-03",
+            });
+
+            expect(result.modules.at(-1)).toMatchObject({
+                toolKey: "unknown",
+                activeUsers: 1,
+                tasks: 3,
+            });
+            expect(result.modules).toHaveLength(22);
+        });
+
+        it("omits an empty unknown aggregate", async () => {
+            const builders = populatedBuilders();
+            builders[3] = new FakeQueryBuilder({
+                one: { tasks: "0", activeUsers: "0", consumedCredits: "0" },
+            });
+            const { service } = serviceWith(...builders);
+
+            const result = await service.getDashboard({
+                startDate: "2026-11-01",
+                endDate: "2026-11-03",
+            });
+
+            expect(result.modules).toHaveLength(21);
+        });
+
+        it("uses aggregate-only PostgreSQL expressions and Shanghai grouping", async () => {
+            const builders = populatedBuilders();
+            const { service } = serviceWith(...builders);
+
+            await service.getDashboard({
+                startDate: "2026-11-01",
+                endDate: "2026-11-03",
+                granularity: "month",
+            });
+
+            const sql = builders.flatMap((builder) => builder.sql).join("\n");
+            expect(sql).toContain("jsonb_array_length");
+            expect(sql).toContain("billingStatus");
+            expect(sql).toContain("'charged'");
+            expect(sql).toContain("'refunded'");
+            expect(sql).toContain("COUNT(DISTINCT");
+            expect(sql).toContain("AT TIME ZONE 'Asia/Shanghai'");
+            expect(sql).toContain("DATE_TRUNC('month'");
+            expect(sql).toContain("YYYY-MM");
+            expect(sql).not.toContain("generation.prompt");
+            expect(sql).not.toContain("generation.error");
+        });
+
+        it("returns no PII fields in the dashboard result", async () => {
+            const { service } = serviceWith(...populatedBuilders());
+            const result = await service.getDashboard({
+                startDate: "2026-11-01",
+                endDate: "2026-11-03",
+            });
+            const serialized = JSON.stringify(result);
+
+            expect(serialized).not.toMatch(/"userId"|"prompt"|"error"|"images"/);
         });
     });
 
