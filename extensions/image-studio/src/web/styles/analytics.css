@@ -220,8 +220,16 @@
     font-size: 12px;
 }
 
+.studio-analytics__chart-scroll {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+}
+
 .studio-analytics__chart {
     width: 100%;
+    min-width: 560px;
     height: 300px;
     margin-top: 14px;
 }
@@ -355,6 +363,7 @@
     }
 
     .studio-analytics__chart {
+        min-width: 480px;
         height: 260px;
     }
 }

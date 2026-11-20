@@ -22,10 +22,13 @@ type SortDirection = "asc" | "desc";
 type ModuleSortKey = keyof GenerationAnalyticsModuleItem;
 
 const numberFormatter = new Intl.NumberFormat("zh-CN");
-const percentageFormatter = new Intl.NumberFormat("zh-CN", {
-    style: "percent",
+const percentagePointFormatter = new Intl.NumberFormat("zh-CN", {
     maximumFractionDigits: 1,
 });
+
+export function formatFailureRate(value: number) {
+    return `${percentagePointFormatter.format(value)}%`;
+}
 
 const MODULE_COLUMNS: { key: ModuleSortKey; label: string }[] = [
     { key: "category", label: "分类" },
@@ -143,64 +146,66 @@ function AnalyticsTrendChart({
                     <p>{description}</p>
                 </div>
             </div>
-            <ChartContainer config={config} className="studio-analytics__chart">
-                <AreaChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
-                    <defs>
-                        {series.map((item) => (
-                            <linearGradient
-                                id={`${id}-${item.key}`}
-                                key={item.key}
-                                x1="0"
-                                y1="0"
-                                x2="0"
-                                y2="1"
-                            >
-                                <stop offset="5%" stopColor={item.color} stopOpacity={0.3} />
-                                <stop offset="95%" stopColor={item.color} stopOpacity={0.02} />
-                            </linearGradient>
-                        ))}
-                    </defs>
-                    <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                    <XAxis
-                        dataKey="period"
-                        tickLine={false}
-                        axisLine={false}
-                        minTickGap={28}
-                        tickFormatter={(value: string) =>
-                            formatAnalyticsDate(value, granularity)
-                        }
-                    />
-                    <YAxis
-                        tickLine={false}
-                        axisLine={false}
-                        width={52}
-                        tickFormatter={(value: number) => numberFormatter.format(value)}
-                    />
-                    <ChartTooltip
-                        content={
-                            <ChartTooltipContent
-                                labelFormatter={(value) =>
-                                    formatAnalyticsDate(String(value), granularity)
-                                }
-                                indicator="dot"
-                            />
-                        }
-                    />
-                    <ChartLegend content={<ChartLegendContent />} />
-                    {series.map((item) => (
-                        <Area
-                            key={item.key}
-                            dataKey={item.key}
-                            type="monotone"
-                            fill={`url(#${id}-${item.key})`}
-                            stroke={item.color}
-                            strokeWidth={2}
-                            dot={false}
-                            activeDot={{ r: 4 }}
+            <div className="studio-analytics__chart-scroll">
+                <ChartContainer config={config} className="studio-analytics__chart">
+                    <AreaChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+                        <defs>
+                            {series.map((item) => (
+                                <linearGradient
+                                    id={`${id}-${item.key}`}
+                                    key={item.key}
+                                    x1="0"
+                                    y1="0"
+                                    x2="0"
+                                    y2="1"
+                                >
+                                    <stop offset="5%" stopColor={item.color} stopOpacity={0.3} />
+                                    <stop offset="95%" stopColor={item.color} stopOpacity={0.02} />
+                                </linearGradient>
+                            ))}
+                        </defs>
+                        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                        <XAxis
+                            dataKey="period"
+                            tickLine={false}
+                            axisLine={false}
+                            minTickGap={28}
+                            tickFormatter={(value: string) =>
+                                formatAnalyticsDate(value, granularity)
+                            }
                         />
-                    ))}
-                </AreaChart>
-            </ChartContainer>
+                        <YAxis
+                            tickLine={false}
+                            axisLine={false}
+                            width={52}
+                            tickFormatter={(value: number) => numberFormatter.format(value)}
+                        />
+                        <ChartTooltip
+                            content={
+                                <ChartTooltipContent
+                                    labelFormatter={(value) =>
+                                        formatAnalyticsDate(String(value), granularity)
+                                    }
+                                    indicator="dot"
+                                />
+                            }
+                        />
+                        <ChartLegend content={<ChartLegendContent />} />
+                        {series.map((item) => (
+                            <Area
+                                key={item.key}
+                                dataKey={item.key}
+                                type="monotone"
+                                fill={`url(#${id}-${item.key})`}
+                                stroke={item.color}
+                                strokeWidth={2}
+                                dot={false}
+                                activeDot={{ r: 4 }}
+                            />
+                        ))}
+                    </AreaChart>
+                </ChartContainer>
+            </div>
         </section>
     );
 }
@@ -249,7 +254,7 @@ export default function AnalyticsPage() {
 
     const formatModuleValue = (key: ModuleSortKey, row: GenerationAnalyticsModuleItem) => {
         const value = row[key];
-        if (key === "failureRate") return percentageFormatter.format(Number(value));
+        if (key === "failureRate") return formatFailureRate(Number(value));
         if (typeof value === "number") return numberFormatter.format(value);
         return String(value);
     };
@@ -401,7 +406,7 @@ export default function AnalyticsPage() {
                             metric="failedTasks"
                             title="失败任务"
                             value={numberFormatter.format(data.summary.failedTasks)}
-                            detail={`失败率 ${percentageFormatter.format(data.summary.failureRate)}`}
+                            detail={`失败率 ${formatFailureRate(data.summary.failureRate)}`}
                         />
                         <MetricCard
                             metric="activeUsers"

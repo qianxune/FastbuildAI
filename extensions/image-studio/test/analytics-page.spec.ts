@@ -170,7 +170,7 @@ const analyticsData = {
         completedTasks: 1100,
         failedTasks: 152,
         cancelledTasks: 5,
-        failureRate: 0.1232,
+        failureRate: 12.32,
         consumedCredits: 98765,
         refundedCredits: 321,
     },
@@ -194,7 +194,7 @@ const analyticsData = {
             completedTasks: 1050,
             failedTasks: 150,
             cancelledTasks: 0,
-            failureRate: 0.125,
+            failureRate: 12.5,
             consumedCredits: 90000,
             refundedCredits: 300,
         },
@@ -208,7 +208,7 @@ const analyticsData = {
             completedTasks: 30,
             failedTasks: 2,
             cancelledTasks: 2,
-            failureRate: 0.0588,
+            failureRate: 5.88,
             consumedCredits: 8765,
             refundedCredits: 21,
         },
@@ -264,8 +264,22 @@ describe("generation analytics query hook", () => {
             expect(cards).toHaveLength(6);
             expect(cards.map((card) => textContent(card)).join(" ")).toContain("1,234");
             expect(cards.map((card) => textContent(card)).join(" ")).toContain("12.3%");
+            expect(cards.map((card) => textContent(card)).join(" ")).not.toContain("1,230%");
             expect(cards.map((card) => textContent(card)).join(" ")).toContain("98,765");
             expect(childNodes(harness.tree).filter((node) => node.type === "AreaChart")).toHaveLength(2);
+        });
+
+        it("formats module percentage points and contains chart overflow locally", () => {
+            const harness = loadAnalyticsPage({ data: analyticsData });
+            const text = textContent(harness.tree);
+            const chartScrolls = childNodes(harness.tree).filter(
+                (node) => node.props.className === "studio-analytics__chart-scroll",
+            );
+
+            expect(text).toContain("12.5%");
+            expect(text).toContain("5.9%");
+            expect(text).not.toContain("1,250%");
+            expect(chartScrolls).toHaveLength(2);
         });
 
         it("updates date, granularity and module query filters from controls", () => {
