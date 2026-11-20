@@ -166,6 +166,53 @@ function text(value: any): string {
     if (Array.isArray(value)) return value.map(text).join("");
     return value && typeof value === "object" ? text(value.props?.children) : typeof value === "string" || typeof value === "number" ? String(value) : "";
 }
+describe("analytics console wiring", () => {
+    it("shows analytics in both navigation surfaces only for a super administrator", () => {
+        const auth: any = { token: "test-session", userInfo: undefined };
+        const file = path.relative(path.resolve(__dirname, "../src/web/pages"),
+            path.resolve(__dirname, "../../../packages/@buildingai/web/ui/src/layouts/extension/console/index"));
+        const view = harness(file, { "@buildingai/stores": { useAuthStore: (select: any) => select({ auth }) } });
+        const menus = [
+            { title: "studio", path: "/studio" },
+            { title: "pricing", path: "/pricing", superAdminOnly: true },
+            { title: "analytics", path: "/analytics", superAdminOnly: true },
+        ];
+        const navigation = () => nodes(view.render({ menus })).filter((node) => Array.isArray(node.props.menus));
+        for (const role of [undefined, 0, 1]) {
+            auth.userInfo = role === undefined ? undefined : { isRoot: role };
+            const surfaces = navigation();
+            expect(surfaces).toHaveLength(2);
+            for (const surface of surfaces) {
+                expect(surface.props.menus.map((menu: any) => menu.title))
+                    .toEqual(role === 1 ? ["studio", "pricing", "analytics"] : ["studio"]);
+            }
+        }
+    });
+
+    it("registers the analytics page only in the restricted console route tree", () => {
+        const view = harness("../routes", {
+            "@buildingai/web-core": { defineRouteOption: (option: any) => option },
+            "./../../package.json": { __esModule: true, default: { name: "image-studio" } },
+            "./pages": { __esModule: true, default: "ImageStudioPage" },
+            "./pages/landing": { __esModule: true, default: "LandingPage" },
+            "./pages/login-redirect": { __esModule: true, default: "LoginRedirect" },
+            "./pages/console/pricing": { __esModule: true, default: "PricingPage" },
+            "./pages/console/analytics": { __esModule: true, default: "AnalyticsPage" },
+        });
+        expect(view.exports.routeOption.consoleMenus).toContainEqual({
+            title: "使用统计",
+            path: "/analytics",
+            icon: "chart-no-axes-combined",
+            superAdminOnly: true,
+        });
+        expect(view.exports.routeOption.consoleRoutes).toContainEqual({
+            path: "analytics",
+            element: { type: "AnalyticsPage", props: {}, key: undefined },
+        });
+        expect(view.exports.routeOption.routes.some((route: any) => route.path === "analytics")).toBe(false);
+    });
+});
+
 function theme() {
     const classes = new Set(["dark"]);
     const root = { classList: {
