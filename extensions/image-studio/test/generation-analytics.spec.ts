@@ -211,42 +211,42 @@ describe("generation analytics contract", () => {
             ]);
         });
 
-        it("merges the catalog and groups unknown historical tools after known modules", () => {
-            const modules = mergeModuleCatalog([
+        it("uses pre-aggregated unknown active users without double-counting overlap", () => {
+            const modules = mergeModuleCatalog(
+                [
+                    {
+                        toolKey: "main",
+                        activeUsers: "2",
+                        tasks: "3",
+                        generatedImages: "4",
+                        completedTasks: "2",
+                        failedTasks: "1",
+                        cancelledTasks: "0",
+                        consumedCredits: "30",
+                        refundedCredits: "5",
+                    },
+                    {
+                        toolKey: "legacy-a",
+                        activeUsers: "1",
+                    },
+                    {
+                        toolKey: "legacy-b",
+                        activeUsers: "1",
+                    },
+                ],
                 {
-                    toolKey: "main",
-                    activeUsers: "2",
+                    // The same user appears in both per-key rows above, so this separately
+                    // aggregated value must be used instead of their sum.
+                    activeUsers: "1",
                     tasks: "3",
-                    generatedImages: "4",
-                    completedTasks: "2",
-                    failedTasks: "1",
-                    cancelledTasks: "0",
-                    consumedCredits: "30",
-                    refundedCredits: "5",
-                },
-                {
-                    toolKey: "legacy-a",
-                    activeUsers: "1",
-                    tasks: "2",
-                    generatedImages: "0",
-                    completedTasks: "0",
-                    failedTasks: "0",
-                    cancelledTasks: "2",
-                    consumedCredits: "0",
-                    refundedCredits: "20",
-                },
-                {
-                    toolKey: "legacy-b",
-                    activeUsers: "1",
-                    tasks: "1",
                     generatedImages: "1",
                     completedTasks: "1",
                     failedTasks: "0",
-                    cancelledTasks: "0",
+                    cancelledTasks: "2",
                     consumedCredits: "10",
-                    refundedCredits: "0",
+                    refundedCredits: "20",
                 },
-            ]);
+            );
 
             expect(modules[1]).toMatchObject({
                 toolKey: "main",
@@ -260,7 +260,7 @@ describe("generation analytics contract", () => {
                 toolKey: "unknown",
                 name: "未知功能",
                 category: "基础生图",
-                activeUsers: 2,
+                activeUsers: 1,
                 tasks: 3,
                 generatedImages: 1,
                 completedTasks: 1,

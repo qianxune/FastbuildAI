@@ -37,6 +37,8 @@ export type RawAnalyticsModuleRow = RawAnalyticsMetrics & {
     toolKey: unknown;
 };
 
+export type RawAnalyticsUnknownRow = RawAnalyticsMetrics;
+
 export function normalizeAnalyticsNumber(value: unknown): number {
     if (typeof value === "string" && value.trim() === "") return 0;
 
@@ -193,33 +195,32 @@ function emptyModule(
 }
 
 export function mergeModuleCatalog(
-    rows: readonly RawAnalyticsModuleRow[],
+    knownRows: readonly RawAnalyticsModuleRow[],
+    unknownRow?: RawAnalyticsUnknownRow | null,
 ): GenerationAnalyticsModuleItem[] {
     const modules = PRICING_CATALOG.map((entry) =>
         emptyModule(entry.key, entry.name, entry.category),
     );
     const modulesByTool = new Map(modules.map((module) => [module.toolKey, module]));
-    let unknownModule: GenerationAnalyticsModuleItem | undefined;
 
-    for (const row of rows) {
+    for (const row of knownRows) {
         const toolKey = typeof row.toolKey === "string" ? row.toolKey : "";
-        if (PRICING_KEYS.has(toolKey)) {
-            addModuleMetrics(modulesByTool.get(toolKey)!, row);
-            continue;
-        }
+        if (!PRICING_KEYS.has(toolKey)) continue;
 
-        if (!unknownModule) {
-            unknownModule = emptyModule(
-                "unknown",
-                "未知功能",
-                UNKNOWN_ANALYTICS_CATEGORY,
-            );
-        }
-        addModuleMetrics(unknownModule, row);
+        addModuleMetrics(modulesByTool.get(toolKey)!, row);
     }
 
-    const orderedModules = unknownModule ? [...modules, unknownModule] : modules;
-    return orderedModules.map((module) => ({
+    if (unknownRow) {
+        const unknownModule = emptyModule(
+            "unknown",
+            "未知功能",
+            UNKNOWN_ANALYTICS_CATEGORY,
+        );
+        addModuleMetrics(unknownModule, unknownRow);
+        modules.push(unknownModule);
+    }
+
+    return modules.map((module) => ({
         ...module,
         failureRate: failureRate(module.completedTasks, module.failedTasks),
     }));
