@@ -609,7 +609,7 @@ Commit routing/menu wiring.
 ### Task 9: Add the optional read indexes (completed 2026-11-20: skipped)
 
 **Files:**
-- Create only if production query-plan review shows a scan: `extensions/image-studio/src/api/db/migrations/<timestamp>-0.1.6-add-generation-analytics-indexes.ts`
+- Create only if representative production-like query-plan review shows a measurable index benefit: `extensions/image-studio/src/api/db/migrations/<timestamp>-0.1.6-add-generation-analytics-indexes.ts`
 - Modify if the plan still benefits: `extensions/image-studio/src/api/db/entities/image-generation.entity.ts`
 - Test: `extensions/image-studio/test/generation-analytics.spec.ts`
 
@@ -621,7 +621,9 @@ In a read-only environment, run `EXPLAIN (ANALYZE, BUFFERS)` for:
 - time series;
 - single-tool module filter.
 
-If the existing `[userId, createdAt]` index is not used for global analytics, add:
+If representative production-like evidence shows a material improvement in
+estimated cost and/or safely measured execution/IO for the relevant queries,
+consider:
 
 ```ts
 @Index(["createdAt"])
@@ -646,12 +648,14 @@ Do not execute database migrations during implementation without separate user a
 
 **Step 4: Commit only if needed**
 
-If indexes are not justified by the query plan, skip this task entirely and record "not needed for observed volume" rather than adding speculative schema changes.
+Index non-use or a sequential scan alone is not sufficient. If the candidate
+index has no measurable query-plan benefit, skip this task and record the
+observed limitation rather than adding speculative schema changes.
 
 **Assessment record (2026-11-20)**
 
-- Read-only local development access was available through the existing
-  `buildingai-postgres` container. Every query used
+- Read-only local development access was reported as available through the
+  existing `buildingai-postgres` container. Every query was reported as using
   `default_transaction_read_only=on`, `statement_timeout=5000`, and
   `lock_timeout=1000`; no `ANALYZE`, migration, schema change, write, or restart
   was performed.
@@ -661,7 +665,7 @@ If indexes are not justified by the query plan, skip this task entirely and reco
   `IDX_3581bd1bc55aeb29d616ec462d` on
   `("user_id", "created_at")`; there is no existing analytics/global
   `created_at` or `tool_key`-leading index.
-- Bounded, parameter-equivalent `EXPLAIN`-only plans were collected for the
+- A bounded, parameter-equivalent `EXPLAIN`-only transcript was self-reported for the
   global 30-day summary, day trend, and single-tool query. All three used
   sequential scans at this volume (planned output was 27 rows for the global
   range and 1 row for the tested tool filter). The PostgreSQL planner
@@ -675,15 +679,24 @@ If indexes are not justified by the query plan, skip this task entirely and reco
   benefit from `created_at`, but the relative benefit cannot be established
   from this small local development sample. Aggregation over broad ranges may
   still favor a sequential scan even when such indexes exist.
-- **Decision:** no migration and no entity index change. The local evidence is
-  safe and concrete, but it shows neither a bottleneck nor an index advantage
+- **Decision:** no migration and no entity index change. The self-reported
+  local transcript shows neither a bottleneck nor an index advantage
   and is not production-like enough to justify write/schema risk. Reassess on
   representative production volume using bounded read-only `EXPLAIN`
   (`EXPLAIN (ANALYZE, BUFFERS)` only if separately authorized and known safe),
-  then add an index only if the observed cost, selectivity, and latency
-  establish a measurable benefit.
-- **Task 9 files changed:** only this plan and the synchronized CTAI-CHG-0069
-  records; no source, migration, or test files changed.
+  and independently capture/review the transcript before any migration. Add an
+  index only if the candidate reduces estimated cost or, when safely
+  measurable, execution/IO materially for the representative workload after
+  accounting for selectivity and write/storage overhead.
+- **Evidence limitation:** the 32-row local `EXPLAIN` transcript is
+  self-reported task output, not independently verified evidence. It must be
+  re-run on representative production-like data with preserved query shapes,
+  and the fresh result must demonstrate measurable benefit before creating a
+  migration.
+- **Task 9 repository record:** the committed change contains only this plan;
+  the CTAI-REQ-0058 / CTAI-CHG-0069 Obsidian records are external and were
+  synchronized separately, not committed in this repository. No source,
+  migration, or test files changed.
 
 ---
 
