@@ -787,12 +787,16 @@ Do not claim user acceptance from automated checks.
   not constitute user acceptance.
 - Follow-up final review found that a direct `/console/analytics` visit by a
   logged non-root user mounted the dashboard query before the backend returned
-  403. The outer page now gates on both token and `userInfo.isRoot` and mounts
-  an inner dashboard component only for root; unauthorized states show an
-  explicit no-permission message and return-to-studio link. Isolated tests
-  cover normal, undefined-user and no-token states without a query, root with a
-  query, plus the existing restricted route/menu contract. The clean worktree
-  rerun passed 203 focused Jest tests, focused ESLint and the Web build.
+  403. The outer page gates on token and `userInfo.isRoot` and mounts an inner
+  dashboard component only for root. At router level, the console remains
+  inside the shared `AuthGuard`, so tokenless direct navigation redirects to
+  shared login before this page renders. Logged non-root or not-yet-hydrated
+  users see explicit no permission and a return-to-studio link. The page-level
+  no-token check is retained only as isolated-component defense. Tests assert
+  those component boundaries—ordinary/missing-user states without a query and
+  root with a query—without claiming tokenless router rendering. The existing
+  restricted route/menu contract remains covered. The clean worktree rerun
+  passed 203 focused Jest tests, focused ESLint and the Web build.
 
 ---
 

@@ -250,16 +250,25 @@ describe("generation analytics query hook", () => {
 
     describe("analytics dashboard page", () => {
         it.each([
-            ["ordinary user", { token: "test-session", userInfo: { id: "ordinary", isRoot: 0 } }],
-            ["missing user info", { token: "test-session", userInfo: undefined }],
-            ["missing token", { token: undefined, userInfo: { id: "root", isRoot: 1 } }],
-        ])("does not mount the analytics query for %s", (_label, auth) => {
+            ["logged non-root user", { token: "test-session", userInfo: { id: "ordinary", isRoot: 0 } }],
+            ["logged user before profile hydration", { token: "test-session", userInfo: undefined }],
+        ])("shows no permission without mounting the analytics query for %s", (_label, auth) => {
             const harness = loadAnalyticsPage({ data: analyticsData }, auth);
 
             expect(harness.filters).toHaveLength(0);
             expect(textContent(harness.tree)).toContain("无权限访问");
             const link = findNode(harness.tree, (node) => node.type === "Link");
             expect(link?.props.to).toBe("/console/studio");
+        });
+
+        it("keeps a component-level no-token guard without implying router behavior", () => {
+            const harness = loadAnalyticsPage(
+                { data: analyticsData },
+                { token: undefined, userInfo: { id: "stale-root", isRoot: 1 } },
+            );
+
+            expect(harness.filters).toHaveLength(0);
+            expect(textContent(harness.tree)).toContain("无权限访问");
         });
 
         it("mounts the analytics query for a super administrator", () => {
