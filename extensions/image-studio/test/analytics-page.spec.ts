@@ -93,7 +93,7 @@ function loadAnalyticsPage(queryState: QueryResult) {
                     },
                 };
             }
-            if (name.includes("shared/pricing")) return { PRICING_CATALOG: catalog };
+            if (name.includes("shared/analytics")) return { ANALYTICS_MODULE_CATALOG: catalog };
             if (name === "@buildingai/ui/components/ui/chart") {
                 return Object.fromEntries(
                     [

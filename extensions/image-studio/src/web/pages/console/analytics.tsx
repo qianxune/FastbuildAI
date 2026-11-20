@@ -14,7 +14,7 @@ import type {
     AnalyticsGranularity,
     GenerationAnalyticsModuleItem,
 } from "../../../api/shared/analytics";
-import { PRICING_CATALOG } from "../../../api/shared/pricing";
+import { ANALYTICS_MODULE_CATALOG } from "../../../api/shared/analytics";
 import { useGenerationAnalyticsQuery } from "../../services/analytics";
 import "../../styles/analytics.css";
 
@@ -342,7 +342,7 @@ export default function AnalyticsPage() {
                         onChange={(event) => setToolKey(event.target.value)}
                     >
                         <option value="">全部功能</option>
-                        {PRICING_CATALOG.map((entry) => (
+                        {ANALYTICS_MODULE_CATALOG.map((entry) => (
                             <option value={entry.key} key={entry.key}>
                                 {entry.name}
                             </option>

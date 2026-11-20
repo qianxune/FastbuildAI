@@ -1,17 +1,16 @@
 import type {
     AnalyticsGranularity,
+    AnalyticsModuleCategory,
     GenerationAnalyticsModuleItem,
     GenerationAnalyticsSummary,
     GenerationAnalyticsTrendItem,
 } from "../../../shared/analytics";
 import {
-    PRICING_CATALOG,
-    PRICING_KEYS,
-    type PricingCategory,
-} from "../../../shared/pricing";
+    ANALYTICS_MODULE_CATALOG,
+    ANALYTICS_MODULE_KEYS,
+} from "../../../shared/analytics";
 
-// PricingCategory has no unknown value; legacy tools use a stable neutral fallback.
-const UNKNOWN_ANALYTICS_CATEGORY: PricingCategory = "基础生图";
+const UNKNOWN_ANALYTICS_CATEGORY: AnalyticsModuleCategory = "基础生图";
 
 export type RawAnalyticsMetrics = {
     tasks?: unknown;
@@ -176,7 +175,7 @@ function addModuleMetrics(
 function emptyModule(
     toolKey: string,
     name: string,
-    category: PricingCategory,
+    category: AnalyticsModuleCategory,
 ): GenerationAnalyticsModuleItem {
     return {
         toolKey,
@@ -198,14 +197,14 @@ export function mergeModuleCatalog(
     knownRows: readonly RawAnalyticsModuleRow[],
     unknownRow?: RawAnalyticsUnknownRow | null,
 ): GenerationAnalyticsModuleItem[] {
-    const modules = PRICING_CATALOG.map((entry) =>
+    const modules = ANALYTICS_MODULE_CATALOG.map((entry) =>
         emptyModule(entry.key, entry.name, entry.category),
     );
     const modulesByTool = new Map(modules.map((module) => [module.toolKey, module]));
 
     for (const row of knownRows) {
         const toolKey = typeof row.toolKey === "string" ? row.toolKey : "";
-        if (!PRICING_KEYS.has(toolKey)) continue;
+        if (!ANALYTICS_MODULE_KEYS.has(toolKey)) continue;
 
         addModuleMetrics(modulesByTool.get(toolKey)!, row);
     }

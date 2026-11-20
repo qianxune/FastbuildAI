@@ -1,7 +1,7 @@
 import { IsDateString, IsIn, IsOptional, IsString, Matches } from "class-validator";
 
 import type { AnalyticsGranularity } from "../../../shared/analytics";
-import { PRICING_KEYS } from "../../../shared/pricing";
+import { ANALYTICS_MODULE_KEYS } from "../../../shared/analytics";
 
 export class QueryAnalyticsDto {
     @IsOptional()
@@ -20,6 +20,6 @@ export class QueryAnalyticsDto {
 
     @IsOptional()
     @IsString()
-    @IsIn([...PRICING_KEYS])
+    @IsIn([...ANALYTICS_MODULE_KEYS])
     toolKey?: string;
 }

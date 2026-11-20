@@ -8,7 +8,7 @@ import type {
     AnalyticsGranularity,
     GenerationAnalytics,
 } from "../../../shared/analytics";
-import { PRICING_KEYS } from "../../../shared/pricing";
+import { ANALYTICS_MODULE_KEYS } from "../../../shared/analytics";
 import type { QueryAnalyticsDto } from "../dto/query-analytics.dto";
 import {
     fillAnalyticsPeriods,
@@ -24,7 +24,7 @@ const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAY_RANGE = 366;
 const MAX_MONTH_RANGE = 24;
-const KNOWN_TOOL_KEYS = [...PRICING_KEYS];
+const KNOWN_TOOL_KEYS = [...ANALYTICS_MODULE_KEYS];
 
 type AnalyticsRange = {
     startDate: string;
