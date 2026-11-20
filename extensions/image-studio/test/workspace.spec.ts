@@ -176,6 +176,10 @@ describe("analytics console wiring", () => {
             { title: "studio", path: "/studio" },
             { title: "pricing", path: "/pricing", superAdminOnly: true },
             { title: "analytics", path: "/analytics", superAdminOnly: true },
+            { title: "group", path: "/group", children: [
+                { title: "public", path: "/public" },
+                { title: "private", path: "/private", superAdminOnly: true },
+            ] },
         ];
         const navigation = () => nodes(view.render({ menus })).filter((node) => Array.isArray(node.props.menus));
         for (const role of [undefined, 0, 1]) {
@@ -184,7 +188,9 @@ describe("analytics console wiring", () => {
             expect(surfaces).toHaveLength(2);
             for (const surface of surfaces) {
                 expect(surface.props.menus.map((menu: any) => menu.title))
-                    .toEqual(role === 1 ? ["studio", "pricing", "analytics"] : ["studio"]);
+                    .toEqual(role === 1 ? ["studio", "pricing", "analytics", "group"] : ["studio", "group"]);
+                expect(surface.props.menus.at(-1).children.map((menu: any) => menu.title))
+                    .toEqual(role === 1 ? ["public", "private"] : ["public"]);
             }
         }
     });
