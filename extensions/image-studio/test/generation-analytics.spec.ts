@@ -122,6 +122,20 @@ describe("generation analytics contract", () => {
             },
         );
 
+        it.each(["2026-02-30", "2026-13-01", "2026-00-10", "2025-02-29"])(
+            "rejects invalid calendar date %s",
+            async (date) => {
+                await expect(validateQuery({ startDate: date })).resolves.not.toHaveLength(0);
+                await expect(validateQuery({ endDate: date })).resolves.not.toHaveLength(0);
+            },
+        );
+
+        it("accepts a valid leap day", async () => {
+            await expect(
+                validateQuery({ startDate: "2024-02-29", endDate: "2024-02-29" }),
+            ).resolves.toHaveLength(0);
+        });
+
         it("rejects invalid granularity", async () => {
             await expect(validateQuery({ granularity: "week" })).resolves.not.toHaveLength(0);
         });
