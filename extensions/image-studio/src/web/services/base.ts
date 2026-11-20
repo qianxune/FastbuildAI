@@ -1,5 +1,5 @@
 import { createPluginHttpClients } from "@buildingai/services";
 
-const { apiHttpClient } = createPluginHttpClients();
+const { apiHttpClient, consoleHttpClient } = createPluginHttpClients();
 
-export { apiHttpClient };
+export { apiHttpClient, consoleHttpClient };

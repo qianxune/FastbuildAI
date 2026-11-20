@@ -1,3 +1,8 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { runInNewContext } from "node:vm";
+import * as ts from "typescript";
+
 jest.mock("../src/web/services/base", () => ({
     consoleHttpClient: { get: jest.fn() },
 }));
@@ -88,5 +93,39 @@ describe("generation analytics query hook", () => {
         const options = (useQuery as jest.Mock).mock.calls[0][0];
         await options.queryFn();
         expect(consoleHttpClient.get).toHaveBeenCalledWith("/analytics", { params: {} });
+    });
+
+    it("exports the console client from the real base service module", () => {
+        const source = readFileSync(path.join(__dirname, "../src/web/services/base.ts"), "utf8");
+        const code = ts.transpileModule(source, {
+            compilerOptions: {
+                module: ts.ModuleKind.CommonJS,
+                target: ts.ScriptTarget.ES2022,
+            },
+        }).outputText;
+        const api = { kind: "api" };
+        const console = { kind: "console" };
+        const module = { exports: {} as Record<string, unknown> };
+
+        runInNewContext(code, {
+            module,
+            exports: module.exports,
+            require: (name: string) => {
+                if (name === "@buildingai/services") {
+                    return {
+                        createPluginHttpClients: () => ({
+                            apiHttpClient: api,
+                            consoleHttpClient: console,
+                        }),
+                    };
+                }
+                throw new Error(`Unexpected base service dependency: ${name}`);
+            },
+        });
+
+        expect(module.exports).toEqual({
+            apiHttpClient: api,
+            consoleHttpClient: console,
+        });
     });
 });
