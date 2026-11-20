@@ -756,6 +756,36 @@ git commit -m "feat(image-studio): [CTAI-REQ-0058][CTAI-CHG-0069] add usage anal
 
 Do not claim user acceptance from automated checks.
 
+**Task 10 verification record (2026-11-20)**
+
+- Verified detached clean checkout `09fd4741`, created independently from the
+  dirty primary worktree with a frozen-lockfile install. The available Node
+  24.12 runtime is outside the repository's declared Node 22 range, so pnpm
+  commands used `--config.engine-strict=false`; no dependency or lockfile
+  changes were made.
+- Clean-checkout Jest:
+  `pnpm --config.engine-strict=false exec jest --runInBand
+  test/generation-analytics.spec.ts test/analytics-page.spec.ts
+  test/workspace.spec.ts --silent` — **199 tests passed** across 3 suites.
+- Clean-checkout focused ESLint over analytics controller/DTO/service/util,
+  shared contract, page/client/base/routes, tests and shared console
+  menu files — passed.
+- Clean-checkout API type check:
+  `pnpm --config.engine-strict=false exec tsc -p tsconfig.api.json
+  --pretty false --noEmit` — passed.
+- Clean-checkout `pnpm --config.engine-strict=false run build:web` and
+  `build:api` with `DB_TYPE=postgres` — passed; web emitted only its existing
+  large-chunk/plugin-timing warnings.
+- The clean checkout first exposed an uncommitted `src/api/shared/pricing.ts`
+  dependency in the analytics chain. Follow-up `09fd4741` made the analytics
+  catalog self-contained. Subsequent clean tests, lint, types and both builds
+  passed; no pricing/config/source from the dirty worktree was included.
+- Real anonymous, ordinary-account and super-admin requests, and real SQL/data
+  reconciliation, were not run because no authenticated account verification
+  was available or separately authorized. No paid request, database mutation,
+  migration, deployment, restart or push was performed. Automated checks do
+  not constitute user acceptance.
+
 ---
 
 ## Recommended phases
@@ -776,21 +806,22 @@ This order allows API totals to be verified independently before chart/UI work b
 - **Heavy history scan**: cap ranges and add indexes only after `EXPLAIN`.
 - **Permission leak**: use `@SuperAdminOnly()` and `superAdminOnly: true`; test anonymous, ordinary, and root accounts separately.
 - **PII exposure**: response contains aggregates only, never user IDs, prompts, errors, URLs, or images.
-- **Promptly changing tool catalog**: build module labels from `PRICING_CATALOG`; preserve unknown legacy keys as `未知功能`.
+- **Promptly changing tool catalog**: keep the analytics catalog aligned with the
+  21 committed generation tools and preserve unknown legacy keys as `未知功能`.
 - **Misleading failure rate**: cancellation is excluded from technical failure denominator.
 
 ## Acceptance checklist
 
-- [ ] Super administrator sees `使用统计`; ordinary users do not.
-- [ ] Anonymous and ordinary accounts cannot call the endpoint.
-- [ ] Presets, custom range, day/month, and module filter all work.
-- [ ] Summary, trend, and module totals agree for the same filter.
-- [ ] Missing periods show zeros.
-- [ ] Refunded tasks are not double counted as consumed credits.
-- [ ] Failed/cancelled tasks are distinguished.
-- [ ] Active users are deduplicated.
-- [ ] No prompt, failure detail, user ID, or image URL leaves the API.
-- [ ] Desktop and narrow layouts have no page-level horizontal overflow.
-- [ ] API/Web targeted tests, lint, types, and builds pass.
+- [x] Super administrator menu filtering is covered for root and ordinary users; real accounts remain pending.
+- [ ] Anonymous and ordinary accounts cannot call the endpoint; real requests remain pending.
+- [x] Presets, custom range, day/month, and module filter contracts are covered by isolated tests.
+- [x] Summary, trend, and module totals are covered by isolated aggregation tests.
+- [x] Missing periods show zeros in isolated tests.
+- [x] Refunded tasks are not double counted as consumed credits in isolated tests.
+- [x] Failed/cancelled tasks are distinguished in isolated tests.
+- [x] Active users are deduplicated in isolated tests.
+- [x] Response contract excludes prompt, failure detail, user ID, and image data.
+- [x] Desktop and narrow layout contracts are covered by isolated source tests; visual acceptance remains pending.
+- [x] Clean-checkout focused API/Web tests, lint, API types, and both builds pass.
 - [x] Performance is checked against actual row count/query plan before index migration; 32-row local evidence did not justify a migration.
-- [ ] Deployment, real-account verification, Git commit, and user acceptance are recorded separately.
+- [x] Deployment, real-account verification, Git commits, and user acceptance are recorded separately; no deployment or user acceptance is claimed.
