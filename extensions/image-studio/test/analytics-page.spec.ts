@@ -33,7 +33,13 @@ type QueryResult = {
 const pageSource = () =>
     readFileSync(path.join(__dirname, "../src/web/pages/console/analytics.tsx"), "utf8");
 
-function loadAnalyticsPage(queryState: QueryResult) {
+function loadAnalyticsPage(
+    queryState: QueryResult,
+    auth: { token?: string; userInfo?: { id: string; isRoot?: number } } = {
+        token: "test-session",
+        userInfo: { id: "root", isRoot: 1 },
+    },
+) {
     const state: unknown[] = [];
     let cursor = 0;
     let page: (() => ElementNode) | null = null;
@@ -85,6 +91,13 @@ function loadAnalyticsPage(queryState: QueryResult) {
             if (name === "react") return react;
             if (name === "react/jsx-runtime") return { Fragment: "Fragment", jsx, jsxs: jsx };
             if (name.endsWith(".css")) return {};
+            if (name === "@buildingai/stores") {
+                return {
+                    useAuthStore: (select: (state: unknown) => unknown) =>
+                        select({ auth }),
+                };
+            }
+            if (name === "react-router-dom") return { Link: "Link" };
             if (name === "../services/analytics" || name.endsWith("/services/analytics")) {
                 return {
                     useGenerationAnalyticsQuery: (filter: unknown) => {
@@ -236,6 +249,27 @@ describe("generation analytics query hook", () => {
     });
 
     describe("analytics dashboard page", () => {
+        it.each([
+            ["ordinary user", { token: "test-session", userInfo: { id: "ordinary", isRoot: 0 } }],
+            ["missing user info", { token: "test-session", userInfo: undefined }],
+            ["missing token", { token: undefined, userInfo: { id: "root", isRoot: 1 } }],
+        ])("does not mount the analytics query for %s", (_label, auth) => {
+            const harness = loadAnalyticsPage({ data: analyticsData }, auth);
+
+            expect(harness.filters).toHaveLength(0);
+            expect(textContent(harness.tree)).toContain("无权限访问");
+            const link = findNode(harness.tree, (node) => node.type === "Link");
+            expect(link?.props.to).toBe("/console/studio");
+        });
+
+        it("mounts the analytics query for a super administrator", () => {
+            const harness = loadAnalyticsPage({ data: analyticsData });
+
+            expect(harness.filters).toHaveLength(1);
+            expect(textContent(harness.tree)).toContain("使用统计");
+            expect(textContent(harness.tree)).not.toContain("无权限访问");
+        });
+
         it("builds inclusive Shanghai calendar ranges and chart labels", () => {
             const { exports } = loadAnalyticsPage({});
             const recentDateRange = exports.recentDateRange as (

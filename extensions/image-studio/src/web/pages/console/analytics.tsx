@@ -6,8 +6,10 @@ import {
     ChartTooltipContent,
     type ChartConfig,
 } from "@buildingai/ui/components/ui/chart";
+import { useAuthStore } from "@buildingai/stores";
 import { RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import type {
@@ -211,6 +213,26 @@ function AnalyticsTrendChart({
 }
 
 export default function AnalyticsPage() {
+    const { token, userInfo } = useAuthStore((state) => state.auth);
+    if (!token || userInfo?.isRoot !== 1) {
+        return (
+            <main className="studio-analytics">
+                <section className="studio-analytics__alert">
+                    <div>
+                        <h2>无权限访问</h2>
+                        <p role="alert">仅超级管理员可查看生图使用统计。</p>
+                    </div>
+                    <Link className="studio-analytics__refresh" to="/console/studio">
+                        返回工作台
+                    </Link>
+                </section>
+            </main>
+        );
+    }
+    return <AnalyticsDashboard key={userInfo.id} />;
+}
+
+function AnalyticsDashboard() {
     const initialRange = recentDateRange(30);
     const [startDate, setStartDate] = useState(initialRange.startDate);
     const [endDate, setEndDate] = useState(initialRange.endDate);

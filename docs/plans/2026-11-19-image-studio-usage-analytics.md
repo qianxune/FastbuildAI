@@ -785,6 +785,14 @@ Do not claim user acceptance from automated checks.
   was available or separately authorized. No paid request, database mutation,
   migration, deployment, restart or push was performed. Automated checks do
   not constitute user acceptance.
+- Follow-up final review found that a direct `/console/analytics` visit by a
+  logged non-root user mounted the dashboard query before the backend returned
+  403. The outer page now gates on both token and `userInfo.isRoot` and mounts
+  an inner dashboard component only for root; unauthorized states show an
+  explicit no-permission message and return-to-studio link. Isolated tests
+  cover normal, undefined-user and no-token states without a query, root with a
+  query, plus the existing restricted route/menu contract. The clean worktree
+  rerun passed 203 focused Jest tests, focused ESLint and the Web build.
 
 ---
 
