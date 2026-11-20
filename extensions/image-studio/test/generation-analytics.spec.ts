@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { plainToInstance } from "class-transformer";
 import { validate } from "class-validator";
+import { AnalyticsController } from "../src/api/modules/generation/controllers/console/analytics.controller";
 import { QueryAnalyticsDto } from "../src/api/modules/generation/dto/query-analytics.dto";
 import { GenerationAnalyticsService } from "../src/api/modules/generation/services/generation-analytics.service";
 import {
@@ -20,11 +24,65 @@ jest.mock("@buildingai/errors", () => ({
         badRequest: (message: string) => new Error(message),
     },
 }));
+jest.mock("@buildingai/core/decorators", () => ({
+    ExtensionConsoleController: () => (target: unknown) => target,
+}));
+jest.mock("@buildingai/decorators/super-admin-only.decorator", () => ({
+    SuperAdminOnly: () => (target: unknown) => target,
+}));
 jest.mock("../src/api/db/entities/image-generation.entity", () => ({
     ImageGeneration: class ImageGeneration {},
 }));
 
 describe("generation analytics contract", () => {
+    describe("generation analytics console controller", () => {
+        it("passes the validated query to the analytics service", async () => {
+            const query = new QueryAnalyticsDto();
+            query.startDate = "2026-11-01";
+            query.endDate = "2026-11-30";
+            query.toolKey = "main";
+            const dashboard = { range: query };
+            const getDashboard = jest.fn().mockResolvedValue(dashboard);
+            const controller = new AnalyticsController({ getDashboard } as never);
+
+            await expect(controller.getDashboard(query)).resolves.toBe(dashboard);
+            expect(getDashboard).toHaveBeenCalledWith(query);
+        });
+
+        it("exposes a read-only super-admin route and is registered by the module", () => {
+            const controllerSource = readFileSync(
+                join(
+                    __dirname,
+                    "../src/api/modules/generation/controllers/console/analytics.controller.ts",
+                ),
+                "utf8",
+            );
+            const moduleSource = readFileSync(
+                join(__dirname, "../src/api/modules/generation/generation.module.ts"),
+                "utf8",
+            );
+
+            expect(controllerSource).toContain("@SuperAdminOnly()");
+            expect(controllerSource).toContain(
+                '@ExtensionConsoleController("analytics", "生图使用统计")',
+            );
+            expect(controllerSource).toMatch(
+                /transform:\s*true,\s*whitelist:\s*true,\s*forbidNonWhitelisted:\s*true/,
+            );
+            expect(controllerSource).toMatch(/@Get\(\)/);
+            expect(controllerSource).toMatch(
+                /@Query\(analyticsValidation\)\s+query:\s*QueryAnalyticsDto/,
+            );
+            expect(controllerSource).not.toMatch(/@(Post|Put|Patch|Delete)\b/);
+            expect(moduleSource).toMatch(
+                /controllers:\s*\[[\s\S]*AnalyticsController[\s\S]*\]/,
+            );
+            expect(moduleSource).toMatch(
+                /providers:\s*\[[\s\S]*GenerationAnalyticsService[\s\S]*\]/,
+            );
+        });
+    });
+
     it("defines the full console analytics contract", () => {
         const granularity: AnalyticsGranularity = "day";
         const result: GenerationAnalytics = {
