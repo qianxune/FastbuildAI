@@ -3,6 +3,7 @@ import { defineRouteOption } from "@buildingai/web-core";
 import packageJson from "./../../package.json";
 import ImageStudioPage from "./pages";
 import LandingPage from "./pages/landing";
+import LoginRedirect from "./pages/login-redirect";
 import AnalyticsPage from "./pages/console/analytics";
 
 export const routeOption = defineRouteOption({
@@ -11,6 +12,7 @@ export const routeOption = defineRouteOption({
     routes: [
         { index: true, element: <LandingPage /> },
         { path: "studio", element: <ImageStudioPage /> },
+        { path: "login", element: <LoginRedirect /> },
     ],
     consoleMenus: [
         { title: "出图AI", path: "/studio", icon: "image" },

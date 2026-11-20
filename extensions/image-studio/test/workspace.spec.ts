@@ -216,7 +216,62 @@ describe("analytics console wiring", () => {
             element: { type: "AnalyticsPage", props: {}, key: undefined },
         });
         expect(view.exports.routeOption.routes.some((route: any) => route.path === "analytics")).toBe(false);
+        expect(view.exports.routeOption.routes).toContainEqual({
+            path: "login",
+            element: { type: "LoginRedirect", props: {}, key: undefined },
+        });
     });
+});
+
+
+describe("extension console shared login", () => {
+    function login(search: string) {
+        const replace = jest.fn();
+        const view = harness("login-redirect", {
+            "react-router-dom": { useLocation: () => ({ search }) },
+            "../../../package.json": { default: { name: "image-studio" } },
+        }, {
+            URL, URLSearchParams,
+            window: { location: { origin: "http://localhost:4090" }, top: { location: { replace } } },
+        });
+        return { ...view, replace };
+    }
+
+    it.each([
+        "/console/analytics?granularity=month#risk",
+        "/console/pricing?tab=retouch#main",
+    ])("leaves the extension basename and retains the complete console return address (%s)", (target) => {
+        const view = login(`?redirect=${encodeURIComponent(target)}`);
+        expect(view.render().props.role).toBe("status");
+        view.commit();
+        expect(view.replace).toHaveBeenCalledWith(
+            `/login?redirect=${encodeURIComponent(`/extension/image-studio${target}`)}`,
+        );
+    });
+
+    it("uses the console home when no return address was supplied", () => {
+        const view = login("");
+        view.render(); view.commit();
+        expect(view.replace).toHaveBeenCalledWith("/login?redirect=%2Fextension%2Fimage-studio%2Fconsole");
+    });
+
+    it.each([
+        "https://example.invalid",
+        "//example.invalid",
+        "/console/../../studio",
+        "/console/%2e%2e/studio",
+        "/console-other",
+        "/console\\analytics",
+        "/console/analytics\u0000",
+    ])(
+        "shows an error instead of following an invalid return address (%s)",
+        (target) => {
+            const view = login(`?redirect=${encodeURIComponent(target)}`);
+            expect(view.render().props.role).toBe("alert");
+            view.commit();
+            expect(view.replace).not.toHaveBeenCalled();
+        },
+    );
 });
 
 function theme() {

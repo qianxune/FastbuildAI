@@ -797,6 +797,17 @@ Do not claim user acceptance from automated checks.
   root with a query—without claiming tokenless router rendering. The existing
   restricted route/menu contract remains covered. The clean worktree rerun
   passed 203 focused Jest tests, focused ESLint and the Web build.
+- Final atomicity review found that the committed analytics route remained
+  under the SDK `AuthGuard`, whose login destination is extension-local
+  `/login`; without a public extension bridge, tokenless navigation would
+  reach a 404. The public route now mounts a login redirect page which sends
+  the top window to the host `/login` while preserving the complete
+  `/extension/image-studio/console/...` return path, query and hash. The bridge
+  accepts only same-extension console destinations and rejects external URLs,
+  protocol-relative URLs, path traversal (including encoded `..`), backslashes
+  and control characters. Tests cover analytics/pricing return addresses,
+  default console return, invalid destinations, and public login versus
+  restricted analytics route placement.
 
 ---
 
