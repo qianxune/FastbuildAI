@@ -1,0 +1,95 @@
+name: Build FastbuildAI
+
+on:
+  push:
+    branches:
+      - feat/yingxiao
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download source
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.20.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare build configuration
+        run: cp .env.example .env
+
+      - name: Build backend and shared packages
+        run: |
+          NODE_OPTIONS=--max-old-space-size=3072 \
+            pnpm exec turbo run build --concurrency=2
+
+      - name: Build main website
+        run: pnpm build:web
+
+      - name: Build Image Studio
+        run: pnpm --filter image-studio build:publish
+
+      - name: Create extension configuration
+        run: |
+          node -e '
+            const fs = require("fs");
+            const m = JSON.parse(fs.readFileSync("extensions/image-studio/manifest.json"));
+            const config = {
+              applications: {
+                [m.identifier]: {
+                  manifest: {
+                    identifier: m.identifier,
+                    name: m.name,
+                    version: m.version,
+                    description: m.description,
+                    author: m.author
+                  },
+                  isLocal: true,
+                  enabled: true,
+                  installedAt: new Date().toISOString()
+                }
+              },
+              functionals: {}
+            };
+            fs.writeFileSync("extensions/extensions.json", JSON.stringify(config, null, 2));
+          '
+
+      - name: Package application
+        run: |
+          tar -czf "$RUNNER_TEMP/fastbuildai-${GITHUB_SHA:0:8}.tar.gz" \
+            --exclude='./.git' \
+            --exclude='node_modules' \
+            --exclude='./.env' \
+            --exclude='./.env_prod' \
+            --exclude='./.env.local' \
+            --exclude='./.turbo' \
+            --exclude='./storage' \
+            --exclude='./logs' \
+            --exclude='./docker/data' \
+            --exclude='./packages/api/data' \
+            --exclude='./extensions/*/storage' \
+            --exclude='./extensions/*/data' \
+            .
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastbuildai-package
+          path: ${{ runner.temp }}/fastbuildai-*.tar.gz
+          retention-days: 7
